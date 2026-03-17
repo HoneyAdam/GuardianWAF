@@ -1277,3 +1277,114 @@ func TestDetect_IframeWithJSProtocol(t *testing.T) {
 		t.Errorf("expected score >= 80, got %d\nfindings: %+v", totalScore, findings)
 	}
 }
+
+// --- Coverage gap tests for scanTags (parser.go:17) ---
+
+func TestScanTags_NullByteInAttribute(t *testing.T) {
+	// Null byte within attribute name should be handled by the parser
+	// (the parser skips null bytes while scanning attributes)
+	tags := scanTags("<img\x00onerror=alert(1)>")
+	if len(tags) == 0 {
+		t.Fatal("expected at least one tag for input with null byte")
+	}
+	// After null byte handling, the tag should still be parsed
+	// Check that the tag has some attributes parsed
+	tag := tags[0]
+	if tag.Name == "" {
+		t.Error("expected non-empty tag name")
+	}
+}
+
+func TestScanTags_UnclosedTagAtEnd(t *testing.T) {
+	// Tag that never closes (no '>') -- parser should handle gracefully
+	tags := scanTags("<img src=x")
+	if len(tags) == 0 {
+		t.Fatal("expected at least one tag for unclosed tag")
+	}
+	if tags[0].Name != "img" {
+		t.Errorf("expected tag name 'img', got %q", tags[0].Name)
+	}
+	if v, ok := tags[0].Attributes["src"]; !ok || v != "x" {
+		t.Errorf("expected src=x attribute, got %v", tags[0].Attributes)
+	}
+}
+
+func TestScanTags_WhitespaceAroundEquals(t *testing.T) {
+	// Whitespace before and after the = sign in attribute
+	tags := scanTags("<img onerror = alert(1)>")
+	if len(tags) == 0 {
+		t.Fatal("expected at least one tag")
+	}
+	if _, ok := tags[0].Attributes["onerror"]; !ok {
+		t.Error("expected 'onerror' attribute to be parsed despite whitespace around =")
+	}
+}
+
+func TestScanTags_UnquotedAttributeValue(t *testing.T) {
+	// Unquoted attribute value
+	tags := scanTags("<img onerror=alert(1)>")
+	if len(tags) == 0 {
+		t.Fatal("expected at least one tag")
+	}
+	if v, ok := tags[0].Attributes["onerror"]; !ok {
+		t.Error("expected 'onerror' attribute")
+	} else if v != "alert(1)" {
+		t.Errorf("expected onerror=alert(1), got %q", v)
+	}
+}
+
+func TestScanTags_NullByteAfterTagName(t *testing.T) {
+	// Null byte right after tag name should stop name scanning, then be
+	// skipped during attribute scanning
+	tags := scanTags("<script\x00>alert(1)</script>")
+	if len(tags) == 0 {
+		t.Fatal("expected at least one tag")
+	}
+	if tags[0].Name != "script" {
+		t.Errorf("expected tag name 'script', got %q", tags[0].Name)
+	}
+}
+
+func TestScanTags_TagEndImmediatelyAfterOpen(t *testing.T) {
+	// '<>' should not produce a tag (no name)
+	tags := scanTags("<>")
+	if len(tags) != 0 {
+		t.Errorf("expected 0 tags for '<>', got %d", len(tags))
+	}
+}
+
+func TestScanTags_MultipleNullBytesBetweenAttrs(t *testing.T) {
+	// Multiple null bytes in attribute area
+	tags := scanTags("<div\x00\x00class\x00=\x00test>")
+	if len(tags) == 0 {
+		t.Fatal("expected at least one tag")
+	}
+	if tags[0].Name != "div" {
+		t.Errorf("expected tag name 'div', got %q", tags[0].Name)
+	}
+}
+
+func TestDetect_NullByteInOnerror(t *testing.T) {
+	// Full detection pipeline with null byte in event handler attribute name
+	findings := Detect("<img\x00onerror=alert(1)>", "query")
+	totalScore := 0
+	for _, f := range findings {
+		totalScore += f.Score
+	}
+	// Should still detect as XSS (null bytes are stripped during detection)
+	if totalScore < 50 {
+		t.Errorf("expected score >= 50 for null byte evasion, got %d", totalScore)
+	}
+}
+
+func TestDetect_UnclosedTag(t *testing.T) {
+	// Unclosed tag should still trigger detection for event handler
+	findings := Detect("<img src=x onerror=alert(1)", "query")
+	totalScore := 0
+	for _, f := range findings {
+		totalScore += f.Score
+	}
+	if totalScore < 70 {
+		t.Errorf("expected score >= 70 for unclosed tag with event handler, got %d", totalScore)
+	}
+}

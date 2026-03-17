@@ -1030,3 +1030,293 @@ func ExampleEngine_OnEvent() {
 	fmt.Println("Event handler registered")
 	// Output: Event handler registered
 }
+
+func TestWithDetector_NilMap(t *testing.T) {
+	eng, err := New(Config{}, WithDetector("sqli", true, 2.0))
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	defer eng.Close()
+
+	dc := eng.cfg.WAF.Detection.Detectors["sqli"]
+	if !dc.Enabled {
+		t.Error("expected sqli detector to be enabled")
+	}
+	if dc.Multiplier != 2.0 {
+		t.Errorf("expected multiplier 2.0, got %f", dc.Multiplier)
+	}
+}
+
+func TestNewFromFile_NonexistentDir(t *testing.T) {
+	_, err := NewFromFile("/nonexistent/deep/path/guardianwaf.yaml")
+	if err == nil {
+		t.Fatal("expected error for nonexistent config file")
+	}
+}
+
+func TestNew_WithRateLimit(t *testing.T) {
+	eng, err := New(Config{
+		RateLimit: RateLimitConfig{
+			Enabled: true,
+			Rules: []RateLimitRule{
+				{ID: "test", Scope: "ip", Limit: 10, Window: 60_000_000_000, Burst: 5, Action: "block"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	defer eng.Close()
+
+	if !eng.cfg.WAF.RateLimit.Enabled {
+		t.Error("expected rate limit to be enabled")
+	}
+}
+
+func TestNew_WithIPACL(t *testing.T) {
+	eng, err := New(Config{
+		IPACL: IPACLConfig{
+			Whitelist: []string{"10.0.0.0/8"},
+			Blacklist: []string{"192.168.1.100"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	defer eng.Close()
+
+	if len(eng.cfg.WAF.IPACL.Whitelist) == 0 {
+		t.Error("expected whitelist to be set")
+	}
+	if len(eng.cfg.WAF.IPACL.Blacklist) == 0 {
+		t.Error("expected blacklist to be set")
+	}
+}
+
+func TestNew_WithBotDisabled(t *testing.T) {
+	eng, err := New(Config{
+		Bot: BotConfig{
+			Enabled:            false,
+			BlockEmpty:         true,
+			BlockKnownScanners: true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	defer eng.Close()
+
+	if eng.cfg.WAF.BotDetection.Enabled {
+		t.Error("expected bot detection to be disabled")
+	}
+	if !eng.cfg.WAF.BotDetection.UserAgent.BlockEmpty {
+		t.Error("expected BlockEmpty to be true")
+	}
+}
+
+func TestNew_WithEvents(t *testing.T) {
+	eng, err := New(Config{
+		Events: EventsConfig{MaxEvents: 5000},
+	})
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	defer eng.Close()
+
+	if eng.cfg.Events.MaxEvents != 5000 {
+		t.Errorf("expected MaxEvents 5000, got %d", eng.cfg.Events.MaxEvents)
+	}
+}
+
+func TestToInternalDetector_EnabledWithZeroMultiplier(t *testing.T) {
+	dc := DetectorConfig{Enabled: true, Multiplier: 0}
+	result := toInternalDetector(dc, false)
+	if !result.Enabled {
+		t.Error("expected enabled")
+	}
+	if result.Multiplier != 1.0 {
+		t.Errorf("expected multiplier 1.0, got %f", result.Multiplier)
+	}
+}
+
+func TestToInternalDetector_WithMultiplier(t *testing.T) {
+	dc := DetectorConfig{Enabled: true, Multiplier: 2.5}
+	result := toInternalDetector(dc, false)
+	if result.Multiplier != 2.5 {
+		t.Errorf("expected multiplier 2.5, got %f", result.Multiplier)
+	}
+}
+
+func TestWithDetector_NilDetectorsMap(t *testing.T) {
+	// Call WithDetector on a config that has a nil Detectors map
+	// by creating an engine with explicit detector override
+	eng, err := New(Config{
+		Detection: DetectionConfig{
+			SQLi: DetectorConfig{Enabled: false, Multiplier: 0},
+			XSS:  DetectorConfig{Enabled: false, Multiplier: 0},
+		},
+	}, WithDetector("xss", true, 1.5))
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	defer eng.Close()
+
+	dc := eng.cfg.WAF.Detection.Detectors["xss"]
+	if !dc.Enabled {
+		t.Error("expected xss detector to be enabled")
+	}
+	if dc.Multiplier != 1.5 {
+		t.Errorf("expected multiplier 1.5, got %f", dc.Multiplier)
+	}
+}
+
+func TestNew_WithHSTS(t *testing.T) {
+	eng, err := New(Config{
+		Response: ResponseConfig{
+			SecurityHeaders: true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	defer eng.Close()
+
+	if !eng.cfg.WAF.Response.SecurityHeaders.Enabled {
+		t.Error("expected security headers to be enabled")
+	}
+}
+
+func TestNew_WithDataMasking(t *testing.T) {
+	eng, err := New(Config{
+		Response: ResponseConfig{
+			DataMasking: true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	defer eng.Close()
+
+	if !eng.cfg.WAF.Response.DataMasking.Enabled {
+		t.Error("expected data masking to be enabled")
+	}
+}
+
+func TestNew_WithMaxBodySize(t *testing.T) {
+	eng, err := New(Config{
+		Sanitizer: SanitizerConfig{
+			MaxBodySize: 1024 * 1024,
+		},
+	})
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	defer eng.Close()
+
+	if eng.cfg.WAF.Sanitizer.MaxBodySize != 1024*1024 {
+		t.Errorf("expected MaxBodySize 1048576, got %d", eng.cfg.WAF.Sanitizer.MaxBodySize)
+	}
+}
+
+func TestNew_WithDetectionThresholds(t *testing.T) {
+	eng, err := New(Config{
+		Threshold: ThresholdConfig{Block: 70, Log: 20},
+	})
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	defer eng.Close()
+
+	if eng.cfg.WAF.Detection.Threshold.Block != 70 {
+		t.Errorf("expected block 70, got %d", eng.cfg.WAF.Detection.Threshold.Block)
+	}
+	if eng.cfg.WAF.Detection.Threshold.Log != 20 {
+		t.Errorf("expected log 20, got %d", eng.cfg.WAF.Detection.Threshold.Log)
+	}
+}
+
+func TestNew_WithHSTSConfig(t *testing.T) {
+	// Exercise the addDefaultLayers branch where SecurityHeaders.Enabled is true,
+	// which populates the response layer's Headers struct (XContentTypeOptions, etc.).
+	// Also verify the engine works end-to-end with HSTS-enabled config via NewFromFile.
+	tmpDir := t.TempDir()
+	cfgFile := tmpDir + "/guardianwaf.yaml"
+	content := `mode: enforce
+waf:
+  response:
+    security_headers:
+      enabled: true
+      hsts:
+        enabled: true
+        max_age: 31536000
+        include_subdomains: true
+      x_frame_options: DENY
+      referrer_policy: no-referrer
+`
+	if err := os.WriteFile(cfgFile, []byte(content), 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	eng, err := NewFromFile(cfgFile)
+	if err != nil {
+		t.Fatalf("NewFromFile() error: %v", err)
+	}
+	defer eng.Close()
+
+	if !eng.cfg.WAF.Response.SecurityHeaders.Enabled {
+		t.Error("expected security headers to be enabled")
+	}
+	if !eng.cfg.WAF.Response.SecurityHeaders.HSTS.Enabled {
+		t.Error("expected HSTS to be enabled")
+	}
+	if !eng.cfg.WAF.Response.SecurityHeaders.HSTS.IncludeSubDomains {
+		t.Error("expected HSTS IncludeSubDomains to be true")
+	}
+	if eng.cfg.WAF.Response.SecurityHeaders.HSTS.MaxAge != 31536000 {
+		t.Errorf("expected HSTS MaxAge 31536000, got %d", eng.cfg.WAF.Response.SecurityHeaders.HSTS.MaxAge)
+	}
+
+	// Verify the engine processes requests without error
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) TestBrowser/1.0")
+	result := eng.Check(req)
+	if result.RequestID == "" {
+		t.Error("expected non-empty RequestID")
+	}
+}
+
+func TestNew_SecurityHeadersEnabled_PopulatesResponseHeaders(t *testing.T) {
+	// Exercise the addDefaultLayers SecurityHeaders.Enabled=true branch
+	// through the public API (not from file).
+	eng, err := New(Config{
+		Response: ResponseConfig{
+			SecurityHeaders: true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	defer eng.Close()
+
+	if !eng.cfg.WAF.Response.SecurityHeaders.Enabled {
+		t.Error("expected security headers enabled")
+	}
+
+	// Send a clean request through the middleware to verify headers are applied
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintln(w, "OK")
+	})
+	wrapped := eng.Middleware(handler)
+
+	req := httptest.NewRequest("GET", "/hello", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) TestBrowser/1.0")
+	rr := httptest.NewRecorder()
+	wrapped.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", rr.Code)
+	}
+}

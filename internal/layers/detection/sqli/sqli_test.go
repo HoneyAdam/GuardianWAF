@@ -1194,6 +1194,123 @@ func TestCheckBooleanInjection_ANDWithoutPrecedingString(t *testing.T) {
 	}
 }
 
+// --- Coverage gap tests for patterns.go ---
+
+func TestDetect_BooleanTautology_1Equals1(t *testing.T) {
+	// Standalone tautology pattern: 1=1
+	findings := Detect("' OR 1=1", "query")
+	hasTautologyFinding := false
+	for _, f := range findings {
+		if strings.Contains(f.Description, "tautology") {
+			hasTautologyFinding = true
+		}
+	}
+	if !hasTautologyFinding {
+		t.Error("expected tautology finding for '1=1' pattern")
+	}
+}
+
+func TestDetect_BooleanTautology_StringEqualsString(t *testing.T) {
+	// String tautology: 'a'='a'
+	findings := Detect("' OR 'a'='a'", "query")
+	hasTautologyFinding := false
+	totalScore := 0
+	for _, f := range findings {
+		totalScore += f.Score
+		if strings.Contains(f.Description, "tautology") {
+			hasTautologyFinding = true
+		}
+	}
+	if !hasTautologyFinding {
+		t.Errorf("expected tautology finding for string equality, findings: %+v", findings)
+	}
+	if totalScore < 80 {
+		t.Errorf("expected score >= 80 for string tautology, got %d", totalScore)
+	}
+}
+
+func TestDetect_TimeBasedBlind_WaitforDelay(t *testing.T) {
+	findings := Detect("WAITFOR DELAY '0:0:5'", "query")
+	hasWaitfor := false
+	for _, f := range findings {
+		if strings.Contains(f.Description, "WAITFOR DELAY") {
+			hasWaitfor = true
+		}
+	}
+	if !hasWaitfor {
+		t.Error("expected WAITFOR DELAY finding")
+	}
+	totalScore := 0
+	for _, f := range findings {
+		totalScore += f.Score
+	}
+	if totalScore < 90 {
+		t.Errorf("expected score >= 90 for WAITFOR DELAY, got %d", totalScore)
+	}
+}
+
+func TestDetect_ExecXpCmdshell(t *testing.T) {
+	findings := Detect("EXEC xp_cmdshell 'dir'", "query")
+	hasExec := false
+	for _, f := range findings {
+		if strings.Contains(f.Description, "EXEC") {
+			hasExec = true
+		}
+	}
+	if !hasExec {
+		t.Error("expected EXEC finding for xp_cmdshell")
+	}
+	totalScore := 0
+	for _, f := range findings {
+		totalScore += f.Score
+	}
+	if totalScore < 80 {
+		t.Errorf("expected score >= 80 for EXEC xp_cmdshell, got %d", totalScore)
+	}
+}
+
+func TestDetect_ExecWithStringLiteral(t *testing.T) {
+	// EXEC followed by a string literal directly
+	findings := Detect("EXEC 'SELECT * FROM users'", "query")
+	hasExec := false
+	for _, f := range findings {
+		if strings.Contains(f.Description, "EXEC") {
+			hasExec = true
+		}
+	}
+	if !hasExec {
+		t.Error("expected EXEC/EXECUTE finding")
+	}
+}
+
+func TestDetect_BooleanInjection_ANDTautology(t *testing.T) {
+	// AND with tautology: 'x' AND 1=1
+	findings := Detect("'x' AND 1=1", "query")
+	hasTautology := false
+	for _, f := range findings {
+		if strings.Contains(f.Description, "tautology") {
+			hasTautology = true
+		}
+	}
+	if !hasTautology {
+		t.Error("expected tautology finding for AND 1=1")
+	}
+}
+
+func TestDetect_BooleanInjection_ORWithoutTautology(t *testing.T) {
+	// 'x' OR something -- should detect boolean injection without tautology
+	findings := Detect("'x' OR admin", "query")
+	hasBooleanInjection := false
+	for _, f := range findings {
+		if strings.Contains(f.Description, "boolean-based") || strings.Contains(f.Description, "Boolean-based") {
+			hasBooleanInjection = true
+		}
+	}
+	if !hasBooleanInjection {
+		t.Error("expected boolean injection finding for 'x' OR")
+	}
+}
+
 func BenchmarkDetect(b *testing.B) {
 	input := "' UNION SELECT username, password FROM users WHERE id=1 OR 1=1 --"
 	b.ResetTimer()

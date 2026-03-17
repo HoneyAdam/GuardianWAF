@@ -822,6 +822,80 @@ func TestParseDecUint8_EdgeCases(t *testing.T) {
 	}
 }
 
+// --- Additional coverage gap tests for parseOctalUint8 and parseHexUint8 ---
+
+func TestParseOctalUint8_Overflow256(t *testing.T) {
+	// 0400 octal = 256 decimal, should overflow uint8
+	ip := ParseOctalIP("0400.0.0.1")
+	if ip != nil {
+		t.Error("expected nil for octal 0400 (256 > 255)")
+	}
+}
+
+func TestParseOctalUint8_EmptySegment(t *testing.T) {
+	// parseOctalUint8 called with empty string should fail
+	_, ok := parseOctalUint8("")
+	if ok {
+		t.Error("expected failure for empty octal segment")
+	}
+}
+
+func TestParseOctalUint8_MaxValid(t *testing.T) {
+	// 0377 octal = 255, should be valid
+	n, ok := parseOctalUint8("0377")
+	if !ok || n != 255 {
+		t.Errorf("expected 255 for 0377, got %d (ok=%v)", n, ok)
+	}
+}
+
+func TestParseHexUint8_InvalidChar(t *testing.T) {
+	// "GG" has invalid hex characters
+	_, ok := parseHexUint8("GG")
+	if ok {
+		t.Error("expected failure for invalid hex digits 'GG'")
+	}
+}
+
+func TestParseHexUint8_TooLong(t *testing.T) {
+	// "1FF" has 3 chars, exceeds the max length of 2
+	_, ok := parseHexUint8("1FF")
+	if ok {
+		t.Error("expected failure for hex segment longer than 2 chars")
+	}
+}
+
+func TestParseHexUint8_EmptySegment(t *testing.T) {
+	_, ok := parseHexUint8("")
+	if ok {
+		t.Error("expected failure for empty hex segment")
+	}
+}
+
+func TestParseHexUint8_MaxValid(t *testing.T) {
+	// "FF" = 255, should be valid
+	n, ok := parseHexUint8("FF")
+	if !ok || n != 255 {
+		t.Errorf("expected 255 for 'FF', got %d (ok=%v)", n, ok)
+	}
+}
+
+func TestParseHexIP_TooLongSegment(t *testing.T) {
+	// 0x1FF = 3 hex chars after prefix, exceeds parseHexUint8 max length
+	ip := ParseHexIP("0x1FF.0x0.0x0.0x1")
+	if ip != nil {
+		t.Error("expected nil for hex segment 0x1FF (too long)")
+	}
+}
+
+func TestParseOctalIP_SingleZero(t *testing.T) {
+	// "0" has len > 1 false, so it goes to decimal path, not octal
+	// All segments are just "0", no octal detected
+	ip := ParseOctalIP("0.0.0.0")
+	if ip != nil {
+		t.Error("expected nil: single '0' segments are not octal notation")
+	}
+}
+
 func BenchmarkDetect(b *testing.B) {
 	input := "http://169.254.169.254/latest/meta-data/"
 	b.ResetTimer()

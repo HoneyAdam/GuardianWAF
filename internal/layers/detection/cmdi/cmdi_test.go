@@ -652,3 +652,45 @@ func TestDetect_EncodedNewlineCROnlyWithCommand(t *testing.T) {
 		t.Error("expected non-zero score for encoded newline with command")
 	}
 }
+
+// --- Coverage gap tests ---
+
+// TestMakeFinding_LongMatchedValueTruncation directly tests the truncation branch
+// in makeFinding when matched value exceeds 200 characters.
+func TestMakeFinding_LongMatchedValueTruncation(t *testing.T) {
+	longStr := strings.Repeat("A", 250)
+	f := makeFinding(50, engine.SeverityHigh, "test long match", longStr, "query", 0.8)
+	if len(f.MatchedValue) > 200 {
+		t.Errorf("expected MatchedValue truncated to <= 200 chars, got %d", len(f.MatchedValue))
+	}
+	if !strings.HasSuffix(f.MatchedValue, "...") {
+		t.Error("expected truncated value to end with '...'")
+	}
+	if len(f.MatchedValue) != 200 {
+		t.Errorf("expected exactly 200 chars (197 + '...'), got %d", len(f.MatchedValue))
+	}
+}
+
+// TestMakeFinding_ExactlyAt200 verifies that a matched value of exactly 200 chars
+// is NOT truncated.
+func TestMakeFinding_ExactlyAt200(t *testing.T) {
+	exact := strings.Repeat("B", 200)
+	f := makeFinding(50, engine.SeverityHigh, "test exact boundary", exact, "query", 0.8)
+	if f.MatchedValue != exact {
+		t.Errorf("expected matched value unchanged at exactly 200 chars, got length %d", len(f.MatchedValue))
+	}
+}
+
+// TestDetect_VeryLongPayloadTruncation triggers CMDi detection with a payload
+// that contains a known command embedded in a very long string, ensuring findings
+// have MatchedValue within the 200-char limit.
+func TestDetect_VeryLongPayloadTruncation(t *testing.T) {
+	// Build a long payload: semicolon + command + 250 chars of padding
+	longPayload := ";" + strings.Repeat("x", 250) + " whoami"
+	findings := Detect(longPayload, "query")
+	for _, f := range findings {
+		if len(f.MatchedValue) > 200 {
+			t.Errorf("finding MatchedValue should be <= 200 chars, got %d: %q", len(f.MatchedValue), f.MatchedValue)
+		}
+	}
+}

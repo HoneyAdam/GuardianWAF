@@ -416,3 +416,11 @@ func TestDetectionLayer_AllDetectorsPresent(t *testing.T) {
 		}
 	}
 }
+
+// 15. TestDetectionLayer_Name - verify Name() returns "detection"
+func TestDetectionLayer_Name(t *testing.T) {
+	layer := NewLayer(defaultConfig())
+	if layer.Name() != "detection" {
+		t.Errorf("expected layer name 'detection', got %q", layer.Name())
+	}
+}

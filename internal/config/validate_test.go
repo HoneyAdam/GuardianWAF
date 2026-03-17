@@ -1149,3 +1149,39 @@ func TestLoadFile_PopulateError(t *testing.T) {
 		t.Fatalf("expected populating config error, got: %v", err)
 	}
 }
+
+func TestValidateListenAddr_EmptyPort(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Listen = "host:"
+	err := Validate(cfg)
+	if err == nil {
+		t.Fatal("expected error for empty port")
+	}
+}
+
+func TestValidateListenAddr_InvalidPort(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Listen = ":99999"
+	err := Validate(cfg)
+	if err == nil {
+		t.Fatal("expected error for out-of-range port")
+	}
+}
+
+func TestValidateListenAddr_NonNumericPort(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Listen = ":abc"
+	err := Validate(cfg)
+	if err == nil {
+		t.Fatal("expected error for non-numeric port")
+	}
+}
+
+func TestValidateListenAddr_InvalidFormat(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Listen = "not-a-host-port"
+	err := Validate(cfg)
+	if err == nil {
+		t.Fatal("expected error for invalid host:port format")
+	}
+}

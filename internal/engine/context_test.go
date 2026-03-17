@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"regexp"
 	"strings"
 	"testing"
@@ -416,5 +417,97 @@ func TestMetadataMap(t *testing.T) {
 	}
 	if ctx.Metadata["key2"] != 42 {
 		t.Error("Metadata key2 not stored correctly")
+	}
+}
+
+// --- Coverage gap tests ---
+
+func TestAcquireContext_EmptyRequestURI(t *testing.T) {
+	// When RequestURI is empty (e.g., manually constructed *http.Request),
+	// AcquireContext should fall back to r.URL.String().
+	r := &http.Request{
+		Method: http.MethodGet,
+		URL: &url.URL{
+			Path:     "/test",
+			RawQuery: "q=1",
+		},
+		Header:     make(http.Header),
+		RemoteAddr: "127.0.0.1:1234",
+	}
+	// r.RequestURI defaults to "" for manually built requests
+
+	ctx := AcquireContext(r, 1, 1024)
+	defer ReleaseContext(ctx)
+
+	expected := "/test?q=1"
+	if ctx.URI != expected {
+		t.Errorf("expected URI %q when RequestURI is empty, got %q", expected, ctx.URI)
+	}
+	if ctx.Path != "/test" {
+		t.Errorf("expected Path /test, got %s", ctx.Path)
+	}
+}
+
+func TestExtractClientIP_InvalidXForwardedFor(t *testing.T) {
+	// When X-Forwarded-For contains an invalid IP, it should fall through
+	// to X-Real-IP or RemoteAddr.
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.RemoteAddr = "10.0.0.1:5555"
+	r.Header.Set("X-Forwarded-For", "not-an-ip")
+
+	ctx := AcquireContext(r, 1, 1024)
+	defer ReleaseContext(ctx)
+
+	if ctx.ClientIP.String() != "10.0.0.1" {
+		t.Errorf("expected fallback to RemoteAddr 10.0.0.1, got %s", ctx.ClientIP)
+	}
+}
+
+func TestExtractClientIP_InvalidXRealIP(t *testing.T) {
+	// When X-Real-IP contains an invalid IP, it should fall through to RemoteAddr.
+	r := httptest.NewRequest(http.MethodGet, "/", nil)
+	r.RemoteAddr = "10.0.0.2:5555"
+	r.Header.Set("X-Real-IP", "not-an-ip")
+
+	ctx := AcquireContext(r, 1, 1024)
+	defer ReleaseContext(ctx)
+
+	if ctx.ClientIP.String() != "10.0.0.2" {
+		t.Errorf("expected fallback to RemoteAddr 10.0.0.2, got %s", ctx.ClientIP)
+	}
+}
+
+func TestExtractClientIP_EmptyRemoteAddr(t *testing.T) {
+	// When RemoteAddr is empty and no forwarding headers, ClientIP should be nil.
+	r := &http.Request{
+		Method:     http.MethodGet,
+		URL:        &url.URL{Path: "/"},
+		Header:     make(http.Header),
+		RemoteAddr: "",
+	}
+
+	ctx := AcquireContext(r, 1, 1024)
+	defer ReleaseContext(ctx)
+
+	if ctx.ClientIP != nil {
+		t.Errorf("expected nil ClientIP for empty RemoteAddr, got %s", ctx.ClientIP)
+	}
+}
+
+func TestExtractClientIP_BareInvalidIP(t *testing.T) {
+	// When RemoteAddr is a bare string that is not a valid IP and has no port,
+	// net.SplitHostPort fails and net.ParseIP also fails, returning nil.
+	r := &http.Request{
+		Method:     http.MethodGet,
+		URL:        &url.URL{Path: "/"},
+		Header:     make(http.Header),
+		RemoteAddr: "not-a-valid-ip",
+	}
+
+	ctx := AcquireContext(r, 1, 1024)
+	defer ReleaseContext(ctx)
+
+	if ctx.ClientIP != nil {
+		t.Errorf("expected nil ClientIP for invalid bare RemoteAddr, got %s", ctx.ClientIP)
 	}
 }

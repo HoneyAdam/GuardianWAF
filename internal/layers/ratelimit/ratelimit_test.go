@@ -619,3 +619,35 @@ func TestRateLimit_GlobPatternMatch(t *testing.T) {
 		t.Fatal("non-matching path: expected pass")
 	}
 }
+
+func TestMatchPath_GlobStar(t *testing.T) {
+	// Test /** suffix matching
+	if !matchPath("/api/**", "/api/users/123") {
+		t.Error("expected /api/** to match /api/users/123")
+	}
+	if matchPath("/api/**", "/home") {
+		t.Error("expected /api/** to NOT match /home")
+	}
+}
+
+func TestMatchPath_InvalidPattern(t *testing.T) {
+	// Invalid glob pattern — path.Match returns error
+	if matchPath("[invalid", "/test") {
+		t.Error("expected invalid glob pattern to return false")
+	}
+}
+
+func TestMatchPath_ExactMatch(t *testing.T) {
+	if !matchPath("/api/health", "/api/health") {
+		t.Error("expected exact match")
+	}
+	if matchPath("/api/health", "/api/other") {
+		t.Error("expected no match for different path")
+	}
+}
+
+func TestMatchPath_GlobPattern(t *testing.T) {
+	if !matchPath("/api/*/info", "/api/user/info") {
+		t.Error("expected glob * to match single segment")
+	}
+}

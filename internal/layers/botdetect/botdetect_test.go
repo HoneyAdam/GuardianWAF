@@ -853,3 +853,118 @@ func TestLayer_UAMediumScore_Severity(t *testing.T) {
 		t.Error("expected SeverityMedium finding for empty UA")
 	}
 }
+
+// --- Coverage gap tests for behavior.go ---
+
+func TestBehaviorTracker_AnalyzeWindowLessThanOneSecond(t *testing.T) {
+	// Covers the windowSecs < 1 branch in analyze.
+	cfg := BehaviorConfig{
+		Window:             500 * time.Millisecond, // less than 1 second
+		RPSThreshold:       1,
+		UniquePathsPerMin:  1000,
+		ErrorRateThreshold: 0,
+		TimingStdDevMs:     0,
+	}
+	bm := NewBehaviorManager(cfg)
+
+	ip := "10.0.0.100"
+	for i := 0; i < 10; i++ {
+		bm.Record(ip, "/test", false, time.Millisecond)
+	}
+
+	score, findings := bm.Analyze(ip)
+	// With windowSecs clamped to 1, RPS = 10/1 = 10, threshold is 1 => should trigger
+	if score == 0 {
+		t.Errorf("expected non-zero score for sub-second window with high RPS, got %d", score)
+	}
+	hasRPS := false
+	for _, f := range findings {
+		if f == "high request rate detected" {
+			hasRPS = true
+			break
+		}
+	}
+	if !hasRPS {
+		t.Errorf("expected 'high request rate detected' finding, got %v", findings)
+	}
+}
+
+func TestBehaviorTracker_AnalyzeHighErrorRateWithThreshold(t *testing.T) {
+	// Covers the totalRequests > 0 && cfg.ErrorRateThreshold > 0 branch
+	// with an error rate that exceeds the threshold.
+	cfg := BehaviorConfig{
+		Window:             5 * time.Second,
+		RPSThreshold:       0, // disable RPS check
+		UniquePathsPerMin:  0, // disable path check
+		ErrorRateThreshold: 20,
+		TimingStdDevMs:     0, // disable timing check
+	}
+	bm := NewBehaviorManager(cfg)
+
+	ip := "10.0.0.101"
+	// 9 out of 10 requests are errors => 90% error rate
+	for i := 0; i < 10; i++ {
+		bm.Record(ip, "/test", i < 9, time.Millisecond)
+	}
+
+	score, findings := bm.Analyze(ip)
+	if score == 0 {
+		t.Errorf("expected non-zero score for high error rate, got %d", score)
+	}
+	hasError := false
+	for _, f := range findings {
+		if f == "high error rate detected" {
+			hasError = true
+			break
+		}
+	}
+	if !hasError {
+		t.Errorf("expected 'high error rate detected' finding, got %v", findings)
+	}
+}
+
+func TestBehaviorManager_GetOrCreate_ConcurrentSameIP(t *testing.T) {
+	// Hammers getOrCreate from multiple goroutines for the same IP
+	// to increase probability of hitting the double-check path (line 218).
+	cfg := BehaviorConfig{
+		Window:             5 * time.Second,
+		RPSThreshold:       1000,
+		UniquePathsPerMin:  1000,
+		ErrorRateThreshold: 100,
+		TimingStdDevMs:     0,
+	}
+	bm := NewBehaviorManager(cfg)
+
+	const goroutines = 50
+	const ip = "10.0.0.200"
+
+	start := make(chan struct{})
+	done := make(chan *BehaviorTracker, goroutines)
+
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			<-start // wait for all goroutines to be ready
+			tracker := bm.getOrCreate(ip)
+			done <- tracker
+		}()
+	}
+
+	// Release all goroutines at once to maximize contention
+	close(start)
+
+	var trackers []*BehaviorTracker
+	for i := 0; i < goroutines; i++ {
+		trackers = append(trackers, <-done)
+	}
+
+	// All goroutines should have gotten the same tracker instance
+	for i := 1; i < len(trackers); i++ {
+		if trackers[i] != trackers[0] {
+			t.Fatal("expected all goroutines to return the same tracker instance")
+		}
+	}
+
+	if bm.TrackerCount() != 1 {
+		t.Errorf("expected exactly 1 tracker, got %d", bm.TrackerCount())
+	}
+}

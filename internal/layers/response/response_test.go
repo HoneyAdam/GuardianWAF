@@ -527,3 +527,192 @@ func TestLayer_ApplyToResponse_SelectiveMasking(t *testing.T) {
 		t.Error("SSN should be masked when MaskSSN is true")
 	}
 }
+
+// --- GetConfig Test ---
+
+func TestLayer_GetConfig(t *testing.T) {
+	cfg := Config{
+		SecurityHeadersEnabled: true,
+		DataMaskingEnabled:     true,
+		MaskCreditCards:        true,
+		ErrorPageMode:          "production",
+	}
+	layer := NewLayer(cfg)
+	got := layer.GetConfig()
+	if got.SecurityHeadersEnabled != cfg.SecurityHeadersEnabled {
+		t.Error("GetConfig should return the config passed to NewLayer")
+	}
+	if got.ErrorPageMode != "production" {
+		t.Errorf("expected ErrorPageMode 'production', got %q", got.ErrorPageMode)
+	}
+}
+
+// --- statusText / statusMessage Edge Cases ---
+
+func TestStatusText_UnknownCode(t *testing.T) {
+	// Unknown status code should return "Error"
+	text := statusText(999)
+	if text != "Error" {
+		t.Errorf("statusText(999) = %q, want %q", text, "Error")
+	}
+}
+
+func TestStatusMessage_AllCodes(t *testing.T) {
+	tests := []struct {
+		code int
+		want string
+	}{
+		{400, "The request could not be understood by the server."},
+		{403, "Access to this resource has been denied by the security policy."},
+		{404, "The requested resource could not be found."},
+		{405, "The request method is not allowed for this resource."},
+		{408, "The server timed out waiting for the request."},
+		{413, "The request payload is too large."},
+		{429, "Too many requests. Please slow down and try again later."},
+		{500, "An internal error occurred. Please try again later."},
+		{502, "The server received an invalid response from an upstream server."},
+		{503, "The service is temporarily unavailable. Please try again later."},
+		{999, "An error occurred while processing your request."},
+	}
+	for _, tc := range tests {
+		got := statusMessage(tc.code)
+		if got != tc.want {
+			t.Errorf("statusMessage(%d) = %q, want %q", tc.code, got, tc.want)
+		}
+	}
+}
+
+func TestErrorPage_UnknownCode(t *testing.T) {
+	page := ErrorPage(999, "production")
+	if !strings.Contains(page, "999") {
+		t.Error("unknown code page should contain the code")
+	}
+	if !strings.Contains(page, "Error") {
+		t.Error("unknown code page should contain 'Error' as title")
+	}
+}
+
+func TestErrorPage_408And413(t *testing.T) {
+	for _, code := range []int{408, 413} {
+		page := ErrorPage(code, "production")
+		if !strings.Contains(page, http.StatusText(code)) {
+			t.Errorf("error page for %d should contain status text", code)
+		}
+	}
+}
+
+// --- SecurityHeaders CacheControl branch ---
+
+func TestSecurityHeaders_CacheControl(t *testing.T) {
+	sh := SecurityHeaders{
+		CacheControl: "no-store",
+	}
+	w := httptest.NewRecorder()
+	sh.Apply(w)
+	if w.Header().Get("Cache-Control") != "no-store" {
+		t.Error("expected Cache-Control header to be set")
+	}
+}
+
+// --- MaskAPIKeys edge cases ---
+
+func TestMaskAPIKeys_ShortKeyValue(t *testing.T) {
+	// Key exactly 16 chars — should mask but maskEnd <= maskStart edge
+	input := `key=1234567890123456`
+	result := MaskAPIKeys(input)
+	if result == input {
+		t.Error("16-char key should be masked")
+	}
+}
+
+func TestMaskAPIKeys_ExactlyEightChars(t *testing.T) {
+	// Key between 8 and 16 — should NOT be masked (< 16 chars)
+	input := `token=abcd1234`
+	result := MaskAPIKeys(input)
+	if result != input {
+		t.Error("8-char key should not be masked")
+	}
+}
+
+func TestMaskAPIKeys_MultipleSeparators(t *testing.T) {
+	// Key with tab separator
+	input := "secret\t= \t'abcdefghijklmnopqrstuvwxyz1234'"
+	result := MaskAPIKeys(input)
+	if result == input {
+		t.Error("key after tab separators should be masked")
+	}
+}
+
+// --- isStackTraceLine edge cases ---
+
+func TestStripStackTraces_GoFuncLine(t *testing.T) {
+	input := "main.handler()\n\t/app/main.go:42 +0x1a3\nOK"
+	result := StripStackTraces(input)
+	if strings.Contains(result, "main.go:42") {
+		t.Error("Go stack frame with () should be stripped")
+	}
+	if !strings.Contains(result, "OK") {
+		t.Error("normal line should be preserved")
+	}
+}
+
+func TestStripStackTraces_TypeErrorAndReferenceError(t *testing.T) {
+	input := "Start\nTypeError: undefined is not a function\n    at handler (/app/index.ts:10:5)\nEnd"
+	result := StripStackTraces(input)
+	if strings.Contains(result, "TypeError") {
+		t.Error("TypeError start should be stripped")
+	}
+	if strings.Contains(result, "index.ts:10") {
+		t.Error("TypeScript stack frame should be stripped")
+	}
+	if !strings.Contains(result, "Start") || !strings.Contains(result, "End") {
+		t.Error("surrounding text should be preserved")
+	}
+}
+
+func TestStripStackTraces_ReferenceError(t *testing.T) {
+	input := "ReferenceError: x is not defined\n    at main (/app/app.js:5:1)\nDone"
+	result := StripStackTraces(input)
+	if strings.Contains(result, "ReferenceError") {
+		t.Error("ReferenceError should be stripped")
+	}
+}
+
+func TestStripStackTraces_SyntaxError(t *testing.T) {
+	input := "SyntaxError: Unexpected token\n    at parse (/app/parser.js:1:1)\nOK"
+	result := StripStackTraces(input)
+	if strings.Contains(result, "SyntaxError") {
+		t.Error("SyntaxError should be stripped")
+	}
+}
+
+func TestMaskSSN_ZeroGroup2(t *testing.T) {
+	// Group 2 is "00" - invalid
+	input := "SSN: 123-00-6789"
+	result := MaskSSN(input)
+	if result != input {
+		t.Error("invalid SSN (00 group) should not be masked")
+	}
+}
+
+func TestMaskSSN_ZeroGroup3(t *testing.T) {
+	// Group 3 is "0000" - invalid
+	input := "SSN: 123-45-0000"
+	result := MaskSSN(input)
+	if result != input {
+		t.Error("invalid SSN (0000 serial) should not be masked")
+	}
+}
+
+func TestDefaultConfig_Values(t *testing.T) {
+	cfg := DefaultConfig()
+	if !cfg.SecurityHeadersEnabled {
+		t.Error("default SecurityHeadersEnabled should be true")
+	}
+	if !cfg.DataMaskingEnabled {
+		t.Error("default DataMaskingEnabled should be true")
+	}
+	if cfg.ErrorPageMode != "production" {
+		t.Errorf("expected ErrorPageMode 'production', got %q", cfg.ErrorPageMode)
+	}
+}

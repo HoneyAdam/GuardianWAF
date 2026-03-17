@@ -2126,3 +2126,803 @@ func TestPopulateFromNode_BotDetectionBehaviorEnabledError(t *testing.T) {
 		t.Fatal("expected error for invalid behavior enabled")
 	}
 }
+
+// --- Coverage-targeted tests for populate* functions ---
+
+func TestPopulateFromNode_ACMEAllFields(t *testing.T) {
+	yaml := `tls:
+  enabled: true
+  listen: ":9443"
+  cert_file: /etc/ssl/cert.pem
+  key_file: /etc/ssl/key.pem
+  acme:
+    enabled: true
+    email: admin@example.com
+    domains:
+      - example.com
+      - www.example.com
+    cache_dir: /tmp/acme`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	if err := PopulateFromNode(cfg, node); err != nil {
+		t.Fatalf("populate error: %v", err)
+	}
+	if !cfg.TLS.Enabled {
+		t.Fatal("expected TLS enabled")
+	}
+	if cfg.TLS.Listen != ":9443" {
+		t.Fatalf("expected :9443, got %q", cfg.TLS.Listen)
+	}
+	if cfg.TLS.CertFile != "/etc/ssl/cert.pem" {
+		t.Fatalf("expected cert_file, got %q", cfg.TLS.CertFile)
+	}
+	if cfg.TLS.KeyFile != "/etc/ssl/key.pem" {
+		t.Fatalf("expected key_file, got %q", cfg.TLS.KeyFile)
+	}
+	if !cfg.TLS.ACME.Enabled {
+		t.Fatal("expected ACME enabled")
+	}
+	if cfg.TLS.ACME.Email != "admin@example.com" {
+		t.Fatalf("expected admin@example.com, got %q", cfg.TLS.ACME.Email)
+	}
+	if len(cfg.TLS.ACME.Domains) != 2 {
+		t.Fatalf("expected 2 domains, got %d", len(cfg.TLS.ACME.Domains))
+	}
+	if cfg.TLS.ACME.Domains[0] != "example.com" {
+		t.Fatalf("expected example.com, got %q", cfg.TLS.ACME.Domains[0])
+	}
+	if cfg.TLS.ACME.CacheDir != "/tmp/acme" {
+		t.Fatalf("expected /tmp/acme, got %q", cfg.TLS.ACME.CacheDir)
+	}
+}
+
+func TestPopulateFromNode_MCPAllFields(t *testing.T) {
+	yaml := `mcp:
+  enabled: false
+  transport: sse`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	if err := PopulateFromNode(cfg, node); err != nil {
+		t.Fatalf("populate error: %v", err)
+	}
+	if cfg.MCP.Enabled {
+		t.Fatal("expected MCP disabled")
+	}
+	if cfg.MCP.Transport != "sse" {
+		t.Fatalf("expected transport 'sse', got %q", cfg.MCP.Transport)
+	}
+}
+
+func TestPopulateFromNode_EventsFileStorage(t *testing.T) {
+	yaml := `events:
+  storage: file
+  max_events: 50000
+  file_path: /var/log/waf/events.jsonl`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	if err := PopulateFromNode(cfg, node); err != nil {
+		t.Fatalf("populate error: %v", err)
+	}
+	if cfg.Events.Storage != "file" {
+		t.Fatalf("expected storage 'file', got %q", cfg.Events.Storage)
+	}
+	if cfg.Events.MaxEvents != 50000 {
+		t.Fatalf("expected 50000, got %d", cfg.Events.MaxEvents)
+	}
+	if cfg.Events.FilePath != "/var/log/waf/events.jsonl" {
+		t.Fatalf("expected file path, got %q", cfg.Events.FilePath)
+	}
+}
+
+func TestPopulateFromNode_DashboardAllFields(t *testing.T) {
+	yaml := `dashboard:
+  enabled: true
+  listen: ":9443"
+  api_key: secret-key-123
+  tls: true`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	if err := PopulateFromNode(cfg, node); err != nil {
+		t.Fatalf("populate error: %v", err)
+	}
+	if !cfg.Dashboard.Enabled {
+		t.Fatal("expected dashboard enabled")
+	}
+	if cfg.Dashboard.Listen != ":9443" {
+		t.Fatalf("expected :9443, got %q", cfg.Dashboard.Listen)
+	}
+	if cfg.Dashboard.APIKey != "secret-key-123" {
+		t.Fatalf("expected api key, got %q", cfg.Dashboard.APIKey)
+	}
+	if !cfg.Dashboard.TLS {
+		t.Fatal("expected dashboard TLS enabled")
+	}
+}
+
+func TestPopulateFromNode_ResponseDataMaskingAndHSTS(t *testing.T) {
+	yaml := `waf:
+  response:
+    security_headers:
+      enabled: true
+      hsts:
+        enabled: true
+        max_age: 63072000
+        include_subdomains: false
+      x_content_type_options: true
+      x_frame_options: DENY
+      referrer_policy: no-referrer
+      permissions_policy: "camera=(), microphone=()"
+    data_masking:
+      enabled: true
+      mask_credit_cards: true
+      mask_ssn: false
+      mask_api_keys: true
+      strip_stack_traces: false
+    error_pages:
+      enabled: true
+      mode: development`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	if err := PopulateFromNode(cfg, node); err != nil {
+		t.Fatalf("populate error: %v", err)
+	}
+	// Security headers
+	sh := cfg.WAF.Response.SecurityHeaders
+	if !sh.Enabled {
+		t.Fatal("expected security headers enabled")
+	}
+	if !sh.HSTS.Enabled {
+		t.Fatal("expected HSTS enabled")
+	}
+	if sh.HSTS.MaxAge != 63072000 {
+		t.Fatalf("expected 63072000, got %d", sh.HSTS.MaxAge)
+	}
+	if sh.HSTS.IncludeSubDomains {
+		t.Fatal("expected include_subdomains false")
+	}
+	if !sh.XContentTypeOptions {
+		t.Fatal("expected x_content_type_options true")
+	}
+	if sh.XFrameOptions != "DENY" {
+		t.Fatalf("expected DENY, got %q", sh.XFrameOptions)
+	}
+	if sh.ReferrerPolicy != "no-referrer" {
+		t.Fatalf("expected no-referrer, got %q", sh.ReferrerPolicy)
+	}
+	if sh.PermissionsPolicy != "camera=(), microphone=()" {
+		t.Fatalf("expected permissions policy, got %q", sh.PermissionsPolicy)
+	}
+	// Data masking
+	dm := cfg.WAF.Response.DataMasking
+	if !dm.Enabled {
+		t.Fatal("expected data masking enabled")
+	}
+	if !dm.MaskCreditCards {
+		t.Fatal("expected mask_credit_cards true")
+	}
+	if dm.MaskSSN {
+		t.Fatal("expected mask_ssn false")
+	}
+	if !dm.MaskAPIKeys {
+		t.Fatal("expected mask_api_keys true")
+	}
+	if dm.StripStackTraces {
+		t.Fatal("expected strip_stack_traces false")
+	}
+	// Error pages
+	ep := cfg.WAF.Response.ErrorPages
+	if !ep.Enabled {
+		t.Fatal("expected error pages enabled")
+	}
+	if ep.Mode != "development" {
+		t.Fatalf("expected development, got %q", ep.Mode)
+	}
+}
+
+func TestPopulateFromNode_LoggingAllFields(t *testing.T) {
+	yaml := `logging:
+  level: debug
+  format: text
+  output: /var/log/waf.log
+  log_allowed: true
+  log_blocked: false
+  log_body: true`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	if err := PopulateFromNode(cfg, node); err != nil {
+		t.Fatalf("populate error: %v", err)
+	}
+	if cfg.Logging.Level != "debug" {
+		t.Fatalf("expected debug, got %q", cfg.Logging.Level)
+	}
+	if cfg.Logging.Format != "text" {
+		t.Fatalf("expected text, got %q", cfg.Logging.Format)
+	}
+	if cfg.Logging.Output != "/var/log/waf.log" {
+		t.Fatalf("expected file path, got %q", cfg.Logging.Output)
+	}
+	if !cfg.Logging.LogAllowed {
+		t.Fatal("expected log_allowed true")
+	}
+	if cfg.Logging.LogBlocked {
+		t.Fatal("expected log_blocked false")
+	}
+	if !cfg.Logging.LogBody {
+		t.Fatal("expected log_body true")
+	}
+}
+
+func TestPopulateFromNode_UpstreamsWithHealthCheck(t *testing.T) {
+	yaml := `upstreams:
+  - name: backend
+    load_balancer: round_robin
+    targets:
+      - url: http://localhost:8081
+        weight: 2
+      - url: http://localhost:8082
+        weight: 1
+    health_check:
+      enabled: true
+      interval: 10s
+      timeout: 5s
+      path: /healthz`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	if err := PopulateFromNode(cfg, node); err != nil {
+		t.Fatalf("populate error: %v", err)
+	}
+	if len(cfg.Upstreams) != 1 {
+		t.Fatalf("expected 1 upstream, got %d", len(cfg.Upstreams))
+	}
+	u := cfg.Upstreams[0]
+	if u.Name != "backend" {
+		t.Fatalf("expected 'backend', got %q", u.Name)
+	}
+	if u.LoadBalancer != "round_robin" {
+		t.Fatalf("expected round_robin, got %q", u.LoadBalancer)
+	}
+	if len(u.Targets) != 2 {
+		t.Fatalf("expected 2 targets, got %d", len(u.Targets))
+	}
+	if u.Targets[0].URL != "http://localhost:8081" {
+		t.Fatalf("expected url, got %q", u.Targets[0].URL)
+	}
+	if u.Targets[0].Weight != 2 {
+		t.Fatalf("expected weight 2, got %d", u.Targets[0].Weight)
+	}
+	if !u.HealthCheck.Enabled {
+		t.Fatal("expected health check enabled")
+	}
+	if u.HealthCheck.Interval != 10*time.Second {
+		t.Fatalf("expected 10s interval, got %v", u.HealthCheck.Interval)
+	}
+	if u.HealthCheck.Timeout != 5*time.Second {
+		t.Fatalf("expected 5s timeout, got %v", u.HealthCheck.Timeout)
+	}
+	if u.HealthCheck.Path != "/healthz" {
+		t.Fatalf("expected /healthz, got %q", u.HealthCheck.Path)
+	}
+}
+
+func TestPopulateFromNode_RoutesWithMethods(t *testing.T) {
+	yaml := `routes:
+  - path: /api
+    upstream: backend
+    strip_prefix: true
+    methods: [GET, POST, PUT]
+  - path: /static
+    upstream: cdn
+    strip_prefix: false`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	if err := PopulateFromNode(cfg, node); err != nil {
+		t.Fatalf("populate error: %v", err)
+	}
+	if len(cfg.Routes) != 2 {
+		t.Fatalf("expected 2 routes, got %d", len(cfg.Routes))
+	}
+	r := cfg.Routes[0]
+	if r.Path != "/api" {
+		t.Fatalf("expected /api, got %q", r.Path)
+	}
+	if r.Upstream != "backend" {
+		t.Fatalf("expected backend, got %q", r.Upstream)
+	}
+	if !r.StripPrefix {
+		t.Fatal("expected strip_prefix true")
+	}
+	if len(r.Methods) != 3 {
+		t.Fatalf("expected 3 methods, got %d", len(r.Methods))
+	}
+	r2 := cfg.Routes[1]
+	if r2.StripPrefix {
+		t.Fatal("expected strip_prefix false")
+	}
+}
+
+func TestPopulateFromNode_BotDetectionAllSubSections(t *testing.T) {
+	yaml := `waf:
+  bot_detection:
+    enabled: true
+    mode: enforce
+    tls_fingerprint:
+      enabled: true
+      known_bots_action: block
+      unknown_action: log
+      mismatch_action: challenge
+    user_agent:
+      enabled: true
+      block_empty: true
+      block_known_scanners: false
+    behavior:
+      enabled: true
+      window: 10m
+      rps_threshold: 50
+      error_rate_threshold: 40`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	if err := PopulateFromNode(cfg, node); err != nil {
+		t.Fatalf("populate error: %v", err)
+	}
+	bd := cfg.WAF.BotDetection
+	if !bd.Enabled {
+		t.Fatal("expected bot detection enabled")
+	}
+	if bd.Mode != "enforce" {
+		t.Fatalf("expected enforce, got %q", bd.Mode)
+	}
+	// TLS fingerprint
+	if !bd.TLSFingerprint.Enabled {
+		t.Fatal("expected tls fingerprint enabled")
+	}
+	if bd.TLSFingerprint.KnownBotsAction != "block" {
+		t.Fatalf("expected block, got %q", bd.TLSFingerprint.KnownBotsAction)
+	}
+	if bd.TLSFingerprint.UnknownAction != "log" {
+		t.Fatalf("expected log, got %q", bd.TLSFingerprint.UnknownAction)
+	}
+	if bd.TLSFingerprint.MismatchAction != "challenge" {
+		t.Fatalf("expected challenge, got %q", bd.TLSFingerprint.MismatchAction)
+	}
+	// User agent
+	if !bd.UserAgent.Enabled {
+		t.Fatal("expected user agent enabled")
+	}
+	if !bd.UserAgent.BlockEmpty {
+		t.Fatal("expected block empty true")
+	}
+	if bd.UserAgent.BlockKnownScanners {
+		t.Fatal("expected block known scanners false")
+	}
+	// Behavior
+	if !bd.Behavior.Enabled {
+		t.Fatal("expected behavior enabled")
+	}
+	if bd.Behavior.Window != 10*time.Minute {
+		t.Fatalf("expected 10m, got %v", bd.Behavior.Window)
+	}
+	if bd.Behavior.RPSThreshold != 50 {
+		t.Fatalf("expected 50, got %d", bd.Behavior.RPSThreshold)
+	}
+	if bd.Behavior.ErrorRateThreshold != 40 {
+		t.Fatalf("expected 40, got %d", bd.Behavior.ErrorRateThreshold)
+	}
+}
+
+func TestPopulateFromNode_DetectionExclusions(t *testing.T) {
+	yaml := `waf:
+  detection:
+    enabled: true
+    threshold:
+      block: 60
+      log: 30
+    detectors:
+      sqli:
+        enabled: true
+        multiplier: 1.5
+      xss:
+        enabled: false
+        multiplier: 0.5
+    exclusions:
+      - path: /webhook
+        detectors: [sqli, xss]
+        reason: trusted webhook`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	if err := PopulateFromNode(cfg, node); err != nil {
+		t.Fatalf("populate error: %v", err)
+	}
+	det := cfg.WAF.Detection
+	if !det.Enabled {
+		t.Fatal("expected detection enabled")
+	}
+	if det.Threshold.Block != 60 {
+		t.Fatalf("expected block 60, got %d", det.Threshold.Block)
+	}
+	if det.Threshold.Log != 30 {
+		t.Fatalf("expected log 30, got %d", det.Threshold.Log)
+	}
+	sqli := det.Detectors["sqli"]
+	if !sqli.Enabled {
+		t.Fatal("expected sqli enabled")
+	}
+	if sqli.Multiplier != 1.5 {
+		t.Fatalf("expected 1.5, got %f", sqli.Multiplier)
+	}
+	xss := det.Detectors["xss"]
+	if xss.Enabled {
+		t.Fatal("expected xss disabled")
+	}
+	if xss.Multiplier != 0.5 {
+		t.Fatalf("expected 0.5, got %f", xss.Multiplier)
+	}
+	if len(det.Exclusions) != 1 {
+		t.Fatalf("expected 1 exclusion, got %d", len(det.Exclusions))
+	}
+	ex := det.Exclusions[0]
+	if ex.Path != "/webhook" {
+		t.Fatalf("expected /webhook, got %q", ex.Path)
+	}
+	if len(ex.Detectors) != 2 {
+		t.Fatalf("expected 2 detectors, got %d", len(ex.Detectors))
+	}
+	if ex.Reason != "trusted webhook" {
+		t.Fatalf("expected reason, got %q", ex.Reason)
+	}
+}
+
+func TestPopulateFromNode_IPACLWithLists(t *testing.T) {
+	yaml := `waf:
+  ip_acl:
+    enabled: true
+    whitelist:
+      - 10.0.0.0/8
+      - 192.168.1.0/24
+    blacklist:
+      - 1.2.3.4
+    auto_ban:
+      enabled: true
+      default_ttl: 30m
+      max_ttl: 12h`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	if err := PopulateFromNode(cfg, node); err != nil {
+		t.Fatalf("populate error: %v", err)
+	}
+	acl := cfg.WAF.IPACL
+	if !acl.Enabled {
+		t.Fatal("expected ip acl enabled")
+	}
+	if len(acl.Whitelist) != 2 {
+		t.Fatalf("expected 2 whitelist, got %d", len(acl.Whitelist))
+	}
+	if len(acl.Blacklist) != 1 {
+		t.Fatalf("expected 1 blacklist, got %d", len(acl.Blacklist))
+	}
+	if acl.AutoBan.DefaultTTL != 30*time.Minute {
+		t.Fatalf("expected 30m, got %v", acl.AutoBan.DefaultTTL)
+	}
+	if acl.AutoBan.MaxTTL != 12*time.Hour {
+		t.Fatalf("expected 12h, got %v", acl.AutoBan.MaxTTL)
+	}
+}
+
+func TestPopulateFromNode_RateLimitWithPathsAndAutoBan(t *testing.T) {
+	yaml := `waf:
+  rate_limit:
+    enabled: true
+    rules:
+      - id: api
+        scope: ip+path
+        paths:
+          - /api/v1
+          - /api/v2
+        limit: 500
+        window: 5m
+        burst: 25
+        action: block
+        auto_ban_after: 3`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	if err := PopulateFromNode(cfg, node); err != nil {
+		t.Fatalf("populate error: %v", err)
+	}
+	rl := cfg.WAF.RateLimit
+	if !rl.Enabled {
+		t.Fatal("expected rate limit enabled")
+	}
+	if len(rl.Rules) != 1 {
+		t.Fatalf("expected 1 rule, got %d", len(rl.Rules))
+	}
+	r := rl.Rules[0]
+	if r.ID != "api" {
+		t.Fatalf("expected api, got %q", r.ID)
+	}
+	if r.Scope != "ip+path" {
+		t.Fatalf("expected ip+path, got %q", r.Scope)
+	}
+	if len(r.Paths) != 2 {
+		t.Fatalf("expected 2 paths, got %d", len(r.Paths))
+	}
+	if r.Limit != 500 {
+		t.Fatalf("expected 500, got %d", r.Limit)
+	}
+	if r.Window != 5*time.Minute {
+		t.Fatalf("expected 5m, got %v", r.Window)
+	}
+	if r.Burst != 25 {
+		t.Fatalf("expected 25, got %d", r.Burst)
+	}
+	if r.Action != "block" {
+		t.Fatalf("expected block, got %q", r.Action)
+	}
+	if r.AutoBanAfter != 3 {
+		t.Fatalf("expected 3, got %d", r.AutoBanAfter)
+	}
+}
+
+func TestPopulateFromNode_SanitizerPathOverrides(t *testing.T) {
+	yaml := `waf:
+  sanitizer:
+    enabled: true
+    max_url_length: 4096
+    max_header_size: 16384
+    max_header_count: 50
+    max_body_size: 5242880
+    max_cookie_size: 8192
+    block_null_bytes: true
+    normalize_encoding: false
+    strip_hop_by_hop: false
+    allowed_methods: [GET, POST]
+    path_overrides:
+      - path: /upload
+        max_body_size: 104857600`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	if err := PopulateFromNode(cfg, node); err != nil {
+		t.Fatalf("populate error: %v", err)
+	}
+	san := cfg.WAF.Sanitizer
+	if !san.Enabled {
+		t.Fatal("expected sanitizer enabled")
+	}
+	if san.MaxURLLength != 4096 {
+		t.Fatalf("expected 4096, got %d", san.MaxURLLength)
+	}
+	if san.MaxHeaderSize != 16384 {
+		t.Fatalf("expected 16384, got %d", san.MaxHeaderSize)
+	}
+	if san.MaxHeaderCount != 50 {
+		t.Fatalf("expected 50, got %d", san.MaxHeaderCount)
+	}
+	if san.MaxBodySize != 5242880 {
+		t.Fatalf("expected 5242880, got %d", san.MaxBodySize)
+	}
+	if san.MaxCookieSize != 8192 {
+		t.Fatalf("expected 8192, got %d", san.MaxCookieSize)
+	}
+	if !san.BlockNullBytes {
+		t.Fatal("expected block_null_bytes true")
+	}
+	if san.NormalizeEncoding {
+		t.Fatal("expected normalize_encoding false")
+	}
+	if san.StripHopByHop {
+		t.Fatal("expected strip_hop_by_hop false")
+	}
+	if len(san.AllowedMethods) != 2 {
+		t.Fatalf("expected 2 methods, got %d", len(san.AllowedMethods))
+	}
+	if len(san.PathOverrides) != 1 {
+		t.Fatalf("expected 1 path override, got %d", len(san.PathOverrides))
+	}
+	po := san.PathOverrides[0]
+	if po.Path != "/upload" {
+		t.Fatalf("expected /upload, got %q", po.Path)
+	}
+	if po.MaxBodySize != 104857600 {
+		t.Fatalf("expected 104857600, got %d", po.MaxBodySize)
+	}
+}
+
+func TestPopulateFromNode_NilNode(t *testing.T) {
+	cfg := DefaultConfig()
+	err := PopulateFromNode(cfg, nil)
+	if err != nil {
+		t.Fatalf("expected no error for nil node, got %v", err)
+	}
+}
+
+func TestPopulateFromNode_NonMapNode(t *testing.T) {
+	node := &Node{Kind: ScalarNode, Value: "test"}
+	cfg := DefaultConfig()
+	err := PopulateFromNode(cfg, node)
+	if err != nil {
+		t.Fatalf("expected no error for non-map node, got %v", err)
+	}
+}
+
+func TestPopulateFromNode_FullConfigCoverage(t *testing.T) {
+	// A comprehensive config that exercises most populate paths together
+	yaml := `mode: monitor
+listen: ":9080"
+tls:
+  enabled: true
+  listen: ":9443"
+  cert_file: /etc/certs/cert.pem
+  key_file: /etc/certs/key.pem
+  acme:
+    enabled: true
+    email: ops@example.com
+    domains:
+      - example.com
+    cache_dir: /cache/acme
+upstreams:
+  - name: web
+    load_balancer: weighted
+    targets:
+      - url: http://web1:8080
+        weight: 3
+      - url: http://web2:8080
+        weight: 1
+    health_check:
+      enabled: true
+      interval: 15s
+      timeout: 3s
+      path: /health
+routes:
+  - path: /
+    upstream: web
+    strip_prefix: false
+    methods: [GET, POST]
+waf:
+  ip_acl:
+    enabled: true
+    whitelist:
+      - 10.0.0.0/8
+    blacklist:
+      - 0.0.0.0/0
+    auto_ban:
+      enabled: true
+      default_ttl: 1h
+      max_ttl: 24h
+  rate_limit:
+    enabled: true
+    rules:
+      - id: global
+        scope: ip
+        limit: 2000
+        window: 1m
+        burst: 100
+        action: block
+  sanitizer:
+    enabled: true
+    max_url_length: 4096
+    max_body_size: 5242880
+    allowed_methods: [GET, POST, PUT]
+  detection:
+    enabled: true
+    threshold:
+      block: 50
+      log: 25
+    detectors:
+      sqli:
+        enabled: true
+        multiplier: 1.0
+  bot_detection:
+    enabled: true
+    mode: monitor
+    tls_fingerprint:
+      enabled: true
+    user_agent:
+      enabled: true
+      block_empty: true
+    behavior:
+      enabled: true
+      window: 5m
+      rps_threshold: 20
+  response:
+    security_headers:
+      enabled: true
+      hsts:
+        enabled: true
+        max_age: 31536000
+        include_subdomains: true
+    data_masking:
+      enabled: true
+      mask_credit_cards: true
+    error_pages:
+      enabled: true
+      mode: production
+dashboard:
+  enabled: true
+  listen: ":9443"
+  api_key: my-secret
+  tls: true
+mcp:
+  enabled: true
+  transport: stdio
+logging:
+  level: info
+  format: json
+  output: stdout
+  log_allowed: false
+  log_blocked: true
+  log_body: false
+events:
+  storage: file
+  max_events: 200000
+  file_path: /var/log/waf/events.jsonl`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	if err := PopulateFromNode(cfg, node); err != nil {
+		t.Fatalf("populate error: %v", err)
+	}
+	// Spot-check some values
+	if cfg.Mode != "monitor" {
+		t.Fatalf("expected monitor, got %q", cfg.Mode)
+	}
+	if cfg.Listen != ":9080" {
+		t.Fatalf("expected :9080, got %q", cfg.Listen)
+	}
+	if !cfg.TLS.Enabled {
+		t.Fatal("expected TLS enabled")
+	}
+	if len(cfg.Upstreams) != 1 {
+		t.Fatalf("expected 1 upstream, got %d", len(cfg.Upstreams))
+	}
+	if len(cfg.Routes) != 1 {
+		t.Fatalf("expected 1 route, got %d", len(cfg.Routes))
+	}
+	if cfg.Events.Storage != "file" {
+		t.Fatalf("expected file storage, got %q", cfg.Events.Storage)
+	}
+	if cfg.Events.MaxEvents != 200000 {
+		t.Fatalf("expected 200000, got %d", cfg.Events.MaxEvents)
+	}
+	if cfg.Dashboard.APIKey != "my-secret" {
+		t.Fatalf("expected my-secret, got %q", cfg.Dashboard.APIKey)
+	}
+}

@@ -485,3 +485,34 @@ func TestIPACL_ConcurrentAddRemoveCleanup(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestParseCIDROrIP_InvalidIP(t *testing.T) {
+	// An IP that is neither a valid CIDR nor a valid bare IP
+	_, err := NewLayer(Config{
+		Enabled:   true,
+		Blacklist: []string{"not-an-ip"},
+	})
+	if err == nil {
+		t.Fatal("expected error for invalid IP")
+	}
+}
+
+func TestParseCIDROrIP_IPv6Bare(t *testing.T) {
+	// Bare IPv6 address (no CIDR)
+	layer, err := NewLayer(Config{
+		Enabled:   true,
+		Blacklist: []string{"::1"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Verify by processing a request from ::1
+	ctx := &engine.RequestContext{
+		ClientIP: net.ParseIP("::1"),
+		Metadata: make(map[string]any),
+	}
+	result := layer.Process(ctx)
+	if result.Action != engine.ActionBlock {
+		t.Error("expected ::1 to be blocked")
+	}
+}
