@@ -3,7 +3,7 @@ package lfi
 import (
 	"strings"
 
-	"github.com/ersinkoc/guardianwaf/internal/engine"
+	"github.com/guardianwaf/guardianwaf/internal/engine"
 )
 
 // Detector implements the engine.Detector interface for path traversal / LFI detection.

@@ -4,7 +4,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ersinkoc/guardianwaf/internal/engine"
+	"github.com/guardianwaf/guardianwaf/internal/engine"
 )
 
 // Config holds the configuration for the IP ACL layer.

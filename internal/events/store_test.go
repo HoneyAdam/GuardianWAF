@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ersinkoc/guardianwaf/internal/engine"
+	"github.com/guardianwaf/guardianwaf/internal/engine"
 )
 
 // helper to create a test event with sensible defaults

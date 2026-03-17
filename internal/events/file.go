@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ersinkoc/guardianwaf/internal/engine"
+	"github.com/guardianwaf/guardianwaf/internal/engine"
 )
 
 const (

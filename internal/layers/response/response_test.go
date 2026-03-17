@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ersinkoc/guardianwaf/internal/engine"
+	"github.com/guardianwaf/guardianwaf/internal/engine"
 )
 
 // --- Security Headers Tests ---
@@ -52,7 +52,7 @@ func TestSecurityHeaders_Empty(t *testing.T) {
 
 func TestSecurityHeaders_Partial(t *testing.T) {
 	sh := SecurityHeaders{
-		HSTS:              "max-age=3600",
+		HSTS:                "max-age=3600",
 		XContentTypeOptions: "nosniff",
 	}
 	w := httptest.NewRecorder()

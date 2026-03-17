@@ -3,7 +3,7 @@ package events
 import (
 	"sync"
 
-	"github.com/ersinkoc/guardianwaf/internal/engine"
+	"github.com/guardianwaf/guardianwaf/internal/engine"
 )
 
 // EventBus provides publish/subscribe for WAF events.

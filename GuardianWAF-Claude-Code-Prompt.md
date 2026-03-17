@@ -5,9 +5,9 @@
 > The WAF that doesn't need a PhD to deploy.
 
 **Author:** Ersin Koç / ECOSTACK TECHNOLOGY OÜ
-**Repository:** `github.com/ersinkoc/guardianwaf`
+**Repository:** `github.com/guardianwaf/guardianwaf`
 **License:** MIT (core) + Commercial (enterprise features, future)
-**Domain:** guardianwaf.dev
+**Domain:** guardianwaf.com
 
 ---
 
@@ -49,7 +49,7 @@ You are building **GuardianWAF** from scratch — a production-grade Web Applica
 |-------|-------|
 | Project Name | GuardianWAF |
 | Binary Name | `guardianwaf` |
-| Go Module | `github.com/ersinkoc/guardianwaf` |
+| Go Module | `github.com/guardianwaf/guardianwaf` |
 | Config File | `guardianwaf.yaml` or `guardianwaf.yml` |
 | Short Name | `gwaf` (for CLI aliases) |
 | Tagline | "Zero-dependency WAF. One binary. Total protection." |
@@ -126,7 +126,7 @@ GuardianWAF is built as a **layered architecture** where the core detection engi
 - Auto-TLS via ACME (Let's Encrypt) — implemented from scratch
 - This is the primary deployment mode, equivalent to SafeLine but as a single binary
 
-**Mode 2: Embeddable Go Library** (`import "github.com/ersinkoc/guardianwaf/engine"`)
+**Mode 2: Embeddable Go Library** (`import "github.com/guardianwaf/guardianwaf/engine"`)
 - Import the detection engine into any Go HTTP application
 - Standard `http.Handler` middleware wrapper
 - Zero overhead when disabled
@@ -1233,7 +1233,7 @@ Create a `llms.txt` file in the project root:
 GuardianWAF is a production-grade WAF that compiles to a single Go binary with zero external dependencies. It protects web applications from SQL injection, XSS, path traversal, command injection, XXE, SSRF, and bot attacks using a tokenizer-based scoring engine.
 
 ## Quick Start
-go install github.com/ersinkoc/guardianwaf/cmd/guardianwaf@latest
+go install github.com/guardianwaf/guardianwaf/cmd/guardianwaf@latest
 guardianwaf serve -c guardianwaf.yaml
 
 ## Deployment Modes

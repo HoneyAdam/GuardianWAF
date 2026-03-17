@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ersinkoc/guardianwaf/internal/config"
-	"github.com/ersinkoc/guardianwaf/internal/engine"
-	"github.com/ersinkoc/guardianwaf/internal/events"
+	"github.com/guardianwaf/guardianwaf/internal/config"
+	"github.com/guardianwaf/guardianwaf/internal/engine"
+	"github.com/guardianwaf/guardianwaf/internal/events"
 )
 
 // ---------------------------------------------------------------------------

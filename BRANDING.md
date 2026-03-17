@@ -14,8 +14,8 @@
 | Full name          | **GuardianWAF**                      |
 | Binary name        | `guardianwaf`                        |
 | Short name / alias | `gwaf`                               |
-| Go module          | `github.com/ersinkoc/guardianwaf`    |
-| Domain             | `guardianwaf.dev`                    |
+| Go module          | `github.com/guardianwaf/guardianwaf`    |
+| Domain             | `guardianwaf.com`                    |
 | Author             | Ersin Koc / ECOSTACK TECHNOLOGY OU   |
 | License            | MIT (core) + Commercial (enterprise) |
 
@@ -84,7 +84,7 @@ GuardianWAF is a modular, zero-dependency Web Application Firewall built entirel
 
 **Why developers should care:**
 
-- **Zero dependencies.** `go get github.com/ersinkoc/guardianwaf` adds nothing to your `go.sum` except GuardianWAF itself. Your supply chain stays clean.
+- **Zero dependencies.** `go get github.com/guardianwaf/guardianwaf` adds nothing to your `go.sum` except GuardianWAF itself. Your supply chain stays clean.
 - **Single binary.** Cross-compile for any OS/arch. Drop it into a container, a VM, or bare metal. No runtime, no shared libs.
 - **Embeddable.** Wrap your `http.Handler` in three lines of Go code and you have a WAF. No sidecar, no reverse proxy -- just middleware.
 - **Explainable scoring.** Every decision includes a score breakdown. Debug false positives in minutes, not hours.
@@ -215,7 +215,7 @@ Comparison with and without GuardianWAF in the request path.
 ## Documentation
 
 Links to:
-- Full documentation site (guardianwaf.dev/docs)
+- Full documentation site (guardianwaf.com/docs)
 - Configuration reference
 - Rule writing guide
 - API reference
@@ -243,16 +243,16 @@ Links to GitHub, website.
 All badges use [shields.io](https://shields.io) unless otherwise noted.
 
 ```markdown
-[![Go Version](https://img.shields.io/github/go-mod/go-version/ersinkoc/guardianwaf?style=flat-square)](https://go.dev/)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/guardianwaf/guardianwafwaf?style=flat-square)](https://go.dev/)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
-[![Go Report Card](https://goreportcard.com/badge/github.com/ersinkoc/guardianwaf?style=flat-square)](https://goreportcard.com/report/github.com/ersinkoc/guardianwaf)
-[![Test Coverage](https://img.shields.io/codecov/c/github/ersinkoc/guardianwaf?style=flat-square)](https://codecov.io/gh/ersinkoc/guardianwaf)
-[![Release](https://img.shields.io/github/v/release/ersinkoc/guardianwaf?style=flat-square)](https://github.com/ersinkoc/guardianwaf/releases)
-[![Docker Pulls](https://img.shields.io/docker/pulls/ersinkoc/guardianwaf?style=flat-square)](https://hub.docker.com/r/ersinkoc/guardianwaf)
-[![GitHub Stars](https://img.shields.io/github/stars/ersinkoc/guardianwaf?style=flat-square)](https://github.com/ersinkoc/guardianwaf/stargazers)
-[![Build Status](https://img.shields.io/github/actions/workflow/status/ersinkoc/guardianwaf/ci.yml?branch=main&style=flat-square)](https://github.com/ersinkoc/guardianwaf/actions)
-[![Go Reference](https://pkg.go.dev/badge/github.com/ersinkoc/guardianwaf.svg)](https://pkg.go.dev/github.com/ersinkoc/guardianwaf)
-[![Security Headers](https://img.shields.io/security-headers?url=https%3A%2F%2Fguardianwaf.dev&style=flat-square)](https://securityheaders.com/?q=guardianwaf.dev)
+[![Go Report Card](https://goreportcard.com/badge/github.com/guardianwaf/guardianwaf?style=flat-square)](https://goreportcard.com/report/github.com/guardianwaf/guardianwaf)
+[![Test Coverage](https://img.shields.io/codecov/c/github/guardianwaf/guardianwafwaf?style=flat-square)](https://codecov.io/guardianwaf/guardianwafianwaf)
+[![Release](https://img.shields.io/github/v/release/guardianwaf/guardianwafwaf?style=flat-square)](https://github.com/guardianwaf/guardianwaf/releases)
+[![Docker Pulls](https://img.shields.io/docker/pulls/guardianwaf/guardianwafwaf?style=flat-square)](https://hub.docker.comguardianwaf/guardianwafianwaf)
+[![GitHub Stars](https://img.shields.io/github/stars/guardianwaf/guardianwafwaf?style=flat-square)](https://github.com/guardianwaf/guardianwaf/stargazers)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/guardianwaf/guardianwafwaf/ci.yml?branch=main&style=flat-square)](https://github.com/guardianwaf/guardianwaf/actions)
+[![Go Reference](https://pkg.go.dev/badge/github.com/guardianwaf/guardianwaf.svg)](https://pkg.go.dev/github.com/guardianwaf/guardianwaf)
+[![Security Headers](https://img.shields.io/security-headers?url=https%3A%2F%2Fguardianwaf.com&style=flat-square)](https://securityheaders.com/?q=guardianwaf.com)
 ```
 
 Use `flat-square` style for visual consistency. Order: Go version, license, report card, coverage, release, Docker, stars, CI, Go reference, security headers.
@@ -298,7 +298,7 @@ Single binary. Three deployment modes. Tokenizer-based detection with scoring en
 
 Open source (MIT).
 
-github.com/ersinkoc/guardianwaf
+github.com/guardianwaf/guardianwaf
 ```
 
 **Variant B (problem/solution):**
@@ -307,7 +307,7 @@ Tired of WAFs that need 20 dependencies, 3 config files, and a PhD?
 
 GuardianWAF: one Go binary, zero deps, sub-millisecond overhead. Protects your app in 10 seconds.
 
-github.com/ersinkoc/guardianwaf
+github.com/guardianwaf/guardianwaf
 ```
 
 **Variant C (feature-forward):**
@@ -322,7 +322,7 @@ GuardianWAF -- open-source WAF in Go:
 
 MIT licensed.
 
-github.com/ersinkoc/guardianwaf
+github.com/guardianwaf/guardianwaf
 ```
 
 ### 7.2 LinkedIn Post
@@ -336,7 +336,7 @@ GuardianWAF takes a different approach. It compiles to a single binary with no e
 
 The project is MIT licensed and available now on GitHub. I'd love feedback from developers, DevOps engineers, and security professionals who have opinions about how WAFs should work.
 
-github.com/ersinkoc/guardianwaf
+github.com/guardianwaf/guardianwaf
 
 #golang #security #waf #opensource #cybersecurity
 ```
@@ -361,7 +361,7 @@ Three deployment modes:
 2. Embeddable Go library: wrap your http.Handler in middleware
 3. Sidecar proxy: run alongside any service in a pod
 
-MIT licensed. Source at github.com/ersinkoc/guardianwaf. Feedback and criticism welcome.
+MIT licensed. Source at github.com/guardianwaf/guardianwaf. Feedback and criticism welcome.
 ```
 
 ### 7.4 Reddit r/golang Post
@@ -390,7 +390,7 @@ I've been working on GuardianWAF, a Web Application Firewall written entirely in
 
 **Performance target:** < 1ms p99 latency overhead.
 
-It's MIT licensed: github.com/ersinkoc/guardianwaf
+It's MIT licensed: github.com/guardianwaf/guardianwaf
 
 I'd especially appreciate feedback on:
 - The API surface for the embeddable library mode

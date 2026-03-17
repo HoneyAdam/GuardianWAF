@@ -3,33 +3,33 @@ package xss
 import (
 	"strings"
 
-	"github.com/ersinkoc/guardianwaf/internal/engine"
+	"github.com/guardianwaf/guardianwaf/internal/engine"
 )
 
 // dangerousTags maps tag names (lowercase) that are inherently dangerous when
 // combined with event handlers or specific attributes.
 var dangerousTags = map[string]bool{
-	"script": true,
-	"img":    true,
-	"svg":    true,
-	"body":   true,
-	"div":    true,
-	"input":  true,
-	"iframe": true,
-	"object": true,
-	"embed":  true,
-	"form":   true,
-	"meta":   true,
-	"link":   true,
-	"style":  true,
-	"video":  true,
-	"audio":  true,
-	"source": true,
-	"math":   true,
-	"table":  true,
-	"td":     true,
-	"details": true,
-	"select": true,
+	"script":   true,
+	"img":      true,
+	"svg":      true,
+	"body":     true,
+	"div":      true,
+	"input":    true,
+	"iframe":   true,
+	"object":   true,
+	"embed":    true,
+	"form":     true,
+	"meta":     true,
+	"link":     true,
+	"style":    true,
+	"video":    true,
+	"audio":    true,
+	"source":   true,
+	"math":     true,
+	"table":    true,
+	"td":       true,
+	"details":  true,
+	"select":   true,
 	"textarea": true,
 	"marquee":  true,
 	"isindex":  true,

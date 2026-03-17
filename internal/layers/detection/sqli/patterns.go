@@ -3,7 +3,7 @@ package sqli
 import (
 	"strings"
 
-	"github.com/ersinkoc/guardianwaf/internal/engine"
+	"github.com/guardianwaf/guardianwaf/internal/engine"
 )
 
 // AnalyzeTokens examines a token sequence and returns findings with scores.

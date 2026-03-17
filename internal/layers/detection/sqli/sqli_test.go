@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ersinkoc/guardianwaf/internal/engine"
+	"github.com/guardianwaf/guardianwaf/internal/engine"
 )
 
 // --- Tokenizer Tests ---
@@ -476,8 +476,8 @@ func TestDetector_Integration(t *testing.T) {
 	}
 
 	ctx := &engine.RequestContext{
-		Request:       req,
-		Method:        "GET",
+		Request:        req,
+		Method:         "GET",
 		NormalizedPath: "/search",
 		NormalizedQuery: map[string][]string{
 			"q": {"' UNION SELECT * FROM users --"},
@@ -567,7 +567,7 @@ func TestDetector_Multiplier(t *testing.T) {
 	}
 
 	// Score at 2x should be roughly double (integer rounding may cause slight differences)
-	expectedMin := result1.Score * 2 - len(result1.Findings) // allow rounding tolerance
+	expectedMin := result1.Score*2 - len(result1.Findings) // allow rounding tolerance
 	if result2.Score < expectedMin {
 		t.Errorf("2x multiplier: expected score >= %d, got %d (baseline=%d)",
 			expectedMin, result2.Score, result1.Score)

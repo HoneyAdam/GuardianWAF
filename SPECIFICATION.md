@@ -2,8 +2,8 @@
 
 > **Version:** 1.0.0-draft
 > **Author:** Ersin Koc / ECOSTACK TECHNOLOGY OU
-> **Repository:** `github.com/ersinkoc/guardianwaf`
-> **Domain:** guardianwaf.dev
+> **Repository:** `github.com/guardianwaf/guardianwaf`
+> **Domain:** guardianwaf.com
 > **Status:** Specification Phase
 
 ---
@@ -16,7 +16,7 @@
 |-------|-------|
 | Project Name | GuardianWAF |
 | Binary Name | `guardianwaf` |
-| Go Module | `github.com/ersinkoc/guardianwaf` |
+| Go Module | `github.com/guardianwaf/guardianwaf` |
 | Config File | `guardianwaf.yaml` or `guardianwaf.yml` |
 | Short Name | `gwaf` (for CLI aliases) |
 | Tagline | "Zero-dependency WAF. One binary. Total protection." |
@@ -83,7 +83,7 @@ This is the primary deployment mode. GuardianWAF operates as a full reverse prox
 #### Mode 2: Embeddable Go Library
 
 ```go
-import "github.com/ersinkoc/guardianwaf/engine"
+import "github.com/guardianwaf/guardianwaf/engine"
 
 waf, err := engine.New(engine.WithConfigFile("guardianwaf.yaml"))
 // or

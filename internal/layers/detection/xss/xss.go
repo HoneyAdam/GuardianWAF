@@ -1,6 +1,6 @@
 package xss
 
-import "github.com/ersinkoc/guardianwaf/internal/engine"
+import "github.com/guardianwaf/guardianwaf/internal/engine"
 
 // Detector implements the engine.Detector interface for XSS detection.
 type Detector struct {

@@ -35,7 +35,7 @@ Each layer produces findings with scores. Scores are accumulated and compared ag
 ## Quick Start (Library)
 
 ```go
-import "github.com/ersinkoc/guardianwaf"
+import "github.com/guardianwaf/guardianwaf"
 
 waf, err := guardianwaf.New(guardianwaf.Config{
     Mode: guardianwaf.ModeEnforce,
@@ -84,7 +84,7 @@ See `examples/standalone/guardianwaf.yaml` for complete example.
 
 ## Module Path
 
-`github.com/ersinkoc/guardianwaf`
+`github.com/guardianwaf/guardianwaf`
 
 ## Project Structure
 

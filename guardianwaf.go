@@ -29,15 +29,15 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/ersinkoc/guardianwaf/internal/config"
-	"github.com/ersinkoc/guardianwaf/internal/engine"
-	"github.com/ersinkoc/guardianwaf/internal/events"
-	"github.com/ersinkoc/guardianwaf/internal/layers/botdetect"
-	"github.com/ersinkoc/guardianwaf/internal/layers/detection"
-	"github.com/ersinkoc/guardianwaf/internal/layers/ipacl"
-	"github.com/ersinkoc/guardianwaf/internal/layers/ratelimit"
-	"github.com/ersinkoc/guardianwaf/internal/layers/response"
-	"github.com/ersinkoc/guardianwaf/internal/layers/sanitizer"
+	"github.com/guardianwaf/guardianwaf/internal/config"
+	"github.com/guardianwaf/guardianwaf/internal/engine"
+	"github.com/guardianwaf/guardianwaf/internal/events"
+	"github.com/guardianwaf/guardianwaf/internal/layers/botdetect"
+	"github.com/guardianwaf/guardianwaf/internal/layers/detection"
+	"github.com/guardianwaf/guardianwaf/internal/layers/ipacl"
+	"github.com/guardianwaf/guardianwaf/internal/layers/ratelimit"
+	"github.com/guardianwaf/guardianwaf/internal/layers/response"
+	"github.com/guardianwaf/guardianwaf/internal/layers/sanitizer"
 )
 
 // Mode constants for WAF operation mode.

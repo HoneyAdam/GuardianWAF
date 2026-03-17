@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ersinkoc/guardianwaf/internal/engine"
-	"github.com/ersinkoc/guardianwaf/internal/events"
+	"github.com/guardianwaf/guardianwaf/internal/engine"
+	"github.com/guardianwaf/guardianwaf/internal/events"
 )
 
 // Version is the current GuardianWAF version reported by the API.

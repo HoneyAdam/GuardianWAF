@@ -9,21 +9,21 @@ This guide covers installing GuardianWAF and running it in each of its three dep
 ### go install
 
 ```bash
-go install github.com/ersinkoc/guardianwaf/cmd/guardianwaf@latest
+go install github.com/guardianwaf/guardianwaf/cmd/guardianwaf@latest
 ```
 
 ### Binary Download
 
-Download the latest release from [GitHub Releases](https://github.com/ersinkoc/guardianwaf/releases):
+Download the latest release from [GitHub Releases](https://github.com/guardianwaf/guardianwaf/releases):
 
 ```bash
 # Linux (amd64)
-curl -Lo guardianwaf https://github.com/ersinkoc/guardianwaf/releases/latest/download/guardianwaf-linux-amd64
+curl -Lo guardianwaf https://github.com/guardianwaf/guardianwaf/releases/latest/download/guardianwaf-linux-amd64
 chmod +x guardianwaf
 sudo mv guardianwaf /usr/local/bin/
 
 # macOS (arm64)
-curl -Lo guardianwaf https://github.com/ersinkoc/guardianwaf/releases/latest/download/guardianwaf-darwin-arm64
+curl -Lo guardianwaf https://github.com/guardianwaf/guardianwaf/releases/latest/download/guardianwaf-darwin-arm64
 chmod +x guardianwaf
 sudo mv guardianwaf /usr/local/bin/
 
@@ -34,13 +34,13 @@ sudo mv guardianwaf /usr/local/bin/
 ### Docker
 
 ```bash
-docker pull ersinkoc/guardianwaf:latest
+docker pull guardianwaf/guardianwafwaf:latest
 ```
 
 ### Build from Source
 
 ```bash
-git clone https://github.com/ersinkoc/guardianwaf.git
+git clone https://github.com/guardianwaf/guardianwaf.git
 cd guardianwaf
 make build
 # Binary: ./guardianwaf
@@ -102,7 +102,7 @@ import (
     "fmt"
     "net/http"
 
-    "github.com/ersinkoc/guardianwaf"
+    "github.com/guardianwaf/guardianwaf"
 )
 
 func main() {
@@ -133,14 +133,14 @@ Lightweight proxy without dashboard or MCP. Ideal for container environments.
 docker run -d \
   --name guardianwaf \
   -p 8080:8080 \
-  ersinkoc/guardianwaf:latest \
+  guardianwaf/guardianwafwaf:latest \
   sidecar --upstream http://app:3000
 
 # Or with a config file
 docker run -d \
   -v ./guardianwaf.yaml:/etc/guardianwaf/guardianwaf.yaml:ro \
   -p 8080:8080 \
-  ersinkoc/guardianwaf:latest \
+  guardianwaf/guardianwafwaf:latest \
   sidecar -c /etc/guardianwaf/guardianwaf.yaml
 ```
 
@@ -158,7 +158,7 @@ spec:
       ports:
         - containerPort: 3000
     - name: waf
-      image: ersinkoc/guardianwaf:latest
+      image: guardianwaf/guardianwafwaf:latest
       args: ["sidecar", "--upstream", "http://localhost:3000", "--listen", ":8080"]
       ports:
         - containerPort: 8080

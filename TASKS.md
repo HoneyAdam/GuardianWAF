@@ -1,7 +1,7 @@
 # GuardianWAF — Implementation Tasks
 
 **Author:** Ersin Koç / ECOSTACK TECHNOLOGY OÜ
-**Module:** `github.com/ersinkoc/guardianwaf`
+**Module:** `github.com/guardianwaf/guardianwaf`
 **Complexity:** S = few hours | M = half day | L = full day | XL = multi-day
 
 > Tasks are ordered. Each task lists dependencies where applicable.
@@ -16,7 +16,7 @@
 **Files:** `go.mod`, `Makefile`, `.golangci.yml`, `.goreleaser.yml`, `.gitignore`
 
 **Description:**
-Initialize the Go module as `github.com/ersinkoc/guardianwaf`. Create the directory skeleton matching the full project layout (all directories, empty `.gitkeep` where needed). The `Makefile` must include targets: `build`, `test`, `lint`, `bench`, `fuzz`, `clean`, `run`, `docker-build`. `.golangci.yml` enables linters: `govet`, `staticcheck`, `errcheck`, `gosimple`, `ineffassign`, `unused`, `misspell`, `gofumpt`, `revive`, `gocritic`. `.goreleaser.yml` defines builds for `linux/amd64`, `linux/arm64`, `darwin/amd64`, `darwin/arm64`, `windows/amd64` with the binary name `guardianwaf` from `cmd/guardianwaf`. `.gitignore` covers Go binaries, `dist/`, IDE files, `.env`.
+Initialize the Go module as `github.com/guardianwaf/guardianwaf`. Create the directory skeleton matching the full project layout (all directories, empty `.gitkeep` where needed). The `Makefile` must include targets: `build`, `test`, `lint`, `bench`, `fuzz`, `clean`, `run`, `docker-build`. `.golangci.yml` enables linters: `govet`, `staticcheck`, `errcheck`, `gosimple`, `ineffassign`, `unused`, `misspell`, `gofumpt`, `revive`, `gocritic`. `.goreleaser.yml` defines builds for `linux/amd64`, `linux/arm64`, `darwin/amd64`, `darwin/arm64`, `windows/amd64` with the binary name `guardianwaf` from `cmd/guardianwaf`. `.gitignore` covers Go binaries, `dist/`, IDE files, `.env`.
 
 **Acceptance Criteria:**
 - [ ] `go mod tidy` succeeds with no errors
@@ -1701,7 +1701,7 @@ Test suite for MCP server and tools. Server tests: initialize handshake, tools/l
 **Dependencies:** Task 11, Task 8
 
 **Description:**
-Implement the public API for library mode (`import "github.com/ersinkoc/guardianwaf"`). This is the primary entry point for users embedding GuardianWAF in their Go applications. Functions: `NewFromFile(path string, opts ...Option) (*WAF, error)` — create WAF from config file with functional options, `New(opts ...Option) (*WAF, error)` — create WAF with defaults and functional options only (no file). `WAF` struct methods: `Middleware() func(http.Handler) http.Handler` — returns standard middleware, `Check(r *http.Request) (*Result, error)` — manual request checking (returns Result with Action, Score, Findings), `OnEvent(fn func(Event))` — register event callback, `Close() error` — graceful shutdown. `Config() *config.Config` — read current config. `Result` is a simplified public struct (not the internal Event). Keep the public API surface minimal — power users access internal packages directly. All public types documented with Go doc comments and examples.
+Implement the public API for library mode (`import "github.com/guardianwaf/guardianwaf"`). This is the primary entry point for users embedding GuardianWAF in their Go applications. Functions: `NewFromFile(path string, opts ...Option) (*WAF, error)` — create WAF from config file with functional options, `New(opts ...Option) (*WAF, error)` — create WAF with defaults and functional options only (no file). `WAF` struct methods: `Middleware() func(http.Handler) http.Handler` — returns standard middleware, `Check(r *http.Request) (*Result, error)` — manual request checking (returns Result with Action, Score, Findings), `OnEvent(fn func(Event))` — register event callback, `Close() error` — graceful shutdown. `Config() *config.Config` — read current config. `Result` is a simplified public struct (not the internal Event). Keep the public API surface minimal — power users access internal packages directly. All public types documented with Go doc comments and examples.
 
 **Acceptance Criteria:**
 - [ ] `NewFromFile` creates WAF from config file

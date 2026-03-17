@@ -89,7 +89,7 @@ guardianwaf serve -c guardianwaf.yaml --mode monitor --log-level debug
 docker run -d \
   -p 8080:8080 -p 9443:9443 \
   -v ./guardianwaf.yaml:/etc/guardianwaf/guardianwaf.yaml:ro \
-  ersinkoc/guardianwaf:latest \
+  guardianwaf/guardianwafwaf:latest \
   serve -c /etc/guardianwaf/guardianwaf.yaml
 ```
 
@@ -128,7 +128,7 @@ import (
     "fmt"
     "net/http"
 
-    "github.com/ersinkoc/guardianwaf"
+    "github.com/guardianwaf/guardianwaf"
 )
 
 func main() {
@@ -248,7 +248,7 @@ guardianwaf sidecar --upstream http://app:3000 --mode monitor --listen :8080
 version: "3.9"
 services:
   waf:
-    image: ersinkoc/guardianwaf:latest
+    image: guardianwaf/guardianwafwaf:latest
     command: ["sidecar", "--upstream", "http://app:3000"]
     ports:
       - "8080:8080"
@@ -281,7 +281,7 @@ spec:
             - containerPort: 3000
 
         - name: waf
-          image: ersinkoc/guardianwaf:latest
+          image: guardianwaf/guardianwafwaf:latest
           args: ["sidecar", "--upstream", "http://localhost:3000", "--listen", ":8080"]
           ports:
             - containerPort: 8080

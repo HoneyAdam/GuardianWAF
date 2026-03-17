@@ -1,7 +1,7 @@
 # IMPLEMENTATION.md — GuardianWAF Architecture & Implementation Guide
 
 **Author:** Ersin Koc / ECOSTACK TECHNOLOGY OU
-**Module:** `github.com/ersinkoc/guardianwaf`
+**Module:** `github.com/guardianwaf/guardianwaf`
 **Go Version:** 1.22+
 **Date:** 2026-03-16
 

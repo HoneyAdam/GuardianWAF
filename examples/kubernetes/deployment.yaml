@@ -1,0 +1,51 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: guardianwaf
+  labels:
+    app: guardianwaf
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: guardianwaf
+  template:
+    metadata:
+      labels:
+        app: guardianwaf
+    spec:
+      containers:
+        - name: guardianwaf
+          image: guardianwaf/guardianwafwaf:latest
+          args: ["serve", "-c", "/etc/guardianwaf/guardianwaf.yaml"]
+          ports:
+            - containerPort: 8080
+              name: http
+            - containerPort: 9443
+              name: dashboard
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 9443
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 9443
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          resources:
+            limits:
+              memory: "256Mi"
+              cpu: "500m"
+            requests:
+              memory: "64Mi"
+              cpu: "100m"
+          volumeMounts:
+            - name: config
+              mountPath: /etc/guardianwaf
+      volumes:
+        - name: config
+          configMap:
+            name: guardianwaf-config

@@ -1,0 +1,23 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: guardianwaf-config
+data:
+  guardianwaf.yaml: |
+    mode: enforce
+    listen: ":8080"
+    upstreams:
+      - name: backend
+        targets:
+          - url: "http://backend-service:3000"
+    routes:
+      - path: /
+        upstream: backend
+    waf:
+      detection:
+        threshold:
+          block: 50
+          log: 25
+    dashboard:
+      enabled: true
+      listen: ":9443"

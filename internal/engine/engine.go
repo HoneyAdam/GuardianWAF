@@ -6,7 +6,7 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/ersinkoc/guardianwaf/internal/config"
+	"github.com/guardianwaf/guardianwaf/internal/config"
 )
 
 // EventStorer is the interface for event persistence.

@@ -1,0 +1,33 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: myapp-with-waf
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: myapp
+  template:
+    metadata:
+      labels:
+        app: myapp
+    spec:
+      containers:
+        - name: myapp
+          image: myapp:latest
+          ports:
+            - containerPort: 3000
+        - name: guardianwaf
+          image: guardianwaf/guardianwafwaf:latest
+          args: ["sidecar", "--upstream", "http://localhost:3000", "--listen", ":8080"]
+          ports:
+            - containerPort: 8080
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            initialDelaySeconds: 3
+          resources:
+            limits:
+              memory: "64Mi"
+              cpu: "200m"

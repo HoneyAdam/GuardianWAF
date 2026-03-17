@@ -1,7 +1,7 @@
 package guardianwaf
 
 import (
-	"github.com/ersinkoc/guardianwaf/internal/config"
+	"github.com/guardianwaf/guardianwaf/internal/config"
 )
 
 // Option is a functional option for configuring the WAF engine.

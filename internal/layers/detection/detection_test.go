@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ersinkoc/guardianwaf/internal/engine"
+	"github.com/guardianwaf/guardianwaf/internal/engine"
 )
 
 func defaultConfig() Config {
@@ -375,7 +375,7 @@ func TestDetectionLayer_Multiplier(t *testing.T) {
 
 	// The 2.0 multiplier score should be approximately double
 	// Due to integer rounding, allow some tolerance
-	expectedMin := result1.Score * 2 * 90 / 100 // 90% of double
+	expectedMin := result1.Score * 2 * 90 / 100  // 90% of double
 	expectedMax := result1.Score * 2 * 110 / 100 // 110% of double
 
 	if result2.Score < expectedMin || result2.Score > expectedMax {

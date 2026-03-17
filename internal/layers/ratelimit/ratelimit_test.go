@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ersinkoc/guardianwaf/internal/engine"
+	"github.com/guardianwaf/guardianwaf/internal/engine"
 )
 
 func makeContext(ip, path string) *engine.RequestContext {

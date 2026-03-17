@@ -3,13 +3,13 @@ package detection
 import (
 	"strings"
 
-	"github.com/ersinkoc/guardianwaf/internal/engine"
-	"github.com/ersinkoc/guardianwaf/internal/layers/detection/cmdi"
-	"github.com/ersinkoc/guardianwaf/internal/layers/detection/lfi"
-	"github.com/ersinkoc/guardianwaf/internal/layers/detection/sqli"
-	"github.com/ersinkoc/guardianwaf/internal/layers/detection/ssrf"
-	"github.com/ersinkoc/guardianwaf/internal/layers/detection/xss"
-	"github.com/ersinkoc/guardianwaf/internal/layers/detection/xxe"
+	"github.com/guardianwaf/guardianwaf/internal/engine"
+	"github.com/guardianwaf/guardianwaf/internal/layers/detection/cmdi"
+	"github.com/guardianwaf/guardianwaf/internal/layers/detection/lfi"
+	"github.com/guardianwaf/guardianwaf/internal/layers/detection/sqli"
+	"github.com/guardianwaf/guardianwaf/internal/layers/detection/ssrf"
+	"github.com/guardianwaf/guardianwaf/internal/layers/detection/xss"
+	"github.com/guardianwaf/guardianwaf/internal/layers/detection/xxe"
 )
 
 // DetectorConfig holds the configuration for a single detector.

@@ -3,7 +3,7 @@ package ssrf
 import (
 	"testing"
 
-	"github.com/ersinkoc/guardianwaf/internal/engine"
+	"github.com/guardianwaf/guardianwaf/internal/engine"
 )
 
 // Attack payloads that MUST be detected

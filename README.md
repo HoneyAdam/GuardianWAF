@@ -2,16 +2,16 @@
 
 > Zero-dependency WAF. One binary. Total protection.
 
-[![Go Version](https://img.shields.io/github/go-mod/go-version/ersinkoc/guardianwaf?style=flat-square)](https://go.dev/)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/guardianwaf/guardianwaf?style=flat-square)](https://go.dev/)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
-[![Go Report Card](https://goreportcard.com/badge/github.com/ersinkoc/guardianwaf?style=flat-square)](https://goreportcard.com/report/github.com/ersinkoc/guardianwaf)
-[![Test Coverage](https://img.shields.io/codecov/c/github/ersinkoc/guardianwaf?style=flat-square)](https://codecov.io/gh/ersinkoc/guardianwaf)
-[![Release](https://img.shields.io/github/v/release/ersinkoc/guardianwaf?style=flat-square)](https://github.com/ersinkoc/guardianwaf/releases)
-[![Docker Pulls](https://img.shields.io/docker/pulls/ersinkoc/guardianwaf?style=flat-square)](https://hub.docker.com/r/ersinkoc/guardianwaf)
-[![GitHub Stars](https://img.shields.io/github/stars/ersinkoc/guardianwaf?style=flat-square)](https://github.com/ersinkoc/guardianwaf/stargazers)
-[![Build Status](https://img.shields.io/github/actions/workflow/status/ersinkoc/guardianwaf/ci.yml?branch=main&style=flat-square)](https://github.com/ersinkoc/guardianwaf/actions)
-[![Go Reference](https://pkg.go.dev/badge/github.com/ersinkoc/guardianwaf.svg)](https://pkg.go.dev/github.com/ersinkoc/guardianwaf)
-[![Security Headers](https://img.shields.io/security-headers?url=https%3A%2F%2Fguardianwaf.dev&style=flat-square)](https://securityheaders.com/?q=guardianwaf.dev)
+[![Go Report Card](https://goreportcard.com/badge/github.com/guardianwaf/guardianwaf?style=flat-square)](https://goreportcard.com/report/github.com/guardianwaf/guardianwaf)
+[![Test Coverage](https://img.shields.io/codecov/c/github/guardianwaf/guardianwaf?style=flat-square)](https://codecov.io/gh/guardianwaf/guardianwaf)
+[![Release](https://img.shields.io/github/v/release/guardianwaf/guardianwaf?style=flat-square)](https://github.com/guardianwaf/guardianwaf/releases)
+[![Docker Pulls](https://img.shields.io/docker/pulls/guardianwaf/guardianwaf?style=flat-square)](https://hub.docker.com/r/guardianwaf/guardianwaf)
+[![GitHub Stars](https://img.shields.io/github/stars/guardianwaf/guardianwaf?style=flat-square)](https://github.com/guardianwaf/guardianwaf/stargazers)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/guardianwaf/guardianwaf/ci.yml?branch=main&style=flat-square)](https://github.com/guardianwaf/guardianwaf/actions)
+[![Go Reference](https://pkg.go.dev/badge/github.com/guardianwaf/guardianwaf.svg)](https://pkg.go.dev/github.com/guardianwaf/guardianwaf)
+[![Security Headers](https://img.shields.io/security-headers?url=https%3A%2F%2Fguardianwaf.com&style=flat-square)](https://securityheaders.com/?q=guardianwaf.com)
 
 GuardianWAF is a production-grade Web Application Firewall written in pure Go with zero external dependencies. It ships as a single binary supporting three deployment modes: standalone reverse proxy, embeddable library, and sidecar proxy. Its tokenizer-based scoring engine provides accurate threat detection with minimal false positives.
 
@@ -59,7 +59,7 @@ GuardianWAF is a production-grade Web Application Firewall written in pure Go wi
 
 ```bash
 # Install
-go install github.com/ersinkoc/guardianwaf/cmd/guardianwaf@latest
+go install github.com/guardianwaf/guardianwaf/cmd/guardianwaf@latest
 
 # Create minimal config
 cat > guardianwaf.yaml <<EOF
@@ -85,7 +85,7 @@ guardianwaf serve
 ### Go Library (Middleware)
 
 ```bash
-go get github.com/ersinkoc/guardianwaf
+go get github.com/guardianwaf/guardianwaf
 ```
 
 ```go
@@ -105,7 +105,7 @@ http.ListenAndServe(":8080", waf.Middleware(myHandler))
 
 ```bash
 docker run -d -p 8080:8080 \
-  ersinkoc/guardianwaf:latest \
+  guardianwaf/guardianwaf:latest \
   sidecar --upstream http://app:3000
 ```
 
@@ -200,19 +200,19 @@ See [Detection Engine docs](docs/detection-engine.md) for the full pattern scori
 ### go install
 
 ```bash
-go install github.com/ersinkoc/guardianwaf/cmd/guardianwaf@latest
+go install github.com/guardianwaf/guardianwaf/cmd/guardianwaf@latest
 ```
 
 ### Binary Download
 
 ```bash
 # Linux (amd64)
-curl -Lo guardianwaf https://github.com/ersinkoc/guardianwaf/releases/latest/download/guardianwaf-linux-amd64
+curl -Lo guardianwaf https://github.com/guardianwaf/guardianwaf/releases/latest/download/guardianwaf-linux-amd64
 chmod +x guardianwaf
 sudo mv guardianwaf /usr/local/bin/
 
 # macOS (arm64)
-curl -Lo guardianwaf https://github.com/ersinkoc/guardianwaf/releases/latest/download/guardianwaf-darwin-arm64
+curl -Lo guardianwaf https://github.com/guardianwaf/guardianwaf/releases/latest/download/guardianwaf-darwin-arm64
 chmod +x guardianwaf
 sudo mv guardianwaf /usr/local/bin/
 ```
@@ -220,13 +220,13 @@ sudo mv guardianwaf /usr/local/bin/
 ### Docker
 
 ```bash
-docker pull ersinkoc/guardianwaf:latest
+docker pull guardianwaf/guardianwaf:latest
 ```
 
 ### Build from Source
 
 ```bash
-git clone https://github.com/ersinkoc/guardianwaf.git
+git clone https://github.com/guardianwaf/guardianwaf.git
 cd guardianwaf
 make build
 # Binary: ./guardianwaf
@@ -412,7 +412,7 @@ Design choices for performance:
 | [MCP Integration](docs/mcp-integration.md) | AI agent tools and Claude Code setup |
 | [Tuning Guide](docs/tuning-guide.md) | False positive reduction and threshold tuning |
 
-Full documentation site: [guardianwaf.dev/docs](https://guardianwaf.dev/docs)
+Full documentation site: [guardianwaf.com/docs](https://guardianwaf.com/docs)
 
 ---
 

@@ -3,7 +3,7 @@ package botdetect
 import (
 	"time"
 
-	"github.com/ersinkoc/guardianwaf/internal/engine"
+	"github.com/guardianwaf/guardianwaf/internal/engine"
 )
 
 // TLSFingerprintConfig controls TLS fingerprint analysis behavior.

@@ -3,7 +3,7 @@ package xxe
 import (
 	"strings"
 
-	"github.com/ersinkoc/guardianwaf/internal/engine"
+	"github.com/guardianwaf/guardianwaf/internal/engine"
 )
 
 // Detector implements the engine.Detector interface for XXE (XML External Entity) detection.

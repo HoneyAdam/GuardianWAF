@@ -6,7 +6,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/ersinkoc/guardianwaf/internal/engine"
+	"github.com/guardianwaf/guardianwaf/internal/engine"
 )
 
 // MemoryStore stores events in a fixed-size ring buffer.

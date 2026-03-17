@@ -3,7 +3,7 @@ package xxe
 import (
 	"testing"
 
-	"github.com/ersinkoc/guardianwaf/internal/engine"
+	"github.com/guardianwaf/guardianwaf/internal/engine"
 )
 
 // Attack payloads with XML content types
@@ -118,8 +118,8 @@ func TestDetector_Integration(t *testing.T) {
 
 	// Test with XML content type
 	ctx := &engine.RequestContext{
-		ContentType:    "application/xml",
-		NormalizedBody: `<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><foo>&xxe;</foo>`,
+		ContentType:     "application/xml",
+		NormalizedBody:  `<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><foo>&xxe;</foo>`,
 		NormalizedQuery: map[string][]string{},
 		Headers:         map[string][]string{},
 		Cookies:         map[string]string{},
@@ -143,8 +143,8 @@ func TestDetector_NonXMLContentType(t *testing.T) {
 
 	// Non-XML content type should be skipped
 	ctx := &engine.RequestContext{
-		ContentType:    "application/json",
-		NormalizedBody: `<!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>`,
+		ContentType:     "application/json",
+		NormalizedBody:  `<!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>`,
 		NormalizedQuery: map[string][]string{},
 		Headers:         map[string][]string{},
 		Cookies:         map[string]string{},
@@ -175,8 +175,8 @@ func TestDetector_XMLContentTypes(t *testing.T) {
 	for _, ct := range contentTypes {
 		t.Run(ct, func(t *testing.T) {
 			ctx := &engine.RequestContext{
-				ContentType:    ct,
-				NormalizedBody: payload,
+				ContentType:     ct,
+				NormalizedBody:  payload,
 				NormalizedQuery: map[string][]string{},
 				Headers:         map[string][]string{},
 				Cookies:         map[string]string{},
@@ -193,8 +193,8 @@ func TestDetector_Disabled(t *testing.T) {
 	det := NewDetector(false, 1.0)
 
 	ctx := &engine.RequestContext{
-		ContentType:    "application/xml",
-		NormalizedBody: `<!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>`,
+		ContentType:     "application/xml",
+		NormalizedBody:  `<!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>`,
 		NormalizedQuery: map[string][]string{},
 		Headers:         map[string][]string{},
 		Cookies:         map[string]string{},
@@ -212,8 +212,8 @@ func TestDetector_Multiplier(t *testing.T) {
 
 	det1 := NewDetector(true, 1.0)
 	ctx1 := &engine.RequestContext{
-		ContentType:    "text/xml",
-		NormalizedBody: payload,
+		ContentType:     "text/xml",
+		NormalizedBody:  payload,
 		NormalizedQuery: map[string][]string{},
 		Headers:         map[string][]string{},
 		Cookies:         map[string]string{},
@@ -222,8 +222,8 @@ func TestDetector_Multiplier(t *testing.T) {
 
 	det2 := NewDetector(true, 2.0)
 	ctx2 := &engine.RequestContext{
-		ContentType:    "text/xml",
-		NormalizedBody: payload,
+		ContentType:     "text/xml",
+		NormalizedBody:  payload,
 		NormalizedQuery: map[string][]string{},
 		Headers:         map[string][]string{},
 		Cookies:         map[string]string{},

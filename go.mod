@@ -1,3 +1,3 @@
-module github.com/ersinkoc/guardianwaf
+module github.com/guardianwaf/guardianwaf
 
 go 1.23

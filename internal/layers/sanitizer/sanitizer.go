@@ -1,7 +1,7 @@
 package sanitizer
 
 import (
-	"github.com/ersinkoc/guardianwaf/internal/engine"
+	"github.com/guardianwaf/guardianwaf/internal/engine"
 )
 
 // Layer implements the engine.Layer interface for request sanitization.

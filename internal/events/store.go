@@ -3,7 +3,7 @@ package events
 import (
 	"time"
 
-	"github.com/ersinkoc/guardianwaf/internal/engine"
+	"github.com/guardianwaf/guardianwaf/internal/engine"
 )
 
 // EventStore is the interface for event persistence.

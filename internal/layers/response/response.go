@@ -3,7 +3,7 @@ package response
 import (
 	"time"
 
-	"github.com/ersinkoc/guardianwaf/internal/engine"
+	"github.com/guardianwaf/guardianwaf/internal/engine"
 )
 
 // Config holds the response protection layer configuration.

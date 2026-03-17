@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ersinkoc/guardianwaf/internal/engine"
+	"github.com/guardianwaf/guardianwaf/internal/engine"
 )
 
 // helper to create a RequestContext with a given IP

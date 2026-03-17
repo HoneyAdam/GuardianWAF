@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ersinkoc/guardianwaf/internal/engine"
+	"github.com/guardianwaf/guardianwaf/internal/engine"
 )
 
 // newTestContext creates a minimal RequestContext for testing.

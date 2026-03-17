@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/ersinkoc/guardianwaf/internal/config"
+	"github.com/guardianwaf/guardianwaf/internal/config"
 )
 
 // --- Mock EventStorer for engine tests ---

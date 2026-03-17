@@ -5,8 +5,8 @@ import (
 	"embed"
 	"net/http"
 
-	"github.com/ersinkoc/guardianwaf/internal/engine"
-	"github.com/ersinkoc/guardianwaf/internal/events"
+	"github.com/guardianwaf/guardianwaf/internal/engine"
+	"github.com/guardianwaf/guardianwaf/internal/events"
 )
 
 //go:embed static/index.html static/style.css static/app.js

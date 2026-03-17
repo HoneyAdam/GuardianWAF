@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/ersinkoc/guardianwaf"
+	"github.com/guardianwaf/guardianwaf"
 )
 
 func main() {
