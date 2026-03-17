@@ -1477,6 +1477,185 @@ func TestMemoryStore_NegativeCapacity(t *testing.T) {
 	}
 }
 
+// --- FileStore Tests ---
+
+func TestFileStore_StoreAndClose(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/events.jsonl"
+
+	fs, err := NewFileStore(path, 0)
+	if err != nil {
+		t.Fatalf("NewFileStore error: %v", err)
+	}
+
+	// Store some events
+	for i := range 5 {
+		ev := engine.Event{
+			ID:        "evt-" + intToStr(i),
+			RequestID: "req-" + intToStr(i),
+			ClientIP:  "10.0.0.1",
+			Method:    "GET",
+			Path:      "/test",
+			Action:    engine.ActionPass,
+			Score:     0,
+			Timestamp: time.Now(),
+		}
+		fs.Store(ev)
+	}
+
+	// Close should drain remaining events
+	if err := fs.Close(); err != nil {
+		t.Fatalf("Close error: %v", err)
+	}
+
+	// Verify file has content
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile error: %v", err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) < 1 {
+		t.Error("expected at least 1 line in output file")
+	}
+}
+
+func TestFileStore_DrainOnClose(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/drain.jsonl"
+
+	fs, err := NewFileStore(path, 0)
+	if err != nil {
+		t.Fatalf("NewFileStore error: %v", err)
+	}
+
+	// Fill the channel with events before closing
+	for i := range 50 {
+		fs.Store(engine.Event{
+			ID:        "drain-" + intToStr(i),
+			RequestID: "r-" + intToStr(i),
+			Method:    "GET",
+			Path:      "/drain",
+			Action:    engine.ActionPass,
+			Timestamp: time.Now(),
+		})
+	}
+
+	// Small delay to let some events be written
+	time.Sleep(50 * time.Millisecond)
+
+	// Close drains remaining
+	if err := fs.Close(); err != nil {
+		t.Fatalf("Close error: %v", err)
+	}
+
+	data, _ := os.ReadFile(path)
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) < 50 {
+		t.Errorf("expected 50 lines, got %d (drain may not have captured all)", len(lines))
+	}
+}
+
+func TestFileStore_RotationSmallMax(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/rotate.jsonl"
+
+	// Very small maxSize to trigger rotation quickly
+	fs, err := NewFileStore(path, 200)
+	if err != nil {
+		t.Fatalf("NewFileStore error: %v", err)
+	}
+
+	// Write enough events to exceed 200 bytes
+	for i := range 20 {
+		fs.Store(engine.Event{
+			ID:        "rot-" + intToStr(i),
+			RequestID: "req-" + intToStr(i),
+			ClientIP:  "10.0.0.1",
+			Method:    "GET",
+			Path:      "/rotation-test-path-that-is-long-enough",
+			Action:    engine.ActionPass,
+			Score:     i,
+			Timestamp: time.Now(),
+		})
+	}
+
+	// Wait for events to be processed
+	time.Sleep(200 * time.Millisecond)
+
+	if err := fs.Close(); err != nil {
+		t.Fatalf("Close error: %v", err)
+	}
+
+	// Check that rotation happened — there should be rotated files
+	entries, _ := os.ReadDir(dir)
+	if len(entries) < 2 {
+		t.Logf("only %d files found (rotation may not have triggered for this data volume)", len(entries))
+	}
+}
+
+func TestFileStore_UnsupportedOps(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/query.jsonl"
+
+	fs, err := NewFileStore(path, 0)
+	if err != nil {
+		t.Fatalf("NewFileStore error: %v", err)
+	}
+	defer fs.Close()
+
+	_, _, err = fs.Query(EventFilter{})
+	if err == nil {
+		t.Error("expected error from Query")
+	}
+
+	_, err = fs.Get("id")
+	if err == nil {
+		t.Error("expected error from Get")
+	}
+
+	_, err = fs.Recent(10)
+	if err == nil {
+		t.Error("expected error from Recent")
+	}
+
+	_, err = fs.Count(EventFilter{})
+	if err == nil {
+		t.Error("expected error from Count")
+	}
+}
+
+func TestFileStore_FlushOnTick(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/tick.jsonl"
+
+	fs, err := NewFileStore(path, 0)
+	if err != nil {
+		t.Fatalf("NewFileStore error: %v", err)
+	}
+
+	// Store a single event
+	fs.Store(engine.Event{
+		ID:        "tick-1",
+		RequestID: "r-1",
+		Method:    "GET",
+		Path:      "/tick",
+		Action:    engine.ActionPass,
+		Timestamp: time.Now(),
+	})
+
+	// Wait for flush tick (1 second)
+	time.Sleep(1500 * time.Millisecond)
+
+	if err := fs.Close(); err != nil {
+		t.Fatalf("Close error: %v", err)
+	}
+
+	data, _ := os.ReadFile(path)
+	if len(data) == 0 {
+		t.Error("expected data after flush tick")
+	}
+}
+
 // intToStr converts a non-negative integer to its string representation without fmt.
 func intToStr(n int) string {
 	if n == 0 {

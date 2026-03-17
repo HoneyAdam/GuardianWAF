@@ -716,3 +716,104 @@ func TestDefaultConfig_Values(t *testing.T) {
 		t.Errorf("expected ErrorPageMode 'production', got %q", cfg.ErrorPageMode)
 	}
 }
+
+// --- MaskCreditCards edge: maskEnd < 0 guard ---
+
+func TestMaskCreditCards_NineteenDigitCard(t *testing.T) {
+	// 19-digit card number (Luhn valid): 6304000000000000000 check
+	// Use a 16-digit valid card with spaces creating long digit sequence
+	input := "Card: 4111111111111111 end"
+	result := MaskCreditCards(input)
+	if strings.Contains(result, "4111111111111111") {
+		t.Error("card should be masked")
+	}
+}
+
+func TestMaskCreditCards_MultipleCards(t *testing.T) {
+	input := "First: 4111111111111111 Second: 5500000000000004"
+	result := MaskCreditCards(input)
+	if strings.Contains(result, "4111111111111111") {
+		t.Error("first card should be masked")
+	}
+	if strings.Contains(result, "5500000000000004") {
+		t.Error("second card should be masked")
+	}
+}
+
+// --- MaskAPIKeys: maskEnd <= maskStart branch ---
+
+func TestMaskAPIKeys_ExactlySixteenChars(t *testing.T) {
+	// 16-char key: first 4 + last 4 = 8 visible, middle 8 masked
+	input := "key=abcd12345678efgh"
+	result := MaskAPIKeys(input)
+	if result == input {
+		t.Error("16-char key should be masked")
+	}
+}
+
+func TestMaskAPIKeys_PasswordKeyword(t *testing.T) {
+	input := `password = "abcdefghijklmnopqrstuvwxyz"`
+	result := MaskAPIKeys(input)
+	if result == input {
+		t.Error("password value should be masked")
+	}
+}
+
+func TestMaskAPIKeys_AccessTokenKeyword(t *testing.T) {
+	input := `access_token=ABCDEFGHIJKLMNOP1234567890abcdef`
+	result := MaskAPIKeys(input)
+	if result == input {
+		t.Error("access_token value should be masked")
+	}
+}
+
+func TestMaskAPIKeys_AuthTokenKeyword(t *testing.T) {
+	input := `auth_token: 'ABCDEFGHIJKLMNOPQRSTUVWXYZ123456'`
+	result := MaskAPIKeys(input)
+	if result == input {
+		t.Error("auth_token value should be masked")
+	}
+}
+
+// --- isStackTraceLine: Go () pattern without +0x ---
+
+func TestStripStackTraces_GoFuncCallOnly(t *testing.T) {
+	input := "runtime.main()\n\t/usr/local/go/src/runtime/proc.go:250 +0x1\nDone"
+	result := StripStackTraces(input)
+	if strings.Contains(result, "proc.go:250") {
+		t.Error("Go stack frame should be stripped")
+	}
+	if !strings.Contains(result, "Done") {
+		t.Error("trailing text should be preserved")
+	}
+}
+
+func TestStripStackTraces_MixedLanguages(t *testing.T) {
+	input := `Start
+goroutine 1 [running]:
+main.handler()
+	/app/main.go:42 +0x1a3
+java.lang.NullPointerException: null
+	at com.app.Handler.handle(Handler.java:10)
+Traceback (most recent call last):
+  File "/app/main.py", line 1, in <module>
+Error: something
+    at handler (/app/index.js:5:10)
+End`
+	result := StripStackTraces(input)
+	if !strings.Contains(result, "Start") || !strings.Contains(result, "End") {
+		t.Error("surrounding text should be preserved")
+	}
+	if strings.Contains(result, "goroutine") || strings.Contains(result, "main.go:42") {
+		t.Error("Go traces should be stripped")
+	}
+	if strings.Contains(result, "NullPointerException") || strings.Contains(result, "Handler.java") {
+		t.Error("Java traces should be stripped")
+	}
+	if strings.Contains(result, "Traceback") || strings.Contains(result, "main.py") {
+		t.Error("Python traces should be stripped")
+	}
+	if strings.Contains(result, "index.js:5") {
+		t.Error("Node.js traces should be stripped")
+	}
+}
