@@ -479,7 +479,7 @@ func TestStartDashboard(t *testing.T) {
 	}
 	defer eng.Close()
 
-	srv := startDashboard(cfg, eng)
+	srv, _ := startDashboard(cfg, eng)
 	if srv == nil {
 		t.Fatal("expected non-nil server")
 	}
@@ -760,7 +760,7 @@ mcp:
 	}
 
 	// Send a request
-	resp, err := http.Get(fmt.Sprintf("http://%s/healthz", addr))
+	resp, err := http.Get(fmt.Sprintf("http://%s/api/v1/health", addr))
 	if err == nil {
 		resp.Body.Close()
 	}
@@ -815,7 +815,7 @@ func TestCLI_Sidecar_Startup(t *testing.T) {
 	}
 
 	// Hit the healthz endpoint
-	resp, err := http.Get(fmt.Sprintf("http://%s/healthz", addr))
+	resp, err := http.Get(fmt.Sprintf("http://%s/api/v1/health", addr))
 	if err != nil {
 		cmd.Process.Kill()
 		cmd.Wait()
@@ -862,7 +862,7 @@ func TestStartDashboard_Endpoints(t *testing.T) {
 	ln.Close()
 
 	cfg.Dashboard.Listen = addr
-	srv := startDashboard(cfg, eng)
+	srv, _ := startDashboard(cfg, eng)
 	if srv == nil {
 		t.Fatal("expected non-nil server")
 	}
@@ -872,7 +872,7 @@ func TestStartDashboard_Endpoints(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Test /healthz
-	resp, err := http.Get(fmt.Sprintf("http://%s/healthz", addr))
+	resp, err := http.Get(fmt.Sprintf("http://%s/api/v1/health", addr))
 	if err != nil {
 		t.Fatalf("healthz request failed: %v", err)
 	}
@@ -882,7 +882,7 @@ func TestStartDashboard_Endpoints(t *testing.T) {
 	}
 
 	// Test /api/stats
-	resp2, err := http.Get(fmt.Sprintf("http://%s/api/stats", addr))
+	resp2, err := http.Get(fmt.Sprintf("http://%s/api/v1/stats", addr))
 	if err != nil {
 		t.Fatalf("stats request failed: %v", err)
 	}
@@ -913,12 +913,12 @@ func TestStartDashboard_WithAPIKey(t *testing.T) {
 	ln.Close()
 
 	cfg.Dashboard.Listen = addr
-	srv := startDashboard(cfg, eng)
+	srv, _ := startDashboard(cfg, eng)
 	defer srv.Close()
 	time.Sleep(100 * time.Millisecond)
 
 	// Without key — should get 401
-	resp, err := http.Get(fmt.Sprintf("http://%s/api/stats", addr))
+	resp, err := http.Get(fmt.Sprintf("http://%s/api/v1/stats", addr))
 	if err != nil {
 		t.Fatalf("stats request failed: %v", err)
 	}
@@ -928,7 +928,7 @@ func TestStartDashboard_WithAPIKey(t *testing.T) {
 	}
 
 	// With correct key
-	req, _ := http.NewRequest("GET", fmt.Sprintf("http://%s/api/stats", addr), nil)
+	req, _ := http.NewRequest("GET", fmt.Sprintf("http://%s/api/v1/stats", addr), nil)
 	req.Header.Set("X-API-Key", "secret-key")
 	resp2, err := http.DefaultClient.Do(req)
 	if err != nil {

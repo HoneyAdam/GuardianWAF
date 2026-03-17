@@ -235,6 +235,26 @@ func marshalEventJSON(ev engine.Event) string {
 	writeJSONInt(&b, ev.StatusCode)
 	b.WriteString(`,"user_agent":`)
 	writeJSONString(&b, ev.UserAgent)
+	b.WriteString(`,"browser":`)
+	writeJSONString(&b, ev.Browser)
+	b.WriteString(`,"browser_version":`)
+	writeJSONString(&b, ev.BrVersion)
+	b.WriteString(`,"os":`)
+	writeJSONString(&b, ev.OS)
+	b.WriteString(`,"device_type":`)
+	writeJSONString(&b, ev.DeviceType)
+	b.WriteString(`,"is_bot":`)
+	if ev.IsBot {
+		b.WriteString("true")
+	} else {
+		b.WriteString("false")
+	}
+	b.WriteString(`,"content_type":`)
+	writeJSONString(&b, ev.ContentType)
+	b.WriteString(`,"referer":`)
+	writeJSONString(&b, ev.Referer)
+	b.WriteString(`,"host":`)
+	writeJSONString(&b, ev.Host)
 	b.WriteByte('}')
 
 	return b.String()

@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/guardianwaf/guardianwaf/internal/config"
+	"github.com/guardianwaf/guardianwaf/internal/dashboard"
 	"github.com/guardianwaf/guardianwaf/internal/engine"
 	"github.com/guardianwaf/guardianwaf/internal/events"
 	"github.com/guardianwaf/guardianwaf/internal/layers/botdetect"
@@ -35,6 +36,14 @@ var (
 	commit  = "none"
 	date    = "unknown"
 )
+
+func init() {
+	// Register UA parser so Event structs get browser/OS/device info
+	engine.SetUAParser(func(ua string) (browser, brVersion, os, deviceType string, isBot bool) {
+		p := botdetect.ParseUserAgent(ua)
+		return p.Browser, p.BrVersion, p.OS, p.DeviceType, p.IsBot
+	})
+}
 
 func main() {
 	if len(os.Args) < 2 {
@@ -167,8 +176,20 @@ func cmdServe(args []string) {
 
 	// 10. Start dashboard if enabled
 	var dashSrv *http.Server
+	var sseBroadcaster *dashboard.SSEBroadcaster
 	if cfg.Dashboard.Enabled && cfg.Dashboard.Listen != "" {
-		dashSrv = startDashboard(cfg, eng)
+		dashSrv, sseBroadcaster = startDashboard(cfg, eng)
+	}
+
+	// 10b. Wire SSE broadcaster to event bus for real-time dashboard updates
+	if sseBroadcaster != nil {
+		eventCh := make(chan engine.Event, 256)
+		eventBus.Subscribe(eventCh)
+		go func() {
+			for event := range eventCh {
+				sseBroadcaster.BroadcastEvent(event)
+			}
+		}()
 	}
 
 	// 11. Graceful shutdown handling
@@ -680,31 +701,25 @@ func buildReverseProxy(cfg *config.Config) http.Handler {
 	return mux
 }
 
-// startDashboard starts the dashboard HTTP server in the background.
-func startDashboard(cfg *config.Config, eng *engine.Engine) *http.Server {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/api/stats", func(w http.ResponseWriter, r *http.Request) {
-		if cfg.Dashboard.APIKey != "" {
-			key := r.Header.Get("X-API-Key")
-			if key != cfg.Dashboard.APIKey {
-				http.Error(w, "Unauthorized", http.StatusUnauthorized)
-				return
-			}
-		}
-		stats := eng.Stats()
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(stats)
-	})
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprintln(w, "ok")
-	})
+// startDashboard starts the full dashboard HTTP server in the background.
+// It provides a real-time web UI with SSE event streaming, REST API,
+// and security analytics. Returns the server and the SSE broadcaster
+// so the engine can publish events to connected dashboard clients.
+func startDashboard(cfg *config.Config, eng *engine.Engine) (*http.Server, *dashboard.SSEBroadcaster) {
+	eventStore, ok := eng.EventStore().(events.EventStore)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "Warning: event store does not support queries; dashboard events disabled\n")
+		eventStore = events.NewMemoryStore(1000)
+	}
+
+	dash := dashboard.New(eng, eventStore, cfg.Dashboard.APIKey)
 
 	srv := &http.Server{
 		Addr:         cfg.Dashboard.Listen,
-		Handler:      mux,
+		Handler:      dash.Handler(),
 		ReadTimeout:  10 * time.Second,
-		WriteTimeout: 10 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  120 * time.Second,
 	}
 
 	go func() {
@@ -714,7 +729,7 @@ func startDashboard(cfg *config.Config, eng *engine.Engine) *http.Server {
 		}
 	}()
 
-	return srv
+	return srv, dash.SSE()
 }
 
 // startMCPServer starts the MCP JSON-RPC server over stdio.

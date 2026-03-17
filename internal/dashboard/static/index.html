@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GuardianWAF Dashboard</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/style.css">
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡</text></svg>">
+</head>
+<body>
+    <!-- Header -->
+    <header class="header">
+        <div class="header-brand">
+            <svg class="header-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            </svg>
+            <h1 class="header-title">GuardianWAF</h1>
+            <span class="header-badge">Dashboard</span>
+        </div>
+        <div class="header-status">
+            <span class="status-dot" id="sse-status" title="SSE disconnected"></span>
+            <span class="status-label" id="sse-status-label">Connecting...</span>
+        </div>
+    </header>
+
+    <main class="main">
+        <!-- Stats Cards -->
+        <section class="stats-grid" id="stats-grid">
+            <div class="stat-card stat-card--total">
+                <div class="stat-label">Total Requests</div>
+                <div class="stat-value" id="stat-total">0</div>
+                <div class="stat-trend" id="stat-total-rate">0 req/s</div>
+            </div>
+            <div class="stat-card stat-card--blocked">
+                <div class="stat-label">Blocked</div>
+                <div class="stat-value" id="stat-blocked">0</div>
+                <div class="stat-trend" id="stat-blocked-pct">0%</div>
+            </div>
+            <div class="stat-card stat-card--logged">
+                <div class="stat-label">Logged</div>
+                <div class="stat-value" id="stat-logged">0</div>
+                <div class="stat-trend" id="stat-logged-pct">0%</div>
+            </div>
+            <div class="stat-card stat-card--passed">
+                <div class="stat-label">Passed</div>
+                <div class="stat-value" id="stat-passed">0</div>
+                <div class="stat-trend" id="stat-passed-pct">0%</div>
+            </div>
+            <div class="stat-card stat-card--latency">
+                <div class="stat-label">Avg Latency</div>
+                <div class="stat-value" id="stat-latency">0ms</div>
+                <div class="stat-trend" id="stat-latency-p99">P99: 0ms</div>
+            </div>
+        </section>
+
+        <!-- Charts Section -->
+        <section class="charts-grid">
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">Attack Types</h2>
+                </div>
+                <div class="card-body" id="chart-attack-types">
+                    <div class="chart-empty">No data yet</div>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-header">
+                    <h2 class="card-title">Top Source IPs</h2>
+                </div>
+                <div class="card-body" id="chart-top-ips">
+                    <div class="chart-empty">No data yet</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Event Feed -->
+        <section class="card events-section">
+            <div class="card-header events-header">
+                <h2 class="card-title">Live Event Feed</h2>
+                <div class="events-controls">
+                    <div class="filter-group">
+                        <button class="filter-btn active" data-filter="all">All</button>
+                        <button class="filter-btn filter-btn--blocked" data-filter="blocked">Blocked</button>
+                        <button class="filter-btn filter-btn--logged" data-filter="logged">Logged</button>
+                        <button class="filter-btn filter-btn--passed" data-filter="passed">Passed</button>
+                    </div>
+                    <div class="search-box">
+                        <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="11" cy="11" r="8"/>
+                            <path d="m21 21-4.35-4.35"/>
+                        </svg>
+                        <input type="text" id="search-input" class="search-input" placeholder="Search events...">
+                    </div>
+                </div>
+            </div>
+            <div class="events-feed" id="events-feed">
+                <table class="events-table">
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>IP Address</th>
+                            <th>Method</th>
+                            <th>Path</th>
+                            <th>Action</th>
+                            <th>Score</th>
+                            <th>Browser</th>
+                            <th>OS</th>
+                            <th>Device</th>
+                        </tr>
+                    </thead>
+                    <tbody id="events-tbody">
+                        <tr class="events-empty-row">
+                            <td colspan="9" class="events-empty">Waiting for events...</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+            <div class="events-footer">
+                <span id="events-count">0 events</span>
+                <span id="events-filtered" class="events-filtered-label"></span>
+            </div>
+        </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="footer-content">
+            <span class="footer-brand">
+                <svg class="footer-logo" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                </svg>
+                Protected by <strong>GuardianWAF</strong>
+            </span>
+            <span class="footer-version" id="footer-version"></span>
+        </div>
+    </footer>
+
+    <script src="/app.js"></script>
+</body>
+</html>
