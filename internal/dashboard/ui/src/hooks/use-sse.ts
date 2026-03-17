@@ -24,8 +24,11 @@ export function useSSE(onEvent: (event: WafEvent) => void) {
 
       es.onmessage = (msg) => {
         try {
-          const event = JSON.parse(msg.data) as WafEvent
-          onEventRef.current(event)
+          const data = JSON.parse(msg.data)
+          // Only forward actual WAF events (not control messages like {"type":"connected"})
+          if (data.action && data.client_ip) {
+            onEventRef.current(data as WafEvent)
+          }
         } catch {
           // ignore malformed messages
         }

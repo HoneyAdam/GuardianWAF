@@ -23,10 +23,10 @@ export function useEvents() {
       const q = search.toLowerCase()
       result = result.filter(
         (e) =>
-          e.client_ip.toLowerCase().includes(q) ||
-          e.path.toLowerCase().includes(q) ||
-          e.method.toLowerCase().includes(q) ||
-          (e.browser && e.browser.toLowerCase().includes(q)),
+          (e.client_ip || '').toLowerCase().includes(q) ||
+          (e.path || '').toLowerCase().includes(q) ||
+          (e.method || '').toLowerCase().includes(q) ||
+          (e.browser || '').toLowerCase().includes(q),
       )
     }
 
