@@ -914,8 +914,8 @@ func TestE2E_Response_BlockedBody(t *testing.T) {
 	if resp.StatusCode != http.StatusForbidden {
 		t.Fatalf("expected 403, got %d", resp.StatusCode)
 	}
-	if !strings.Contains(body, "403 Forbidden") {
-		t.Errorf("blocked response body should contain '403 Forbidden', got: %s", body)
+	if !strings.Contains(body, "Request Blocked") {
+		t.Errorf("blocked response body should contain 'Request Blocked', got: %.100s", body)
 	}
 	if !strings.Contains(body, "GuardianWAF") {
 		t.Errorf("blocked response body should mention GuardianWAF, got: %s", body)
@@ -960,8 +960,8 @@ func TestE2E_Response_ContentType(t *testing.T) {
 	readBody(t, resp)
 
 	ct := resp.Header.Get("Content-Type")
-	if !strings.Contains(ct, "text/plain") {
-		t.Errorf("blocked response Content-Type should be text/plain, got: %s", ct)
+	if !strings.Contains(ct, "text/html") {
+		t.Errorf("blocked response Content-Type should be text/html, got: %s", ct)
 	}
 }
 

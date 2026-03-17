@@ -178,7 +178,7 @@ func TestBuildReverseProxy(t *testing.T) {
 		{Path: "/api", Upstream: "backend", StripPrefix: true},
 	}
 
-	handler := buildReverseProxy(cfg)
+	handler, _ := buildReverseProxy(cfg)
 	if handler == nil {
 		t.Fatal("expected non-nil handler")
 	}
@@ -195,7 +195,7 @@ func TestBuildReverseProxy_InvalidUpstream(t *testing.T) {
 	cfg.Routes = []config.RouteConfig{
 		{Path: "/", Upstream: "bad"},
 	}
-	handler := buildReverseProxy(cfg)
+	handler, _ := buildReverseProxy(cfg)
 	if handler == nil {
 		t.Fatal("expected non-nil handler even with invalid upstream")
 	}
@@ -212,7 +212,7 @@ func TestBuildReverseProxy_MissingUpstream(t *testing.T) {
 	cfg.Routes = []config.RouteConfig{
 		{Path: "/", Upstream: "nonexistent"},
 	}
-	handler := buildReverseProxy(cfg)
+	handler, _ := buildReverseProxy(cfg)
 	if handler == nil {
 		t.Fatal("expected non-nil handler")
 	}
@@ -479,7 +479,7 @@ func TestStartDashboard(t *testing.T) {
 	}
 	defer eng.Close()
 
-	srv, _ := startDashboard(cfg, eng)
+	srv, _, _ := startDashboard(cfg, eng)
 	if srv == nil {
 		t.Fatal("expected non-nil server")
 	}
@@ -531,7 +531,7 @@ func TestBuildReverseProxy_StripPrefix(t *testing.T) {
 		{Path: "/api", Upstream: "backend", StripPrefix: true},
 	}
 
-	handler := buildReverseProxy(cfg)
+	handler, _ := buildReverseProxy(cfg)
 	rr := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/api/users", nil)
 	handler.ServeHTTP(rr, req)
@@ -862,7 +862,7 @@ func TestStartDashboard_Endpoints(t *testing.T) {
 	ln.Close()
 
 	cfg.Dashboard.Listen = addr
-	srv, _ := startDashboard(cfg, eng)
+	srv, _, _ := startDashboard(cfg, eng)
 	if srv == nil {
 		t.Fatal("expected non-nil server")
 	}
@@ -913,7 +913,7 @@ func TestStartDashboard_WithAPIKey(t *testing.T) {
 	ln.Close()
 
 	cfg.Dashboard.Listen = addr
-	srv, _ := startDashboard(cfg, eng)
+	srv, _, _ := startDashboard(cfg, eng)
 	defer srv.Close()
 	time.Sleep(100 * time.Millisecond)
 

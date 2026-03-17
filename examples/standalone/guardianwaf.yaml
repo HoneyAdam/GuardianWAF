@@ -7,23 +7,58 @@ listen: ":8080"
 tls:
   enabled: false
   listen: ":8443"
+  # cert_file: "/etc/guardianwaf/cert.pem"
+  # key_file: "/etc/guardianwaf/key.pem"
 
+# --- Upstreams: Backend server groups with load balancing ---
 upstreams:
   - name: backend
+    load_balancer: weighted     # round_robin | weighted | least_conn | ip_hash
     targets:
       - url: "http://backend:3000"
+        weight: 3
+      - url: "http://backend2:3000"
         weight: 1
     health_check:
       enabled: true
       interval: 10s
       timeout: 2s
       path: /healthz
-    load_balancer: round_robin
 
+# --- Routes: Path-based routing (fallback for unmatched virtual hosts) ---
 routes:
   - path: /
     upstream: backend
     strip_prefix: false
+
+# --- Virtual Hosts: Domain-based routing (optional) ---
+# Uncomment to enable multi-domain routing:
+#
+# virtual_hosts:
+#   - domains:
+#       - "api.example.com"
+#     tls:
+#       cert_file: "/etc/certs/api.pem"
+#       key_file: "/etc/certs/api-key.pem"
+#     routes:
+#       - path: /
+#         upstream: api-backend
+#
+#   - domains:
+#       - "www.example.com"
+#       - "example.com"
+#     tls:
+#       cert_file: "/etc/certs/www.pem"
+#       key_file: "/etc/certs/www-key.pem"
+#     routes:
+#       - path: /
+#         upstream: web-backend
+#
+#   - domains:
+#       - "*.staging.example.com"   # wildcard domain support
+#     routes:
+#       - path: /
+#         upstream: staging-backend
 
 waf:
   ip_acl:
@@ -107,13 +142,13 @@ waf:
 
   challenge:
     enabled: true
-    difficulty: 18
+    difficulty: 18       # leading zero bits (16=easy, 20=normal, 24=hard)
     cookie_ttl: 1h
     cookie_name: __gwaf_challenge
 
   bot_detection:
     enabled: true
-    mode: enforce
+    mode: enforce        # enforce = block/challenge, monitor = log only
     tls_fingerprint:
       enabled: true
       known_bots_action: block
@@ -153,7 +188,7 @@ waf:
 dashboard:
   enabled: true
   listen: ":9443"
-  api_key: "guardianwaf-demo-2024"  # Change this! Set a strong key to protect dashboard
+  api_key: "guardianwaf-demo-2024"  # Change this! Set a strong key
   tls: false
 
 mcp:

@@ -1,8 +1,8 @@
 /* ========================================================================
-   GuardianWAF Dashboard — Dark Theme Stylesheet
+   GuardianWAF Dashboard — Theme Stylesheet (Dark + Light)
    ======================================================================== */
 
-/* --- CSS Variables --- */
+/* --- CSS Variables (Dark theme - default) --- */
 :root {
     /* Base colors */
     --bg-primary: #0f172a;
@@ -46,6 +46,27 @@
     /* Font */
     --font: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
     --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace;
+}
+
+/* --- Light Theme --- */
+[data-theme="light"] {
+    --bg-primary: #f8fafc;
+    --bg-secondary: #ffffff;
+    --bg-tertiary: #f1f5f9;
+    --bg-hover: #e2e8f0;
+    --text-primary: #0f172a;
+    --text-secondary: #475569;
+    --text-muted: #94a3b8;
+    --border: #e2e8f0;
+    --border-subtle: rgba(15, 23, 42, 0.08);
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.07), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
+    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -4px rgba(0, 0, 0, 0.05);
+    --blue-dim: rgba(59, 130, 246, 0.1);
+    --red-dim: rgba(239, 68, 68, 0.1);
+    --amber-dim: rgba(245, 158, 11, 0.1);
+    --green-dim: rgba(34, 197, 94, 0.1);
+    --purple-dim: rgba(168, 85, 247, 0.1);
 }
 
 /* --- Reset & Base --- */
@@ -607,6 +628,11 @@ body {
     background: var(--red-dim);
 }
 
+.badge--challenged {
+    color: var(--orange);
+    background: rgba(249, 115, 22, 0.15);
+}
+
 .badge--logged {
     color: var(--amber);
     background: var(--amber-dim);
@@ -651,6 +677,188 @@ body {
 
 .event-new {
     animation: event-flash 1.2s ease-out;
+}
+
+/* --- Upstream Health --- */
+.upstream-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 1rem;
+    padding: 0.5rem 0;
+}
+.upstream-card {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius);
+    padding: 1rem;
+}
+.upstream-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 0.75rem;
+}
+.upstream-name {
+    font-weight: 600;
+    font-size: 0.9rem;
+}
+.upstream-strategy {
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+.upstream-health {
+    font-size: 0.75rem;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-weight: 500;
+}
+.upstream-health--ok {
+    background: rgba(34, 197, 94, 0.15);
+    color: var(--green);
+}
+.upstream-health--warn {
+    background: rgba(245, 158, 11, 0.15);
+    color: var(--amber);
+}
+.upstream-health--down {
+    background: rgba(239, 68, 68, 0.15);
+    color: var(--red);
+}
+.target-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+}
+.target-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.4rem 0.6rem;
+    background: var(--bg-secondary);
+    border-radius: var(--radius);
+    font-size: 0.8rem;
+    font-family: 'SF Mono', Consolas, monospace;
+}
+.target-url {
+    color: var(--text-primary);
+}
+.target-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+.target-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+.target-dot--healthy { background: var(--green); }
+.target-dot--unhealthy { background: var(--red); }
+.target-dot--half-open { background: var(--amber); }
+.target-conns {
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+}
+
+/* --- Event Detail Row --- */
+.event-detail-row {
+    background: var(--bg-tertiary) !important;
+}
+.event-detail-row:hover {
+    background: var(--bg-tertiary) !important;
+}
+.event-detail {
+    padding: 1rem 1.25rem;
+    animation: detailSlide 0.2s ease;
+}
+@keyframes detailSlide {
+    from { opacity: 0; max-height: 0; }
+    to { opacity: 1; max-height: 600px; }
+}
+.detail-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: .5rem .75rem;
+    margin-bottom: 1rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--border-subtle);
+}
+.detail-field {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+.detail-label {
+    font-size: .7rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    color: var(--text-secondary);
+}
+.detail-value {
+    font-size: .85rem;
+    color: var(--text-primary);
+    font-family: 'SF Mono', SFMono-Regular, Consolas, 'Liberation Mono', Menlo, monospace;
+    word-break: break-word;
+}
+.detail-section-title {
+    font-size: .85rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: .5rem;
+}
+.detail-empty {
+    font-size: .8rem;
+    color: var(--text-secondary);
+    padding: .5rem 0;
+}
+
+/* Findings table inside detail row */
+.findings-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: .8rem;
+}
+.findings-table th {
+    text-align: left;
+    font-size: .7rem;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    color: var(--text-secondary);
+    padding: .4rem .5rem;
+    border-bottom: 1px solid var(--border-subtle);
+    white-space: nowrap;
+}
+.findings-table td {
+    padding: .5rem .5rem;
+    border-bottom: 1px solid var(--border-subtle);
+    color: var(--text-primary);
+    vertical-align: top;
+}
+.findings-table tbody tr:last-child td {
+    border-bottom: none;
+}
+.findings-table tbody tr:hover {
+    background: rgba(255,255,255,.03);
+}
+
+/* Severity badges in findings */
+.badge--sev-critical { background: rgba(239,68,68,.2); color: #f87171; }
+.badge--sev-high { background: rgba(249,115,22,.2); color: #fb923c; }
+.badge--sev-medium { background: rgba(245,158,11,.2); color: #fbbf24; }
+.badge--sev-low { background: rgba(59,130,246,.15); color: #60a5fa; }
+.badge--sev-info { background: rgba(148,163,184,.15); color: #94a3b8; }
+
+/* Clickable rows */
+.events-table tbody tr {
+    cursor: pointer;
+}
+.events-table tbody tr:not(.event-detail-row):hover {
+    background: var(--bg-tertiary);
 }
 
 /* --- Footer --- */

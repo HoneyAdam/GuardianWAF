@@ -516,7 +516,7 @@ func TestIntegration_MiddlewareAttackBlocked(t *testing.T) {
 	if rec.Code != http.StatusForbidden {
 		t.Errorf("expected 403, got %d", rec.Code)
 	}
-	if !strings.Contains(rec.Body.String(), "403 Forbidden") {
+	if !strings.Contains(rec.Body.String(), "Request Blocked") {
 		t.Error("expected block response body")
 	}
 }

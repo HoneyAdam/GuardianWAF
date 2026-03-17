@@ -14,9 +14,21 @@ services:
       - GWAF_LOGGING_LEVEL=info
     depends_on:
       - backend
+      - backend2
     restart: unless-stopped
 
+  # Primary backend (weight: 3)
   backend:
+    image: golang:1.23-alpine
+    working_dir: /app
+    volumes:
+      - ./examples/backend:/app
+    command: ["go", "run", "main.go"]
+    expose:
+      - "3000"
+
+  # Secondary backend for load balancing demo (weight: 1)
+  backend2:
     image: golang:1.23-alpine
     working_dir: /app
     volumes:

@@ -336,7 +336,7 @@
                 event.action || '',
                 event.browser || '',
                 event.os || '',
-                event.device || ''
+                event.device_type || event.device || ''
             ].join(' ').toLowerCase();
             if (haystack.indexOf(q) === -1) return false;
         }
@@ -345,7 +345,19 @@
 
     function createEventRow(event, isNew) {
         var tr = document.createElement('tr');
+        tr.style.cursor = 'pointer';
         if (isNew) tr.className = 'event-new';
+
+        // Click to toggle detail row
+        tr.addEventListener('click', function () {
+            var next = tr.nextElementSibling;
+            if (next && next.classList.contains('event-detail-row')) {
+                next.remove();
+            } else {
+                var detailRow = createDetailRow(event);
+                tr.parentNode.insertBefore(detailRow, tr.nextSibling);
+            }
+        });
 
         // Timestamp
         var tdTime = document.createElement('td');
@@ -378,6 +390,7 @@
         var actionVal = event.action || 'pass';
         actionSpan.className = 'badge badge--passed';
         if (actionVal === 'block') { actionSpan.className = 'badge badge--blocked'; actionSpan.textContent = 'BLOCKED'; }
+        else if (actionVal === 'challenge') { actionSpan.className = 'badge badge--challenged'; actionSpan.textContent = 'CHALLENGED'; }
         else if (actionVal === 'log') { actionSpan.className = 'badge badge--logged'; actionSpan.textContent = 'LOGGED'; }
         else { actionSpan.textContent = 'PASSED'; }
         tdAction.appendChild(actionSpan);
@@ -391,7 +404,9 @@
 
         // Browser
         var tdBrowser = document.createElement('td');
-        tdBrowser.textContent = truncate(event.browser || '-', 15);
+        var brName = event.browser || '-';
+        var brVer = event.browser_version || '';
+        tdBrowser.textContent = truncate(brVer ? brName + ' ' + brVer : brName, 20);
         tr.appendChild(tdBrowser);
 
         // OS
@@ -403,10 +418,117 @@
         var tdDevice = document.createElement('td');
         var deviceSpan = document.createElement('span');
         deviceSpan.className = 'badge badge--device';
-        deviceSpan.textContent = event.device || 'unknown';
+        deviceSpan.textContent = event.device_type || event.device || 'unknown';
         tdDevice.appendChild(deviceSpan);
         tr.appendChild(tdDevice);
 
+        return tr;
+    }
+
+    function createDetailRow(event) {
+        var tr = document.createElement('tr');
+        tr.className = 'event-detail-row';
+        var td = document.createElement('td');
+        td.colSpan = 9;
+
+        var wrap = document.createElement('div');
+        wrap.className = 'event-detail';
+
+        // --- Top info grid ---
+        var grid = document.createElement('div');
+        grid.className = 'detail-grid';
+
+        var fields = [
+            ['Request ID', event.request_id || event.id || '-'],
+            ['Status Code', event.status_code || '-'],
+            ['Score', event.score != null ? event.score : '-'],
+            ['Duration', event.duration_ns ? (event.duration_ns / 1000000).toFixed(2) + ' ms' : '-'],
+            ['Client IP', event.client_ip || '-'],
+            ['Host', event.host || '-'],
+            ['User Agent', event.user_agent || '-'],
+            ['Content Type', event.content_type || '-'],
+            ['Referer', event.referer || '-'],
+            ['Query', event.query || '-']
+        ];
+        for (var i = 0; i < fields.length; i++) {
+            var item = document.createElement('div');
+            item.className = 'detail-field';
+            var label = document.createElement('span');
+            label.className = 'detail-label';
+            label.textContent = fields[i][0];
+            var value = document.createElement('span');
+            value.className = 'detail-value';
+            value.textContent = fields[i][1];
+            if (fields[i][0] === 'User Agent') value.style.wordBreak = 'break-all';
+            item.appendChild(label);
+            item.appendChild(value);
+            grid.appendChild(item);
+        }
+        wrap.appendChild(grid);
+
+        // --- Findings table ---
+        var findings = event.findings || [];
+        if (findings.length > 0) {
+            var title = document.createElement('div');
+            title.className = 'detail-section-title';
+            title.textContent = 'Findings (' + findings.length + ')';
+            wrap.appendChild(title);
+
+            var table = document.createElement('table');
+            table.className = 'findings-table';
+
+            var thead = document.createElement('thead');
+            var headRow = document.createElement('tr');
+            var cols = ['Detector', 'Category', 'Severity', 'Score', 'Description', 'Matched Value', 'Location', 'Confidence'];
+            for (var c = 0; c < cols.length; c++) {
+                var th = document.createElement('th');
+                th.textContent = cols[c];
+                headRow.appendChild(th);
+            }
+            thead.appendChild(headRow);
+            table.appendChild(thead);
+
+            var tbody = document.createElement('tbody');
+            for (var f = 0; f < findings.length; f++) {
+                var finding = findings[f];
+                var row = document.createElement('tr');
+
+                var cells = [
+                    finding.detector || finding.detector_name || '-',
+                    finding.category || '-',
+                    finding.severity || '-',
+                    finding.score != null ? finding.score : '-',
+                    finding.description || '-',
+                    finding.matched_value || '-',
+                    finding.location || '-',
+                    finding.confidence != null ? (finding.confidence * 100).toFixed(0) + '%' : '-'
+                ];
+                for (var x = 0; x < cells.length; x++) {
+                    var cell = document.createElement('td');
+                    cell.textContent = cells[x];
+                    if (x === 2) { // severity badge
+                        cell.textContent = '';
+                        var sevBadge = document.createElement('span');
+                        sevBadge.className = 'badge badge--sev-' + (finding.severity || 'info');
+                        sevBadge.textContent = (finding.severity || 'info').toUpperCase();
+                        cell.appendChild(sevBadge);
+                    }
+                    if (x === 4) cell.style.maxWidth = '300px'; // description
+                    row.appendChild(cell);
+                }
+                tbody.appendChild(row);
+            }
+            table.appendChild(tbody);
+            wrap.appendChild(table);
+        } else {
+            var noFindings = document.createElement('div');
+            noFindings.className = 'detail-empty';
+            noFindings.textContent = 'No findings for this request';
+            wrap.appendChild(noFindings);
+        }
+
+        td.appendChild(wrap);
+        tr.appendChild(td);
         return tr;
     }
 
@@ -699,6 +821,112 @@
     }
 
     // =========================================================================
+    // Upstream Health
+    // =========================================================================
+
+    function fetchUpstreams() {
+        fetch('/api/v1/upstreams')
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                if (Array.isArray(data) && data.length > 0) {
+                    renderUpstreams(data);
+                }
+            })
+            .catch(function () {});
+    }
+
+    function renderUpstreams(upstreams) {
+        var section = document.getElementById('upstream-section');
+        var grid = document.getElementById('upstream-grid');
+        if (!section || !grid) return;
+
+        section.style.display = '';
+        while (grid.firstChild) grid.removeChild(grid.firstChild);
+        grid.className = 'upstream-grid';
+
+        for (var i = 0; i < upstreams.length; i++) {
+            var us = upstreams[i];
+            var card = document.createElement('div');
+            card.className = 'upstream-card';
+
+            // Header
+            var header = document.createElement('div');
+            header.className = 'upstream-header';
+
+            var left = document.createElement('div');
+            var nameSpan = document.createElement('div');
+            nameSpan.className = 'upstream-name';
+            nameSpan.textContent = us.name || 'upstream';
+            left.appendChild(nameSpan);
+            var stratSpan = document.createElement('div');
+            stratSpan.className = 'upstream-strategy';
+            stratSpan.textContent = us.strategy || 'round_robin';
+            left.appendChild(stratSpan);
+            header.appendChild(left);
+
+            var healthBadge = document.createElement('span');
+            var hClass = 'upstream-health ';
+            if (us.healthy_count === us.total_count) hClass += 'upstream-health--ok';
+            else if (us.healthy_count > 0) hClass += 'upstream-health--warn';
+            else hClass += 'upstream-health--down';
+            healthBadge.className = hClass;
+            healthBadge.textContent = us.healthy_count + '/' + us.total_count + ' healthy';
+            header.appendChild(healthBadge);
+
+            card.appendChild(header);
+
+            // Targets
+            var targetList = document.createElement('div');
+            targetList.className = 'target-list';
+
+            var targets = us.targets || [];
+            for (var j = 0; j < targets.length; j++) {
+                var tgt = targets[j];
+                var row = document.createElement('div');
+                row.className = 'target-row';
+
+                var urlSpan = document.createElement('span');
+                urlSpan.className = 'target-url';
+                urlSpan.textContent = tgt.url || '-';
+                row.appendChild(urlSpan);
+
+                var meta = document.createElement('span');
+                meta.className = 'target-meta';
+
+                var conns = document.createElement('span');
+                conns.className = 'target-conns';
+                conns.textContent = (tgt.active_conns || 0) + ' conn';
+                meta.appendChild(conns);
+
+                if (tgt.weight > 1) {
+                    var wSpan = document.createElement('span');
+                    wSpan.className = 'target-conns';
+                    wSpan.textContent = 'w:' + tgt.weight;
+                    meta.appendChild(wSpan);
+                }
+
+                var dot = document.createElement('span');
+                dot.className = 'target-dot ';
+                if (tgt.circuit_state === 'half-open') dot.className += 'target-dot--half-open';
+                else if (tgt.healthy) dot.className += 'target-dot--healthy';
+                else dot.className += 'target-dot--unhealthy';
+                dot.title = tgt.circuit_state || (tgt.healthy ? 'healthy' : 'unhealthy');
+                meta.appendChild(dot);
+
+                row.appendChild(meta);
+                targetList.appendChild(row);
+            }
+
+            card.appendChild(targetList);
+            grid.appendChild(card);
+        }
+    }
+
+    function startUpstreamPolling() {
+        setInterval(fetchUpstreams, STATS_POLL_INTERVAL);
+    }
+
+    // =========================================================================
     // Initialization
     // =========================================================================
 
@@ -709,6 +937,7 @@
         // Initial data load
         fetchStats();
         fetchEvents();
+        fetchUpstreams();
 
         // Connect SSE for real-time updates
         connectSSE();
@@ -716,12 +945,33 @@
         // Periodic refreshes
         startTimestampRefresh();
         startStatsPolling();
+        startUpstreamPolling();
+    }
+
+    // --- Theme toggle ---
+    window.toggleTheme = function () {
+        var current = document.documentElement.getAttribute('data-theme');
+        var next = current === 'light' ? 'dark' : 'light';
+        document.documentElement.setAttribute('data-theme', next);
+        localStorage.setItem('gwaf-theme', next);
+        var btn = document.getElementById('theme-btn');
+        if (btn) btn.textContent = next === 'light' ? '\u263E' : '\u2606';
+    };
+
+    function loadTheme() {
+        var saved = localStorage.getItem('gwaf-theme');
+        if (saved) {
+            document.documentElement.setAttribute('data-theme', saved);
+            var btn = document.getElementById('theme-btn');
+            if (btn) btn.textContent = saved === 'light' ? '\u263E' : '\u2606';
+        }
     }
 
     // Start when DOM is ready
     if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', init);
+        document.addEventListener('DOMContentLoaded', function () { loadTheme(); init(); });
     } else {
+        loadTheme();
         init();
     }
 

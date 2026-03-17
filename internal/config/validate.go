@@ -158,6 +158,9 @@ func Validate(cfg *Config) error {
 	// Events validation
 	validateEvents(&cfg.Events, ve)
 
+	// Virtual hosts validation
+	validateVirtualHosts(cfg.VirtualHosts, cfg.Upstreams, ve)
+
 	if ve.HasErrors() {
 		return ve
 	}
@@ -405,6 +408,74 @@ func validateEvents(ev *EventsConfig, ve *ValidationError) {
 	if ev.MaxEvents <= 0 {
 		ve.addError("events.max_events", fmt.Sprintf("must be > 0; got %d", ev.MaxEvents))
 	}
+}
+
+func validateVirtualHosts(vhosts []VirtualHostConfig, upstreams []UpstreamConfig, ve *ValidationError) {
+	if len(vhosts) == 0 {
+		return
+	}
+
+	upstreamNames := make(map[string]bool, len(upstreams))
+	for _, u := range upstreams {
+		upstreamNames[u.Name] = true
+	}
+
+	seenDomains := make(map[string]int) // domain -> vhost index
+
+	for i, vh := range vhosts {
+		prefix := fmt.Sprintf("virtual_hosts[%d]", i)
+
+		if len(vh.Domains) == 0 {
+			ve.addError(prefix+".domains", "must have at least one domain")
+		}
+
+		for _, domain := range vh.Domains {
+			if domain == "" {
+				ve.addError(prefix+".domains", "domain must not be empty")
+				continue
+			}
+			if prev, dup := seenDomains[domain]; dup {
+				ve.addError(prefix+".domains", fmt.Sprintf("domain %q is already defined in virtual_hosts[%d]", domain, prev))
+			}
+			seenDomains[domain] = i
+		}
+
+		if len(vh.Routes) == 0 {
+			ve.addError(prefix+".routes", "must have at least one route")
+		}
+
+		for j, route := range vh.Routes {
+			rPrefix := fmt.Sprintf("%s.routes[%d]", prefix, j)
+			if route.Path == "" {
+				ve.addError(rPrefix+".path", "must not be empty")
+			}
+			if route.Upstream == "" {
+				ve.addError(rPrefix+".upstream", "must not be empty")
+			} else if !upstreamNames[route.Upstream] {
+				ve.addError(rPrefix+".upstream", fmt.Sprintf("references unknown upstream %q", route.Upstream))
+			}
+		}
+
+		// TLS cert validation: if one is set, both must be set
+		if (vh.TLS.CertFile != "") != (vh.TLS.KeyFile != "") {
+			ve.addError(prefix+".tls", "both cert_file and key_file must be set together")
+		}
+	}
+}
+
+// ValidateUpstreamsExported validates upstream configs (exported for dashboard).
+func ValidateUpstreamsExported(upstreams []UpstreamConfig, ve *ValidationError) {
+	validateUpstreams(upstreams, ve)
+}
+
+// ValidateRoutesExported validates route configs (exported for dashboard).
+func ValidateRoutesExported(routes []RouteConfig, upstreams []UpstreamConfig, ve *ValidationError) {
+	validateRoutes(routes, upstreams, ve)
+}
+
+// ValidateVirtualHostsExported validates virtual host configs (exported for dashboard).
+func ValidateVirtualHostsExported(vhosts []VirtualHostConfig, upstreams []UpstreamConfig, ve *ValidationError) {
+	validateVirtualHosts(vhosts, upstreams, ve)
 }
 
 // isValidIPOrCIDR returns true if s is a valid IP address or CIDR notation.

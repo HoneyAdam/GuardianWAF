@@ -18,16 +18,18 @@ import (
 	"github.com/guardianwaf/guardianwaf/internal/events"
 )
 
-//go:embed static/index.html static/style.css static/app.js static/config.html static/config.js
+//go:embed static/index.html static/style.css static/app.js static/config.html static/config.js static/routing.html static/routing.js
 var staticFiles embed.FS
 
 // Dashboard is the web dashboard server.
 type Dashboard struct {
-	engine     *engine.Engine
-	eventStore events.EventStore
-	sse        *SSEBroadcaster
-	mux        *http.ServeMux
-	apiKey     string
+	engine        *engine.Engine
+	eventStore    events.EventStore
+	sse           *SSEBroadcaster
+	mux           *http.ServeMux
+	apiKey        string
+	upstreamsFn   func() any // returns upstream status (injected to avoid circular imports)
+	rebuildFn     func() error // rebuilds proxy after config change
 }
 
 // New creates a new Dashboard wired to the given engine and event store.
@@ -52,8 +54,11 @@ func New(eng *engine.Engine, store events.EventStore, apiKey string) *Dashboard 
 	d.mux.HandleFunc("GET /api/v1/stats", d.authWrap(d.handleGetStats))
 	d.mux.HandleFunc("GET /api/v1/events", d.authWrap(d.handleGetEvents))
 	d.mux.HandleFunc("GET /api/v1/events/{id}", d.authWrap(d.handleGetEvent))
+	d.mux.HandleFunc("GET /api/v1/upstreams", d.authWrap(d.handleGetUpstreams))
 	d.mux.HandleFunc("GET /api/v1/config", d.authWrap(d.handleGetConfig))
 	d.mux.HandleFunc("PUT /api/v1/config", d.authWrap(d.handleUpdateConfig))
+	d.mux.HandleFunc("GET /api/v1/routing", d.authWrap(d.handleGetRouting))
+	d.mux.HandleFunc("PUT /api/v1/routing", d.authWrap(d.handleUpdateRouting))
 	d.mux.HandleFunc("GET /api/v1/ipacl", d.authWrap(d.handleGetIPACL))
 	d.mux.HandleFunc("POST /api/v1/ipacl", d.authWrap(d.handleAddIPACL))
 	d.mux.HandleFunc("DELETE /api/v1/ipacl", d.authWrap(d.handleRemoveIPACL))
@@ -62,9 +67,11 @@ func New(eng *engine.Engine, store events.EventStore, apiKey string) *Dashboard 
 	// Protected static files
 	d.mux.HandleFunc("/", d.authWrap(d.handleIndex))
 	d.mux.HandleFunc("/config", d.authWrap(d.handleConfigPage))
+	d.mux.HandleFunc("/routing", d.authWrap(d.handleRoutingPage))
 	d.mux.HandleFunc("/style.css", d.authWrap(d.handleStatic("static/style.css", "text/css; charset=utf-8")))
 	d.mux.HandleFunc("/app.js", d.authWrap(d.handleStatic("static/app.js", "application/javascript; charset=utf-8")))
 	d.mux.HandleFunc("/config.js", d.authWrap(d.handleStatic("static/config.js", "application/javascript; charset=utf-8")))
+	d.mux.HandleFunc("/routing.js", d.authWrap(d.handleStatic("static/routing.js", "application/javascript; charset=utf-8")))
 
 	return d
 }
@@ -226,6 +233,140 @@ func (d *Dashboard) handleGetEvent(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, evt)
 }
 
+// --- Upstreams ---
+
+// SetRebuildFn sets the function called after routing config changes to rebuild the proxy.
+func (d *Dashboard) SetRebuildFn(fn func() error) {
+	d.rebuildFn = fn
+}
+
+// --- Routing (Upstreams + Virtual Hosts + Routes) ---
+
+func (d *Dashboard) handleGetRouting(w http.ResponseWriter, r *http.Request) {
+	cfg := d.engine.Config()
+
+	// Serialize upstreams
+	upstreams := make([]map[string]any, len(cfg.Upstreams))
+	for i, u := range cfg.Upstreams {
+		targets := make([]map[string]any, len(u.Targets))
+		for j, t := range u.Targets {
+			targets[j] = map[string]any{"url": t.URL, "weight": t.Weight}
+		}
+		upstreams[i] = map[string]any{
+			"name":          u.Name,
+			"load_balancer": u.LoadBalancer,
+			"targets":       targets,
+			"health_check": map[string]any{
+				"enabled":  u.HealthCheck.Enabled,
+				"interval": u.HealthCheck.Interval.String(),
+				"timeout":  u.HealthCheck.Timeout.String(),
+				"path":     u.HealthCheck.Path,
+			},
+		}
+	}
+
+	// Serialize virtual hosts
+	vhosts := make([]map[string]any, len(cfg.VirtualHosts))
+	for i, vh := range cfg.VirtualHosts {
+		routes := make([]map[string]any, len(vh.Routes))
+		for j, r := range vh.Routes {
+			routes[j] = map[string]any{
+				"path":         r.Path,
+				"upstream":     r.Upstream,
+				"strip_prefix": r.StripPrefix,
+			}
+		}
+		vhosts[i] = map[string]any{
+			"domains": vh.Domains,
+			"tls": map[string]any{
+				"cert_file": vh.TLS.CertFile,
+				"key_file":  vh.TLS.KeyFile,
+			},
+			"routes": routes,
+		}
+	}
+
+	// Serialize default routes
+	routes := make([]map[string]any, len(cfg.Routes))
+	for i, r := range cfg.Routes {
+		routes[i] = map[string]any{
+			"path":         r.Path,
+			"upstream":     r.Upstream,
+			"strip_prefix": r.StripPrefix,
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{
+		"upstreams":     upstreams,
+		"virtual_hosts": vhosts,
+		"routes":        routes,
+	})
+}
+
+func (d *Dashboard) handleUpdateRouting(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Upstreams    []config.UpstreamConfig    `json:"upstreams"`
+		VirtualHosts []config.VirtualHostConfig `json:"virtual_hosts"`
+		Routes       []config.RouteConfig       `json:"routes"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON: " + err.Error()})
+		return
+	}
+
+	cfg := d.engine.Config()
+
+	// Apply changes — only overwrite fields that were provided
+	if body.Upstreams != nil {
+		cfg.Upstreams = body.Upstreams
+	}
+	if body.VirtualHosts != nil {
+		cfg.VirtualHosts = body.VirtualHosts
+	}
+	if body.Routes != nil {
+		cfg.Routes = body.Routes
+	}
+
+	// Validate
+	ve := &config.ValidationError{}
+	config.ValidateUpstreamsExported(cfg.Upstreams, ve)
+	config.ValidateRoutesExported(cfg.Routes, cfg.Upstreams, ve)
+	config.ValidateVirtualHostsExported(cfg.VirtualHosts, cfg.Upstreams, ve)
+	if ve.HasErrors() {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": ve.Error()})
+		return
+	}
+
+	// Reload config
+	if err := d.engine.Reload(cfg); err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+
+	// Rebuild proxy
+	if d.rebuildFn != nil {
+		if err := d.rebuildFn(); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "proxy rebuild: " + err.Error()})
+			return
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "message": "Routing updated"})
+}
+
+// SetUpstreamsFn sets the function that returns upstream health status.
+func (d *Dashboard) SetUpstreamsFn(fn func() any) {
+	d.upstreamsFn = fn
+}
+
+func (d *Dashboard) handleGetUpstreams(w http.ResponseWriter, r *http.Request) {
+	if d.upstreamsFn == nil {
+		writeJSON(w, http.StatusOK, []any{})
+		return
+	}
+	writeJSON(w, http.StatusOK, d.upstreamsFn())
+}
+
 // --- Config ---
 
 func (d *Dashboard) handleGetConfig(w http.ResponseWriter, r *http.Request) {
@@ -338,6 +479,16 @@ func (d *Dashboard) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "message": "Configuration updated"})
+}
+
+func (d *Dashboard) handleRoutingPage(w http.ResponseWriter, r *http.Request) {
+	data, err := staticFiles.ReadFile("static/routing.html")
+	if err != nil {
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write(data)
 }
 
 func (d *Dashboard) handleConfigPage(w http.ResponseWriter, r *http.Request) {

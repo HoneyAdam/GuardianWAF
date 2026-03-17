@@ -13,7 +13,8 @@ func DefaultConfig() *Config {
 		Mode:   "enforce",
 		Listen: ":8080",
 		TLS: TLSConfig{
-			Listen: ":8443",
+			Listen:       ":8443",
+			HTTPRedirect: true,
 			ACME: ACMEConfig{
 				CacheDir: "/var/lib/guardianwaf/acme",
 			},
@@ -192,6 +193,15 @@ func PopulateFromNode(cfg *Config, node *Node) error {
 		cfg.Routes = routes
 	}
 
+	// Virtual Hosts
+	if n := node.Get("virtual_hosts"); n != nil && n.Kind == SequenceNode {
+		vhosts, err := populateVirtualHosts(n)
+		if err != nil {
+			return fmt.Errorf("virtual_hosts: %w", err)
+		}
+		cfg.VirtualHosts = vhosts
+	}
+
 	// WAF
 	if n := node.Get("waf"); n != nil {
 		if err := populateWAF(&cfg.WAF, n); err != nil {
@@ -251,6 +261,13 @@ func populateTLS(tls *TLSConfig, n *Node) error {
 	}
 	if v := n.Get("key_file"); v != nil && !v.IsNull {
 		tls.KeyFile = v.String()
+	}
+	if v := n.Get("http_redirect"); v != nil {
+		b, err := nodeBool(v)
+		if err != nil {
+			return fmt.Errorf("http_redirect: %w", err)
+		}
+		tls.HTTPRedirect = b
 	}
 	if a := n.Get("acme"); a != nil {
 		if err := populateACME(&tls.ACME, a); err != nil {
@@ -381,6 +398,38 @@ func populateRoutes(n *Node) ([]RouteConfig, error) {
 			r.Methods = nodeStringSlice(v)
 		}
 		result = append(result, r)
+	}
+	return result, nil
+}
+
+// --- Virtual Hosts ---
+
+func populateVirtualHosts(n *Node) ([]VirtualHostConfig, error) {
+	var result []VirtualHostConfig
+	for _, item := range n.Slice() {
+		if item.Kind != MapNode {
+			continue
+		}
+		vh := VirtualHostConfig{}
+		if v := item.Get("domains"); v != nil {
+			vh.Domains = nodeStringSlice(v)
+		}
+		if t := item.Get("tls"); t != nil && t.Kind == MapNode {
+			if v := t.Get("cert_file"); v != nil && !v.IsNull {
+				vh.TLS.CertFile = v.String()
+			}
+			if v := t.Get("key_file"); v != nil && !v.IsNull {
+				vh.TLS.KeyFile = v.String()
+			}
+		}
+		if r := item.Get("routes"); r != nil && r.Kind == SequenceNode {
+			routes, err := populateRoutes(r)
+			if err != nil {
+				return nil, fmt.Errorf("routes: %w", err)
+			}
+			vh.Routes = routes
+		}
+		result = append(result, vh)
 	}
 	return result, nil
 }

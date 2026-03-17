@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync"
 	"testing"
 
@@ -522,12 +523,12 @@ func TestEngine_Middleware_Block(t *testing.T) {
 		t.Errorf("expected status 403, got %d", rec.Code)
 	}
 	body := rec.Body.String()
-	if body != "403 Forbidden - Request blocked by GuardianWAF" {
-		t.Errorf("unexpected block response body: %q", body)
+	if !strings.Contains(body, "Request Blocked") {
+		t.Errorf("block response should contain 'Request Blocked', got: %.100s", body)
 	}
 	ct := rec.Header().Get("Content-Type")
-	if ct != "text/plain; charset=utf-8" {
-		t.Errorf("expected Content-Type 'text/plain; charset=utf-8', got %q", ct)
+	if ct != "text/html; charset=utf-8" {
+		t.Errorf("expected Content-Type 'text/html; charset=utf-8', got %q", ct)
 	}
 }
 

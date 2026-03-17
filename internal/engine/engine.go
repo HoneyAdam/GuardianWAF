@@ -273,9 +273,10 @@ func (e *Engine) Middleware(next http.Handler) http.Handler {
 
 		switch finalAction {
 		case ActionBlock:
-			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Header().Set("Cache-Control", "no-store")
 			w.WriteHeader(http.StatusForbidden)
-			w.Write([]byte("403 Forbidden - Request blocked by GuardianWAF"))
+			w.Write([]byte(blockPage(event.RequestID, event.Score)))
 			return
 		case ActionChallenge:
 			if e.challengeSvc != nil {
@@ -283,9 +284,10 @@ func (e *Engine) Middleware(next http.Handler) http.Handler {
 				return
 			}
 			// Fallback if no challenge service: block
-			w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			w.Header().Set("Cache-Control", "no-store")
 			w.WriteHeader(http.StatusForbidden)
-			w.Write([]byte("403 Forbidden - Request blocked by GuardianWAF"))
+			w.Write([]byte(blockPage(event.RequestID, event.Score)))
 			return
 		}
 

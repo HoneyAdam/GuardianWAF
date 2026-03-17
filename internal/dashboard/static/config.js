@@ -3,12 +3,32 @@
 
     var originalConfig = null;
     var dirty = false;
+    // Routing management moved to /routing page
 
     // --- Init ---
     document.addEventListener("DOMContentLoaded", function () {
+        loadTheme();
         fetchConfig();
         fetchIPACL();
     });
+
+    // --- Theme ---
+    window.toggleTheme = function () {
+        var cur = document.documentElement.getAttribute("data-theme");
+        var next = cur === "light" ? "dark" : "light";
+        document.documentElement.setAttribute("data-theme", next);
+        localStorage.setItem("gwaf-theme", next);
+        var btn = document.getElementById("theme-btn");
+        if (btn) btn.textContent = next === "light" ? "\u263E" : "\u2606";
+    };
+    function loadTheme() {
+        var saved = localStorage.getItem("gwaf-theme");
+        if (saved) {
+            document.documentElement.setAttribute("data-theme", saved);
+            var btn = document.getElementById("theme-btn");
+            if (btn) btn.textContent = saved === "light" ? "\u263E" : "\u2606";
+        }
+    }
 
     // --- Fetch config ---
     function fetchConfig() {

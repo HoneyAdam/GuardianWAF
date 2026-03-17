@@ -9,8 +9,6 @@ import (
 	"fmt"
 	"net"
 	"net/http"
-	"net/http/httputil"
-	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -29,6 +27,9 @@ import (
 	"github.com/guardianwaf/guardianwaf/internal/layers/response"
 	"github.com/guardianwaf/guardianwaf/internal/layers/sanitizer"
 	"github.com/guardianwaf/guardianwaf/internal/mcp"
+	"github.com/guardianwaf/guardianwaf/internal/proxy"
+	"github.com/guardianwaf/guardianwaf/internal/acme"
+	gwaftls "github.com/guardianwaf/guardianwaf/internal/tls"
 )
 
 // Build-time variables set by goreleaser or -ldflags.
@@ -174,8 +175,12 @@ func cmdServe(args []string) {
 
 	// Mount upstream proxy or default handler
 	var upstream http.Handler
+	var proxyRouter *proxy.Router
 	if len(cfg.Upstreams) > 0 && len(cfg.Routes) > 0 {
-		upstream = buildReverseProxy(cfg)
+		var h http.Handler
+		h, _ = buildReverseProxy(cfg)
+		proxyRouter, _ = h.(*proxy.Router)
+		upstream = h
 	} else {
 		upstream = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", "text/plain")
@@ -186,16 +191,112 @@ func cmdServe(args []string) {
 	serveMux.Handle("/", eng.Middleware(upstream))
 	handler := http.Handler(serveMux)
 
-	// 8. Start HTTP server
+	// 8. Start TLS server if enabled
+	var tlsSrv *http.Server
+	var certStore *gwaftls.CertStore
+	if cfg.TLS.Enabled {
+		certStore = gwaftls.NewCertStore()
+
+		// Load default cert if provided
+		if cfg.TLS.CertFile != "" && cfg.TLS.KeyFile != "" {
+			if err := certStore.LoadDefaultCert(cfg.TLS.CertFile, cfg.TLS.KeyFile); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to load default TLS cert: %v\n", err)
+			}
+		}
+
+		// Load per-vhost certs
+		for _, vh := range cfg.VirtualHosts {
+			if vh.TLS.CertFile != "" && vh.TLS.KeyFile != "" {
+				if err := certStore.LoadCert(vh.Domains, vh.TLS.CertFile, vh.TLS.KeyFile); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: failed to load TLS cert for %v: %v\n", vh.Domains, err)
+				}
+			}
+		}
+
+		// ACME auto-certificate if enabled
+		var acmeHandler *acme.HTTP01Handler
+		if cfg.TLS.ACME.Enabled && cfg.TLS.ACME.Email != "" {
+			acmeHandler = acme.NewHTTP01Handler()
+
+			acmeClient := acme.NewClient(acme.LetsEncryptProduction)
+			// Load or generate account key from cache dir
+			accountKeyPath := cfg.TLS.ACME.CacheDir + "/account.key"
+			var accountKeyPEM []byte
+			if data, err := os.ReadFile(accountKeyPath); err == nil {
+				accountKeyPEM = data
+			}
+			if err := acmeClient.Init(accountKeyPEM); err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: ACME init failed: %v\n", err)
+			} else {
+				// Save account key
+				if keyPEM, err := acmeClient.AccountKeyPEM(); err == nil {
+					os.MkdirAll(cfg.TLS.ACME.CacheDir, 0700)
+					os.WriteFile(accountKeyPath, keyPEM, 0600)
+				}
+				// Register account
+				if err := acmeClient.Register(cfg.TLS.ACME.Email); err != nil {
+					fmt.Fprintf(os.Stderr, "Warning: ACME registration: %v\n", err)
+				} else {
+					// Obtain certs for all ACME domains + vhost domains
+					diskStore := acme.NewCertDiskStore(cfg.TLS.ACME.CacheDir, acmeClient, acmeHandler)
+					allDomains := collectACMEDomains(cfg)
+					for _, domains := range allDomains {
+						diskStore.AddDomains(domains)
+						cert, err := diskStore.LoadOrObtain(domains)
+						if err != nil {
+							fmt.Fprintf(os.Stderr, "Warning: ACME cert for %v: %v\n", domains, err)
+						} else {
+							certStore.LoadCertFromTLS(domains, cert)
+						}
+					}
+					// Start background renewal
+					diskStore.StartRenewal(12 * time.Hour)
+				}
+			}
+			// Mount ACME challenge handler on HTTP server
+			serveMux.Handle("/.well-known/acme-challenge/", acmeHandler)
+		}
+
+		// Start cert hot-reload
+		certStore.StartReload(30 * time.Second)
+
+		tlsSrv = &http.Server{
+			Addr:         cfg.TLS.Listen,
+			Handler:      handler,
+			TLSConfig:    certStore.TLSConfig(),
+			ReadTimeout:  30 * time.Second,
+			WriteTimeout: 30 * time.Second,
+			IdleTimeout:  120 * time.Second,
+		}
+	}
+
+	// 9. Start HTTP server
+	// If TLS is enabled with http_redirect, HTTP server redirects to HTTPS
+	httpHandler := handler
+	if cfg.TLS.Enabled && cfg.TLS.HTTPRedirect {
+		httpHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Serve ACME challenges even when redirecting
+			if strings.HasPrefix(r.URL.Path, "/.well-known/acme-challenge/") {
+				serveMux.ServeHTTP(w, r)
+				return
+			}
+			host := r.Host
+			if idx := strings.LastIndex(host, ":"); idx > 0 {
+				host = host[:idx]
+			}
+			target := "https://" + host + r.RequestURI
+			http.Redirect(w, r, target, http.StatusMovedPermanently)
+		})
+	}
 	srv := &http.Server{
 		Addr:         cfg.Listen,
-		Handler:      handler,
+		Handler:      httpHandler,
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  120 * time.Second,
 	}
 
-	// 9. Start MCP server if enabled
+	// 10. Start MCP server if enabled
 	if cfg.MCP.Enabled && cfg.MCP.Transport == "stdio" {
 		go startMCPServer(eng, cfg)
 	}
@@ -204,7 +305,32 @@ func cmdServe(args []string) {
 	var dashSrv *http.Server
 	var sseBroadcaster *dashboard.SSEBroadcaster
 	if cfg.Dashboard.Enabled && cfg.Dashboard.Listen != "" {
-		dashSrv, sseBroadcaster = startDashboard(cfg, eng)
+		var dash *dashboard.Dashboard
+		dashSrv, sseBroadcaster, dash = startDashboard(cfg, eng)
+		// Inject upstream status provider and rebuild function
+		if proxyRouter != nil && dash != nil {
+			r := proxyRouter
+			dash.SetUpstreamsFn(func() any {
+				return r.AllUpstreamStatus()
+			})
+		}
+		if dash != nil {
+			dash.SetRebuildFn(func() error {
+				newHandler, _ := buildReverseProxy(cfg)
+				newRouter, ok := newHandler.(*proxy.Router)
+				if ok && newRouter != nil {
+					proxyRouter = newRouter
+					// Re-inject upstream status with new router
+					rr := newRouter
+					dash.SetUpstreamsFn(func() any {
+						return rr.AllUpstreamStatus()
+					})
+				}
+				// Update the serveMux root handler
+				serveMux.Handle("/", eng.Middleware(newHandler))
+				return nil
+			})
+		}
 	}
 
 	// 10b. Wire SSE broadcaster to event bus for real-time dashboard updates
@@ -230,6 +356,16 @@ func cmdServe(args []string) {
 		}
 	}()
 
+	// Start TLS server if configured
+	if tlsSrv != nil {
+		go func() {
+			fmt.Printf("TLS server listening on %s\n", cfg.TLS.Listen)
+			if err := tlsSrv.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
+				fmt.Fprintf(os.Stderr, "TLS server error: %v\n", err)
+			}
+		}()
+	}
+
 	<-shutdown
 	fmt.Println("\nShutting down...")
 
@@ -237,6 +373,12 @@ func cmdServe(args []string) {
 	defer cancel()
 
 	srv.Shutdown(ctx)
+	if tlsSrv != nil {
+		tlsSrv.Shutdown(ctx)
+	}
+	if certStore != nil {
+		certStore.StopReload()
+	}
 	if dashSrv != nil {
 		dashSrv.Shutdown(ctx)
 	}
@@ -347,7 +489,7 @@ func cmdSidecar(args []string) {
 
 	var proxyHandler http.Handler
 	if len(cfg.Upstreams) > 0 && len(cfg.Routes) > 0 {
-		proxyHandler = buildReverseProxy(cfg)
+		proxyHandler, _ = buildReverseProxy(cfg)
 	} else {
 		proxyHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusBadGateway)
@@ -699,54 +841,93 @@ func addLayers(eng *engine.Engine, cfg *config.Config) {
 }
 
 // buildReverseProxy creates an http.Handler that routes requests to upstreams
-// based on the configured routes.
-func buildReverseProxy(cfg *config.Config) http.Handler {
-	// Build upstream map: name -> first target URL
-	upstreamMap := make(map[string]*url.URL)
+// based on the configured routes. It uses the proxy package for load balancing
+// and health checking across multiple targets per upstream.
+func buildReverseProxy(cfg *config.Config) (http.Handler, []*proxy.HealthChecker) {
+	// Build balancers: name -> *Balancer
+	balancerMap := make(map[string]*proxy.Balancer)
+	var healthCheckers []*proxy.HealthChecker
+
 	for _, u := range cfg.Upstreams {
-		if len(u.Targets) > 0 {
-			target, err := url.Parse(u.Targets[0].URL)
+		var targets []*proxy.Target
+		for _, t := range u.Targets {
+			target, err := proxy.NewTarget(t.URL, t.Weight)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: invalid upstream URL %q: %v\n", u.Targets[0].URL, err)
+				fmt.Fprintf(os.Stderr, "Warning: invalid upstream URL %q: %v\n", t.URL, err)
 				continue
 			}
-			upstreamMap[u.Name] = target
+			targets = append(targets, target)
+		}
+		if len(targets) == 0 {
+			continue
+		}
+
+		strategy := u.LoadBalancer
+		if strategy == "" {
+			strategy = proxy.StrategyRoundRobin
+		}
+		lb := proxy.NewBalancer(targets, strategy)
+		balancerMap[u.Name] = lb
+
+		// Start health checks if configured
+		if u.HealthCheck.Enabled {
+			hc := proxy.NewHealthChecker(lb, proxy.HealthConfig{
+				Enabled:  true,
+				Interval: u.HealthCheck.Interval,
+				Timeout:  u.HealthCheck.Timeout,
+				Path:     u.HealthCheck.Path,
+			})
+			hc.Start()
+			healthCheckers = append(healthCheckers, hc)
 		}
 	}
 
-	mux := http.NewServeMux()
+	// Build default routes (flat routes array — fallback)
+	var defaultRoutes []proxy.Route
 	for _, route := range cfg.Routes {
-		target, ok := upstreamMap[route.Upstream]
+		lb, ok := balancerMap[route.Upstream]
 		if !ok {
 			continue
 		}
-		proxy := httputil.NewSingleHostReverseProxy(target)
-		pattern := route.Path
-		if !strings.HasSuffix(pattern, "/") {
-			pattern += "/"
-		}
-		stripPrefix := route.StripPrefix
-		routePath := route.Path
-
-		mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
-			if stripPrefix {
-				r.URL.Path = strings.TrimPrefix(r.URL.Path, routePath)
-				if !strings.HasPrefix(r.URL.Path, "/") {
-					r.URL.Path = "/" + r.URL.Path
-				}
-			}
-			proxy.ServeHTTP(w, r)
+		defaultRoutes = append(defaultRoutes, proxy.Route{
+			PathPrefix:  route.Path,
+			Balancer:    lb,
+			StripPrefix: route.StripPrefix,
 		})
 	}
 
-	return mux
+	// Build virtual hosts if configured
+	if len(cfg.VirtualHosts) > 0 {
+		var vhosts []proxy.VirtualHost
+		for _, vh := range cfg.VirtualHosts {
+			var vhRoutes []proxy.Route
+			for _, route := range vh.Routes {
+				lb, ok := balancerMap[route.Upstream]
+				if !ok {
+					continue
+				}
+				vhRoutes = append(vhRoutes, proxy.Route{
+					PathPrefix:  route.Path,
+					Balancer:    lb,
+					StripPrefix: route.StripPrefix,
+				})
+			}
+			vhosts = append(vhosts, proxy.VirtualHost{
+				Domains: vh.Domains,
+				Routes:  vhRoutes,
+			})
+		}
+		return proxy.NewRouterWithVHosts(vhosts, defaultRoutes), healthCheckers
+	}
+
+	return proxy.NewRouter(defaultRoutes), healthCheckers
 }
 
 // startDashboard starts the full dashboard HTTP server in the background.
 // It provides a real-time web UI with SSE event streaming, REST API,
 // and security analytics. Returns the server and the SSE broadcaster
 // so the engine can publish events to connected dashboard clients.
-func startDashboard(cfg *config.Config, eng *engine.Engine) (*http.Server, *dashboard.SSEBroadcaster) {
+func startDashboard(cfg *config.Config, eng *engine.Engine) (*http.Server, *dashboard.SSEBroadcaster, *dashboard.Dashboard) {
 	eventStore, ok := eng.EventStore().(events.EventStore)
 	if !ok {
 		fmt.Fprintf(os.Stderr, "Warning: event store does not support queries; dashboard events disabled\n")
@@ -770,7 +951,7 @@ func startDashboard(cfg *config.Config, eng *engine.Engine) (*http.Server, *dash
 		}
 	}()
 
-	return srv, dash.SSE()
+	return srv, dash.SSE(), dash
 }
 
 // startMCPServer starts the MCP JSON-RPC server over stdio.
@@ -954,6 +1135,35 @@ func (a *mcpEngineAdapter) TestRequest(method, urlStr string, headers map[string
 		"findings": findings,
 		"duration": event.Duration.String(),
 	}, nil
+}
+
+// collectACMEDomains gathers all domains that need ACME certificates.
+// Collects from tls.acme.domains and virtual_hosts that don't have manual certs.
+func collectACMEDomains(cfg *config.Config) [][]string {
+	var result [][]string
+
+	// Explicit ACME domains from config
+	if len(cfg.TLS.ACME.Domains) > 0 {
+		result = append(result, cfg.TLS.ACME.Domains)
+	}
+
+	// Virtual hosts without manual TLS certs
+	for _, vh := range cfg.VirtualHosts {
+		if vh.TLS.CertFile == "" && vh.TLS.KeyFile == "" && len(vh.Domains) > 0 {
+			// Filter out wildcard domains (ACME HTTP-01 doesn't support them)
+			var nonWild []string
+			for _, d := range vh.Domains {
+				if !strings.HasPrefix(d, "*.") {
+					nonWild = append(nonWild, d)
+				}
+			}
+			if len(nonWild) > 0 {
+				result = append(result, nonWild)
+			}
+		}
+	}
+
+	return result
 }
 
 // isValidIPOrCIDR returns true if s is a valid IP address or CIDR notation.

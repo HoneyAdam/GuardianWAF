@@ -11,8 +11,9 @@ type Config struct {
 	Listen string    `yaml:"listen"` // Listen address (e.g., ":8080")
 	TLS    TLSConfig `yaml:"tls"`
 
-	Upstreams []UpstreamConfig `yaml:"upstreams"`
-	Routes    []RouteConfig    `yaml:"routes"`
+	Upstreams    []UpstreamConfig    `yaml:"upstreams"`
+	Routes       []RouteConfig       `yaml:"routes"`
+	VirtualHosts []VirtualHostConfig `yaml:"virtual_hosts"`
 
 	WAF       WAFConfig       `yaml:"waf"`
 	Dashboard DashboardConfig `yaml:"dashboard"`
@@ -23,11 +24,12 @@ type Config struct {
 
 // TLSConfig holds TLS/SSL settings including optional ACME auto-certificate.
 type TLSConfig struct {
-	Enabled  bool       `yaml:"enabled"`
-	Listen   string     `yaml:"listen"`
-	CertFile string     `yaml:"cert_file"`
-	KeyFile  string     `yaml:"key_file"`
-	ACME     ACMEConfig `yaml:"acme"`
+	Enabled      bool       `yaml:"enabled"`
+	Listen       string     `yaml:"listen"`
+	CertFile     string     `yaml:"cert_file"`
+	KeyFile      string     `yaml:"key_file"`
+	HTTPRedirect bool       `yaml:"http_redirect"` // redirect HTTP→HTTPS when TLS enabled
+	ACME         ACMEConfig `yaml:"acme"`
 }
 
 // ACMEConfig holds automatic certificate management settings.
@@ -66,6 +68,19 @@ type RouteConfig struct {
 	Upstream    string   `yaml:"upstream"`
 	StripPrefix bool     `yaml:"strip_prefix"`
 	Methods     []string `yaml:"methods"`
+}
+
+// VirtualHostConfig maps domain names to routes with optional per-vhost TLS.
+type VirtualHostConfig struct {
+	Domains []string       `yaml:"domains"` // e.g., ["api.example.com", "*.api.example.com"]
+	TLS     VHostTLSConfig `yaml:"tls"`
+	Routes  []RouteConfig  `yaml:"routes"`
+}
+
+// VHostTLSConfig holds per-virtual-host TLS certificate paths.
+type VHostTLSConfig struct {
+	CertFile string `yaml:"cert_file"`
+	KeyFile  string `yaml:"key_file"`
 }
 
 // WAFConfig is the top-level container for all WAF protection settings.

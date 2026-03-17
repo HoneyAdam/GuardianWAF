@@ -22,22 +22,39 @@ GuardianWAF is a production-grade Web Application Firewall written in pure Go wi
 **Detection & Protection**
 - Six attack detectors: SQL injection, XSS, path traversal, command injection, XXE, SSRF
 - Tokenizer-based detection engine with configurable scoring thresholds
+- JS Challenge (SHA-256 proof-of-work) for suspicious requests -- stops bots, passes real browsers
 - Rate limiting with token bucket algorithm, per-IP and per-path scoping, and auto-ban
-- IP whitelist/blacklist with radix tree for O(k) CIDR lookups
+- IP whitelist/blacklist with radix tree for O(k) CIDR lookups (runtime add/remove via dashboard)
 - Bot detection via JA3/JA4 TLS fingerprinting, User-Agent analysis, and behavioral tracking
 - Response protection: security headers (HSTS, X-Frame-Options, CSP), credit card/SSN/API key masking, stack trace stripping
+- Branded HTML block page with request ID and threat score
+
+**Reverse Proxy & Routing**
+- Multi-domain routing via virtual hosts (Host header + SNI)
+- Wildcard domain support (`*.example.com`)
+- Load balancing: round-robin, weighted, least-connections, IP hash
+- Active health checks with configurable interval, timeout, and path
+- Circuit breaker per target (closed -> open -> half-open -> probe)
+- TLS termination with SNI-based certificate selection
+- Certificate hot-reload (automatic file change detection)
+- ACME / Let's Encrypt client for automatic certificate provisioning
+- HTTP to HTTPS redirect (automatic when TLS enabled)
+- Path-based routing with optional prefix stripping
 
 **Deployment**
 - Three deployment modes: standalone reverse proxy, Go library middleware, sidecar proxy
 - Single static binary with zero external dependencies -- no CGO, no shared libraries
 - Docker image based on Alpine (< 20 MB)
-- Built-in ACME client for automatic TLS certificate provisioning
-- Load balancing (round-robin, weighted, least-conn, IP hash) with health checks
 - Graceful shutdown with connection draining
 
-**Operations**
-- Built-in web dashboard with real-time monitoring and rule management
-- REST API for programmatic control (whitelist, blacklist, rate limits, exclusions, config)
+**Dashboard & Operations**
+- Built-in web dashboard with real-time monitoring via SSE
+- Configuration editor with live toggles for all WAF settings
+- Upstream/domain/route management -- add backends, domains, and routing from the UI
+- IP ACL management -- add/remove whitelist and blacklist entries in real-time
+- Upstream health panel -- live backend status, circuit breaker state, active connections
+- Event detail view -- click any event to see full findings, matched patterns, scores
+- REST API for programmatic control (stats, events, config, routing, IP ACL)
 - Structured JSON logging with configurable levels
 - Hot-reload of configuration without restart
 - Health check endpoints for Kubernetes liveness probes
@@ -82,6 +99,54 @@ EOF
 guardianwaf serve
 ```
 
+### Multi-Domain with TLS
+
+```yaml
+listen: ":8080"
+
+tls:
+  enabled: true
+  listen: ":8443"
+  http_redirect: true
+  cert_file: "/etc/certs/default.pem"
+  key_file: "/etc/certs/default-key.pem"
+
+upstreams:
+  - name: api
+    load_balancer: weighted
+    targets:
+      - url: "http://api1:3000"
+        weight: 3
+      - url: "http://api2:3000"
+        weight: 1
+    health_check:
+      enabled: true
+      interval: 10s
+      path: /healthz
+
+  - name: web
+    targets:
+      - url: "http://web:8000"
+
+virtual_hosts:
+  - domains: ["api.example.com"]
+    tls:
+      cert_file: "/etc/certs/api.pem"
+      key_file: "/etc/certs/api-key.pem"
+    routes:
+      - path: /
+        upstream: api
+
+  - domains: ["www.example.com", "example.com"]
+    routes:
+      - path: /
+        upstream: web
+
+routes:
+  - path: /
+    upstream: web
+```
+
 ### Go Library (Middleware)
 
 ```bash
@@ -92,6 +157,7 @@ go get github.com/guardianwaf/guardianwaf
 waf, err := guardianwaf.New(guardianwaf.Config{
     Mode:      guardianwaf.ModeEnforce,
     Threshold: guardianwaf.ThresholdConfig{Block: 50, Log: 25},
+    Challenge: guardianwaf.ChallengeConfig{Enabled: true, Difficulty: 20},
 })
 if err != nil {
     log.Fatal(err)
@@ -109,6 +175,52 @@ docker run -d -p 8080:8080 \
   sidecar --upstream http://app:3000
 ```
 
+### Docker Compose (Multi-Backend)
+
+```yaml
+version: "3.9"
+services:
+  guardianwaf:
+    build: .
+    ports:
+      - "8080:8080"
+      - "9443:9443"
+    volumes:
+      - ./guardianwaf.yaml:/etc/guardianwaf/guardianwaf.yaml:ro
+    command: ["serve", "-c", "/etc/guardianwaf/guardianwaf.yaml"]
+    depends_on:
+      - backend
+      - backend2
+
+  backend:
+    image: myapp:latest
+    expose: ["3000"]
+
+  backend2:
+    image: myapp:latest
+    expose: ["3000"]
+```
+
+---
+
+## Deployment Topologies
+
+```
+A) Standalone (replaces nginx):
+   Internet --> GuardianWAF(:443 + :80) --> backend-api:3000
+                                        --> backend-web:8000
+
+B) Behind CDN:
+   Cloudflare --> GuardianWAF(:8080) --> backends
+   (TLS handled by Cloudflare)
+
+C) Kubernetes Sidecar:
+   Ingress --> GuardianWAF(:8080) --> app(:3000)
+
+D) Embedded Library:
+   Go app --> waf.Middleware(handler)
+```
+
 ---
 
 ## Why GuardianWAF?
@@ -123,14 +235,17 @@ GuardianWAF was built to eliminate the trade-offs other WAF solutions force: com
 | **External deps** | Zero | Multiple | Multiple | Multiple | NGINX module |
 | **Deployment modes** | 3 (proxy, lib, sidecar) | Reverse proxy | Library / proxy | Module (NGINX/Apache) | NGINX module |
 | **Detection method** | Tokenizer + scoring | Semantic analysis | CRS regex rules | CRS regex rules | Scoring + allowlists |
-| **Web dashboard** | Built-in | Built-in | No (third-party) | No (third-party) | No |
+| **JS Challenge / PoW** | Built-in | No | No | No | No |
+| **Multi-domain routing** | Built-in (virtual hosts) | No | No | No | No |
+| **TLS + ACME** | Built-in | External | External | External | External |
+| **Load balancing** | 4 strategies + health check | No | No | No | No |
+| **Circuit breaker** | Built-in | No | No | No | No |
+| **Web dashboard** | Built-in (config + monitoring) | Built-in | No (third-party) | No (third-party) | No |
 | **Single binary** | Yes | No | No | No | No |
 | **MCP / AI integration** | Built-in MCP server | No | No | No | No |
-| **Configuration** | YAML + env vars | Web UI | SecRule directives | SecRule directives | NGINX directives |
+| **Configuration** | YAML + env + dashboard UI | Web UI | SecRule directives | SecRule directives | NGINX directives |
 | **False positive mgmt** | Score tuning per-route | Auto learning | Rule exclusions | Rule exclusions | Allowlists |
 | **Performance overhead** | < 1ms p99 | Low | Low | Moderate | Low |
-| **Memory usage** | Minimal | Moderate | Low-moderate | Moderate-high | Low |
-| **Learning curve** | Low | Low-moderate | Moderate | High | Moderate |
 | **License** | MIT | Apache 2.0 | Apache 2.0 | Apache 2.0 | GPL v3 |
 
 ---
@@ -152,17 +267,18 @@ GuardianWAF was built to eliminate the trade-offs other WAF solutions force: com
        +---------------------------------------------------------------+
        |
        v
-  +------------+    +------------+         +----------------+
-  | Bot Detect |--->|  Response  |-------->|   Upstream     |
-  |   (500)    |    |   (600)    |         |   Backend      |
-  +------------+    +------------+         +----------------+
-                         |
-                         +-- Security headers
-                         +-- Data masking
-                         +-- Error pages
+  +------------+    +-----------+    +-----------+    +----------------+
+  | Bot Detect |--->|    JS     |--->|  Response  |--->|   Upstream     |
+  |   (500)    |    | Challenge |    |   (600)    |    | Load Balancer  |
+  +------------+    +-----------+    +-----------+    +----------------+
+                    (score 40-79)         |             |  |  |  |
+                                          |             v  v  v  v
+                                          +-- Headers  Backend Targets
+                                          +-- Masking  (health checked,
+                                          +-- Errors   circuit breaker)
 ```
 
-Each layer runs in order and can pass, log, or block the request. The detection layer runs 6 independent detectors (SQLi, XSS, LFI, CMDi, XXE, SSRF) and produces a cumulative threat score. The score is compared against configurable thresholds to determine the final action.
+Each layer runs in order and can pass, log, challenge, or block the request. The detection layer runs 6 independent detectors (SQLi, XSS, LFI, CMDi, XXE, SSRF) and produces a cumulative threat score. Bot detection scores between 40-79 trigger a JavaScript proof-of-work challenge instead of blocking outright.
 
 ---
 
@@ -182,11 +298,10 @@ Input: "' OR 'a'='a"
   -> Tautology pattern              score: +55
   -> Total: 85                      -> BLOCK (above block threshold)
 
-Input: "'; DROP TABLE users --"
-  -> Stacked query + DROP keyword   score: 95
-  -> Comment evasion                score: +35
-  -> Isolated keyword               score: +10
-  -> Total: 140                     -> BLOCK (critical attack)
+Input: Suspicious bot (UA: curl, high RPS)
+  -> Bot score: 55                  -> JS CHALLENGE (proof-of-work page)
+  -> Browser solves SHA-256 puzzle  -> Sets cookie, request passes
+  -> Bot can't solve               -> Stays blocked
 ```
 
 This graduated response eliminates most false positives while catching real attacks. Every blocked request includes the full score breakdown for transparent, data-driven tuning.
@@ -256,6 +371,9 @@ waf:
     threshold:
       block: 50
       log: 25
+  challenge:
+    enabled: true
+    difficulty: 20
 
 dashboard:
   enabled: true
@@ -273,16 +391,36 @@ See [Configuration Reference](docs/configuration.md) for the complete YAML schem
 
 GuardianWAF includes a built-in web dashboard accessible on the configured listen address (default `:9443`).
 
-**Capabilities:**
-- Real-time traffic monitoring (requests/sec, blocks/sec, latency percentiles)
-- Security event viewer with filtering by action, IP, path, score, and time range
-- Rule management for whitelist, blacklist, rate limits, and detection exclusions
-- Configuration viewer with hot-reload support
-- Health and version status
+**Monitoring (`/`)**
+- Real-time traffic monitoring (requests/sec, blocks/sec, challenges, latency)
+- Security event feed with filtering by action, IP, path, score
+- Click any event to see full details: findings, matched patterns, threat scores
+- Attack type breakdown and top source IPs charts
+- Upstream health: backend status, circuit breaker state, active connections
+
+**Configuration (`/config`)**
+- Upstream management: add/remove backends, set load balancing strategy and weights
+- Virtual host management: add/remove domains, configure per-domain routing
+- Route management: path-to-upstream mapping with prefix stripping
+- WAF settings: toggle detectors, adjust thresholds and multipliers
+- JS Challenge: enable/disable, set difficulty
+- Bot detection: mode, scanner blocking, behavioral thresholds
+- IP ACL: add/remove whitelist and blacklist entries in real-time
+- Rate limiting, sanitizer, response protection toggles
 
 **REST API:** The dashboard exposes a full [REST API](docs/api-reference.md) for programmatic management, protected by API key authentication.
 
-Access at `https://localhost:9443` (enabled by default in standalone mode).
+| Endpoint | Description |
+|---|---|
+| `GET /api/v1/stats` | Runtime statistics |
+| `GET /api/v1/events` | Paginated events with filters |
+| `GET /api/v1/upstreams` | Backend health status |
+| `GET/PUT /api/v1/config` | WAF configuration |
+| `GET/PUT /api/v1/routing` | Upstreams, virtual hosts, routes |
+| `GET/POST/DELETE /api/v1/ipacl` | IP whitelist/blacklist |
+| `GET /api/v1/sse` | Server-Sent Events stream |
+
+Access at `http://localhost:9443` (enabled by default in standalone mode).
 
 ---
 
@@ -383,6 +521,8 @@ GuardianWAF targets sub-millisecond p99 latency overhead per request.
 | Rate limit check | < 500ns |
 | SQLi detection | < 200us p95 |
 | All detectors combined | < 500us p95 |
+| PoW verification (server-side) | ~60ns |
+| Token generation (HMAC) | ~600ns |
 | **Total pipeline (clean request)** | **< 1ms p99** |
 | **Total pipeline (attack)** | **< 2ms p99** |
 | Memory baseline (standalone) | < 30 MB |
@@ -397,6 +537,7 @@ Design choices for performance:
 - Radix tree for IP lookups (O(k) where k = address bits)
 - Token bucket rate limiter (O(1) per check)
 - State-machine tokenizer (no regex on the hot path)
+- Circuit breaker with atomic state transitions (lock-free)
 
 ---
 
@@ -422,27 +563,28 @@ Full documentation site: [guardianwaf.com/docs](https://guardianwaf.com/docs)
 guardianwaf/
 ├── cmd/guardianwaf/       # CLI entry point (serve, sidecar, check, validate)
 ├── internal/
-│   ├── engine/            # Core WAF engine, pipeline, scoring
+│   ├── engine/            # Core WAF engine, pipeline, scoring, block page
 │   ├── config/            # YAML parser, config structs, env loading, validation
 │   ├── layers/
-│   │   ├── ipacl/         # IP whitelist/blacklist (radix tree)
+│   │   ├── ipacl/         # IP whitelist/blacklist (radix tree, runtime add/remove)
 │   │   ├── ratelimit/     # Token bucket rate limiter
 │   │   ├── sanitizer/     # Request normalization and validation
 │   │   ├── detection/     # Attack detectors (sqli/xss/lfi/cmdi/xxe/ssrf)
 │   │   ├── botdetect/     # Bot detection (JA3, UA, behavior)
+│   │   ├── challenge/     # JS proof-of-work challenge (SHA-256 PoW)
 │   │   └── response/      # Response protection (headers, masking, error pages)
-│   ├── proxy/             # Reverse proxy, load balancer, circuit breaker, websocket
-│   ├── tls/               # TLS manager, ACME client, SNI routing
-│   ├── dashboard/         # Web UI, REST API, SSE real-time updates
+│   ├── proxy/             # Reverse proxy, load balancer, circuit breaker, router
+│   ├── tls/               # TLS cert store, SNI selection, hot-reload
+│   ├── acme/              # ACME client (RFC 8555), HTTP-01 challenge, cert cache
+│   ├── dashboard/         # Web UI, REST API, SSE, config editor, routing manager
 │   ├── mcp/               # MCP JSON-RPC server and tool definitions
-│   ├── events/            # Event storage (memory ring buffer, JSONL file)
-│   └── analytics/         # Rolling counters, TopK, time series
+│   └── events/            # Event storage (memory ring buffer, JSONL file)
 ├── guardianwaf.go         # Public API for library mode
 ├── options.go             # Functional options (WithMode, WithThreshold, etc.)
 ├── examples/              # Library and backend examples
 ├── docs/                  # Documentation
 ├── Dockerfile             # Multi-stage Alpine build
-├── docker-compose.yml     # Standalone + backend example
+├── docker-compose.yml     # Standalone + multi-backend example
 └── Makefile               # build, test, lint, bench, fuzz, cover
 ```
 

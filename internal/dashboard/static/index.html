@@ -21,7 +21,9 @@
             <span class="header-badge">Dashboard</span>
         </div>
         <div class="header-status">
-            <a href="/config" style="color:var(--text-secondary);text-decoration:none;padding:.4rem .8rem;border:1px solid var(--border-subtle);border-radius:var(--radius);font-size:.8rem;margin-right:.75rem;transition:all .15s" onmouseover="this.style.background='var(--bg-tertiary)'" onmouseout="this.style.background='transparent'">Configuration</a>
+            <a href="/routing" style="color:var(--text-secondary);text-decoration:none;padding:.4rem .8rem;border:1px solid var(--border-subtle);border-radius:var(--radius);font-size:.8rem;margin-right:.5rem;transition:all .15s" onmouseover="this.style.background='var(--bg-tertiary)'" onmouseout="this.style.background='transparent'">Routing</a>
+            <a href="/config" style="color:var(--text-secondary);text-decoration:none;padding:.4rem .8rem;border:1px solid var(--border-subtle);border-radius:var(--radius);font-size:.8rem;margin-right:.5rem;transition:all .15s" onmouseover="this.style.background='var(--bg-tertiary)'" onmouseout="this.style.background='transparent'">WAF Config</a>
+            <button onclick="toggleTheme()" style="background:none;border:1px solid var(--border-subtle);border-radius:var(--radius);padding:.4rem .6rem;cursor:pointer;font-size:.9rem;margin-right:.75rem" title="Toggle theme" id="theme-btn">&#9788;</button>
             <span class="status-dot" id="sse-status" title="SSE disconnected"></span>
             <span class="status-label" id="sse-status-label">Connecting...</span>
         </div>
@@ -80,6 +82,14 @@
                     <div class="chart-empty">No data yet</div>
                 </div>
             </div>
+        </section>
+
+        <!-- Upstream Health -->
+        <section class="card" id="upstream-section" style="display:none">
+            <div class="card-header">
+                <h2 class="card-title">Upstream Health</h2>
+            </div>
+            <div class="card-body" id="upstream-grid"></div>
         </section>
 
         <!-- Event Feed -->

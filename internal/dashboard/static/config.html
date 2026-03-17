@@ -111,6 +111,29 @@ color:var(--text-primary);transition:all .15s}
 .btn--danger{background:var(--red);color:#fff;border-color:var(--red)}
 .btn--danger:hover{opacity:.9}
 
+/* Routing panels */
+.routing-card{background:var(--bg-tertiary);border:1px solid var(--border-subtle);
+border-radius:var(--radius);padding:1rem;margin-bottom:.75rem;position:relative}
+.routing-card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:.75rem}
+.routing-card-title{font-weight:600;font-size:.9rem}
+.routing-card .field{padding:.5rem 0}
+.target-row-edit{display:flex;gap:.5rem;align-items:center;margin-bottom:.4rem}
+.target-row-edit input{flex:1}
+.domain-tags{display:flex;flex-wrap:wrap;gap:.3rem;margin-top:.4rem}
+.domain-tag{display:inline-flex;align-items:center;gap:.3rem;background:var(--bg-secondary);
+border:1px solid var(--border-subtle);border-radius:var(--radius);padding:.2rem .5rem;
+font-size:.8rem;font-family:monospace}
+.domain-tag button{background:none;border:none;color:var(--text-secondary);cursor:pointer;
+font-size:.9rem;padding:0}
+.domain-tag button:hover{color:var(--red)}
+.add-row{display:flex;gap:.5rem;margin-top:.5rem}
+.add-row input{flex:1}
+.btn--sm{padding:.3rem .75rem;font-size:.8rem}
+.route-row{display:flex;gap:.5rem;align-items:center;margin-bottom:.4rem;font-size:.85rem}
+.route-row input,.route-row select{font-size:.8rem;padding:.3rem .5rem}
+.route-path{width:150px}
+.route-upstream{width:150px}
+
 /* Toast */
 .toast{position:fixed;top:1rem;right:1rem;padding:.75rem 1.25rem;border-radius:var(--radius);
 font-size:.85rem;z-index:200;animation:slideIn .3s ease}
@@ -131,7 +154,8 @@ font-size:.85rem;z-index:200;animation:slideIn .3s ease}
         </div>
         <div class="header-status">
             <a href="/" class="cfg-header-link">Dashboard</a>
-            <a href="/logout" class="cfg-header-link">Logout</a>
+            <a href="/routing" class="cfg-header-link">Routing</a>
+            <button onclick="toggleTheme()" style="background:none;border:1px solid var(--border-subtle);border-radius:var(--radius);padding:.4rem .6rem;cursor:pointer;font-size:.9rem" title="Toggle theme" id="theme-btn">&#9788;</button>
         </div>
     </header>
 
