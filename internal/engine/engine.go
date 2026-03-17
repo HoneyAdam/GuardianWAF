@@ -120,6 +120,16 @@ func (e *Engine) currentPipeline() *Pipeline {
 	return e.pipeline.Load().(*Pipeline)
 }
 
+// FindLayer returns the first layer with the given name, or nil.
+func (e *Engine) FindLayer(name string) Layer {
+	for _, ol := range e.currentPipeline().Layers() {
+		if ol.Layer.Name() == name {
+			return ol.Layer
+		}
+	}
+	return nil
+}
+
 // AddLayer adds a processing layer to the engine's pipeline.
 func (e *Engine) AddLayer(layer OrderedLayer) {
 	e.currentPipeline().AddLayer(layer)

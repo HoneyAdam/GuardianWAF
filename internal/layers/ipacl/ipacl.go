@@ -117,6 +117,36 @@ func (l *Layer) Process(ctx *engine.RequestContext) engine.LayerResult {
 	return engine.LayerResult{Action: engine.ActionPass}
 }
 
+// AddWhitelist adds an IP or CIDR to the whitelist at runtime.
+func (l *Layer) AddWhitelist(cidr string) error {
+	return l.whitelist.Insert(cidr, true)
+}
+
+// RemoveWhitelist removes an IP or CIDR from the whitelist at runtime.
+func (l *Layer) RemoveWhitelist(cidr string) error {
+	return l.whitelist.Remove(cidr)
+}
+
+// AddBlacklist adds an IP or CIDR to the blacklist at runtime.
+func (l *Layer) AddBlacklist(cidr string) error {
+	return l.blacklist.Insert(cidr, true)
+}
+
+// RemoveBlacklist removes an IP or CIDR from the blacklist at runtime.
+func (l *Layer) RemoveBlacklist(cidr string) error {
+	return l.blacklist.Remove(cidr)
+}
+
+// WhitelistEntries returns all whitelist CIDRs.
+func (l *Layer) WhitelistEntries() []string {
+	return l.whitelist.Entries()
+}
+
+// BlacklistEntries returns all blacklist CIDRs.
+func (l *Layer) BlacklistEntries() []string {
+	return l.blacklist.Entries()
+}
+
 // AddAutoBan adds an IP to the auto-ban list with TTL.
 func (l *Layer) AddAutoBan(ip string, reason string, ttl time.Duration) {
 	if l.config.AutoBan.MaxTTL > 0 && ttl > l.config.AutoBan.MaxTTL {

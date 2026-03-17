@@ -54,6 +54,9 @@ func New(eng *engine.Engine, store events.EventStore, apiKey string) *Dashboard 
 	d.mux.HandleFunc("GET /api/v1/events/{id}", d.authWrap(d.handleGetEvent))
 	d.mux.HandleFunc("GET /api/v1/config", d.authWrap(d.handleGetConfig))
 	d.mux.HandleFunc("PUT /api/v1/config", d.authWrap(d.handleUpdateConfig))
+	d.mux.HandleFunc("GET /api/v1/ipacl", d.authWrap(d.handleGetIPACL))
+	d.mux.HandleFunc("POST /api/v1/ipacl", d.authWrap(d.handleAddIPACL))
+	d.mux.HandleFunc("DELETE /api/v1/ipacl", d.authWrap(d.handleRemoveIPACL))
 	d.mux.HandleFunc("GET /api/v1/sse", d.authWrap(d.handleSSE))
 
 	// Protected static files
@@ -345,6 +348,116 @@ func (d *Dashboard) handleConfigPage(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Write(data)
+}
+
+// --- IP ACL ---
+
+// ipaclLayer is the interface we need from the ipacl layer (avoids circular import).
+type ipaclLayer interface {
+	AddWhitelist(cidr string) error
+	RemoveWhitelist(cidr string) error
+	AddBlacklist(cidr string) error
+	RemoveBlacklist(cidr string) error
+	WhitelistEntries() []string
+	BlacklistEntries() []string
+}
+
+func (d *Dashboard) getIPACLLayer() (ipaclLayer, bool) {
+	l := d.engine.FindLayer("ipacl")
+	if l == nil {
+		return nil, false
+	}
+	acl, ok := l.(ipaclLayer)
+	return acl, ok
+}
+
+func (d *Dashboard) handleGetIPACL(w http.ResponseWriter, r *http.Request) {
+	acl, ok := d.getIPACLLayer()
+	if !ok {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"whitelist": []string{},
+			"blacklist": []string{},
+		})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"whitelist": acl.WhitelistEntries(),
+		"blacklist": acl.BlacklistEntries(),
+	})
+}
+
+func (d *Dashboard) handleAddIPACL(w http.ResponseWriter, r *http.Request) {
+	acl, ok := d.getIPACLLayer()
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "IP ACL layer not active"})
+		return
+	}
+
+	var body struct {
+		List string `json:"list"` // "whitelist" or "blacklist"
+		IP   string `json:"ip"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON"})
+		return
+	}
+	if body.IP == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "ip is required"})
+		return
+	}
+
+	var err error
+	switch body.List {
+	case "whitelist":
+		err = acl.AddWhitelist(body.IP)
+	case "blacklist":
+		err = acl.AddBlacklist(body.IP)
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "list must be 'whitelist' or 'blacklist'"})
+		return
+	}
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "ip": body.IP, "list": body.List})
+}
+
+func (d *Dashboard) handleRemoveIPACL(w http.ResponseWriter, r *http.Request) {
+	acl, ok := d.getIPACLLayer()
+	if !ok {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "IP ACL layer not active"})
+		return
+	}
+
+	var body struct {
+		List string `json:"list"`
+		IP   string `json:"ip"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON"})
+		return
+	}
+	if body.IP == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "ip is required"})
+		return
+	}
+
+	var err error
+	switch body.List {
+	case "whitelist":
+		err = acl.RemoveWhitelist(body.IP)
+	case "blacklist":
+		err = acl.RemoveBlacklist(body.IP)
+	default:
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "list must be 'whitelist' or 'blacklist'"})
+		return
+	}
+	if err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "ip": body.IP, "list": body.List})
 }
 
 // applyWAFPatch applies partial config updates from a JSON patch object.

@@ -79,6 +79,22 @@ border-radius:var(--radius);padding:.75rem 1rem;display:flex;align-items:center;
 justify-content:space-between}
 .detector-name{font-size:.85rem;font-weight:500;text-transform:uppercase;letter-spacing:.03em}
 
+/* IP list */
+.ip-add-row{display:flex;gap:.5rem;margin-bottom:.5rem}
+.ip-input{flex:1;background:var(--bg-tertiary);border:1px solid var(--border-subtle);
+border-radius:var(--radius);padding:.5rem .75rem;color:var(--text-primary);font-size:.875rem;
+font-family:monospace}
+.ip-input:focus{outline:none;border-color:var(--blue)}
+.ip-list{display:flex;flex-wrap:wrap;gap:.4rem;min-height:24px}
+.ip-tag{display:inline-flex;align-items:center;gap:.4rem;background:var(--bg-tertiary);
+border:1px solid var(--border-subtle);border-radius:var(--radius);padding:.3rem .6rem;
+font-size:.8rem;font-family:monospace;color:var(--text-primary)}
+.ip-tag--wl{border-color:rgba(34,197,94,.3)}
+.ip-tag--bl{border-color:rgba(239,68,68,.3)}
+.ip-tag button{background:none;border:none;color:var(--text-secondary);cursor:pointer;
+font-size:.9rem;padding:0 2px;line-height:1}
+.ip-tag button:hover{color:var(--red)}
+
 /* Save bar */
 .save-bar{position:fixed;bottom:0;left:0;right:0;background:var(--bg-secondary);
 border-top:1px solid var(--border-subtle);padding:1rem 2rem;display:flex;
@@ -252,6 +268,24 @@ font-size:.85rem;z-index:200;animation:slideIn .3s ease}
             <div class="field">
                 <span class="field-label">Auto-Ban</span>
                 <label class="toggle"><input type="checkbox" data-path="waf.ip_acl.auto_ban.enabled" onchange="markDirty()"><span class="toggle-slider"></span></label>
+            </div>
+            <!-- Whitelist -->
+            <div style="padding-top:.5rem">
+                <div class="field-label" style="margin-bottom:.5rem;font-weight:600;color:var(--green)">Whitelist <small style="color:var(--text-secondary)">(bypass all checks)</small></div>
+                <div class="ip-add-row">
+                    <input type="text" class="ip-input" id="wl-input" placeholder="IP or CIDR (e.g. 10.0.0.1 or 10.0.0.0/24)">
+                    <button class="btn btn--primary" onclick="addIP('whitelist')">Add</button>
+                </div>
+                <div class="ip-list" id="wl-list"></div>
+            </div>
+            <!-- Blacklist -->
+            <div style="padding-top:.75rem">
+                <div class="field-label" style="margin-bottom:.5rem;font-weight:600;color:var(--red)">Blacklist <small style="color:var(--text-secondary)">(block all requests)</small></div>
+                <div class="ip-add-row">
+                    <input type="text" class="ip-input" id="bl-input" placeholder="IP or CIDR (e.g. 192.168.1.100)">
+                    <button class="btn btn--danger" onclick="addIP('blacklist')">Add</button>
+                </div>
+                <div class="ip-list" id="bl-list"></div>
             </div>
         </div>
     </div>

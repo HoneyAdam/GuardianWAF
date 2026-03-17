@@ -7,6 +7,7 @@
     // --- Init ---
     document.addEventListener("DOMContentLoaded", function () {
         fetchConfig();
+        fetchIPACL();
     });
 
     // --- Fetch config ---
@@ -269,5 +270,95 @@
             toast.style.transition = "opacity .3s";
             setTimeout(function () { toast.remove(); }, 300);
         }, 3000);
+    }
+
+    // --- IP ACL Management ---
+
+    function fetchIPACL() {
+        fetch("/api/v1/ipacl")
+            .then(function (r) { return r.json(); })
+            .then(function (data) {
+                renderIPList("wl-list", data.whitelist || [], "whitelist");
+                renderIPList("bl-list", data.blacklist || [], "blacklist");
+            })
+            .catch(function () {});
+    }
+
+    function renderIPList(containerId, ips, listType) {
+        var container = document.getElementById(containerId);
+        if (!container) return;
+        while (container.firstChild) container.removeChild(container.firstChild);
+
+        if (!ips || ips.length === 0) {
+            var empty = document.createElement("span");
+            empty.style.fontSize = ".8rem";
+            empty.style.color = "var(--text-secondary)";
+            empty.textContent = "No entries";
+            container.appendChild(empty);
+            return;
+        }
+
+        for (var i = 0; i < ips.length; i++) {
+            var tag = document.createElement("span");
+            tag.className = "ip-tag " + (listType === "whitelist" ? "ip-tag--wl" : "ip-tag--bl");
+
+            var ipText = document.createElement("span");
+            ipText.textContent = ips[i];
+            tag.appendChild(ipText);
+
+            var removeBtn = document.createElement("button");
+            removeBtn.textContent = "\u00d7";
+            removeBtn.title = "Remove";
+            removeBtn.setAttribute("data-ip", ips[i]);
+            removeBtn.setAttribute("data-list", listType);
+            removeBtn.addEventListener("click", function () {
+                removeIP(this.getAttribute("data-list"), this.getAttribute("data-ip"));
+            });
+            tag.appendChild(removeBtn);
+
+            container.appendChild(tag);
+        }
+    }
+
+    window.addIP = function (listType) {
+        var inputId = listType === "whitelist" ? "wl-input" : "bl-input";
+        var input = document.getElementById(inputId);
+        var ip = input.value.trim();
+        if (!ip) return;
+
+        fetch("/api/v1/ipacl", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ list: listType, ip: ip })
+        })
+            .then(function (r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+            .then(function (res) {
+                if (res.ok) {
+                    showToast(ip + " added to " + listType, false);
+                    input.value = "";
+                    fetchIPACL();
+                } else {
+                    showToast("Error: " + (res.data.error || "Failed"), true);
+                }
+            })
+            .catch(function (err) { showToast("Network error: " + err, true); });
+    };
+
+    function removeIP(listType, ip) {
+        fetch("/api/v1/ipacl", {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ list: listType, ip: ip })
+        })
+            .then(function (r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+            .then(function (res) {
+                if (res.ok) {
+                    showToast(ip + " removed from " + listType, false);
+                    fetchIPACL();
+                } else {
+                    showToast("Error: " + (res.data.error || "Failed"), true);
+                }
+            })
+            .catch(function (err) { showToast("Network error: " + err, true); });
     }
 })();

@@ -142,6 +142,76 @@ func (t *RadixTree) Len() int {
 	return t.count
 }
 
+// Entries returns all CIDRs stored in the tree as string slices.
+func (t *RadixTree) Entries() []string {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+
+	var result []string
+	t.walk(t.root, make([]byte, 0, 128), &result)
+	return result
+}
+
+// walk recursively collects entries from the radix tree.
+func (t *RadixTree) walk(node *radixNode, bits []byte, result *[]string) {
+	if node == nil {
+		return
+	}
+	if node.hasValue {
+		ip := bitsToIP(bits)
+		prefixLen := len(bits)
+		// Convert from IPv6-mapped back to IPv4 display if applicable
+		if prefixLen >= 96 && isIPv4Mapped(ip) {
+			ipv4 := ip.To4()
+			if ipv4 != nil {
+				cidr := fmt.Sprintf("%s/%d", ipv4.String(), prefixLen-96)
+				// /32 → bare IP
+				if prefixLen == 128 {
+					*result = append(*result, ipv4.String())
+				} else {
+					*result = append(*result, cidr)
+				}
+				goto children
+			}
+		}
+		if prefixLen == 128 {
+			*result = append(*result, ip.String())
+		} else {
+			*result = append(*result, fmt.Sprintf("%s/%d", ip.String(), prefixLen))
+		}
+	}
+children:
+	for bit := 0; bit < 2; bit++ {
+		if node.children[bit] != nil {
+			t.walk(node.children[bit], append(bits, byte(bit)), result)
+		}
+	}
+}
+
+// bitsToIP converts a bit slice back to a net.IP (16-byte).
+func bitsToIP(bits []byte) net.IP {
+	ip := make(net.IP, 16)
+	for i := range bits {
+		if bits[i] == 1 {
+			ip[i/8] |= 1 << uint(7-i%8)
+		}
+	}
+	return ip
+}
+
+// isIPv4Mapped checks if an IP is an IPv4-mapped IPv6 address.
+func isIPv4Mapped(ip net.IP) bool {
+	if len(ip) != 16 {
+		return false
+	}
+	for i := 0; i < 10; i++ {
+		if ip[i] != 0 {
+			return false
+		}
+	}
+	return ip[10] == 0xff && ip[11] == 0xff
+}
+
 // parseCIDROrIP parses a string as either a CIDR or a bare IP address.
 // Bare IPs are treated as /32 (IPv4) or /128 (IPv6).
 // All IPs are normalized to 16-byte IPv6 form for consistent tree storage.
