@@ -834,3 +834,434 @@ func assertEqual(t *testing.T, got, want string) {
 		t.Fatalf("expected %q, got %q", want, got)
 	}
 }
+
+// --- Additional tests for uncovered YAML parser code paths ---
+
+func TestNodeKindString_Unknown(t *testing.T) {
+	kind := NodeKind(99)
+	if kind.String() != "Unknown" {
+		t.Fatalf("expected Unknown, got %s", kind.String())
+	}
+}
+
+func TestNodeString_NonScalar(t *testing.T) {
+	n := &Node{Kind: MapNode, MapItems: make(map[string]*Node)}
+	if n.String() != "" {
+		t.Fatalf("expected empty string for MapNode, got %q", n.String())
+	}
+	n2 := &Node{Kind: SequenceNode, Items: []*Node{}}
+	if n2.String() != "" {
+		t.Fatalf("expected empty string for SequenceNode, got %q", n2.String())
+	}
+}
+
+func TestNodeInt_NonScalar(t *testing.T) {
+	n := &Node{Kind: MapNode}
+	_, err := n.Int()
+	if err == nil {
+		t.Fatal("expected error for non-scalar Int()")
+	}
+}
+
+func TestNodeFloat64_NonScalar(t *testing.T) {
+	n := &Node{Kind: SequenceNode}
+	_, err := n.Float64()
+	if err == nil {
+		t.Fatal("expected error for non-scalar Float64()")
+	}
+}
+
+func TestNodeBool_NonScalar(t *testing.T) {
+	n := &Node{Kind: MapNode}
+	_, err := n.Bool()
+	if err == nil {
+		t.Fatal("expected error for non-scalar Bool()")
+	}
+}
+
+func TestNodeBool_InvalidValue(t *testing.T) {
+	n := &Node{Kind: ScalarNode, Value: "maybe"}
+	_, err := n.Bool()
+	if err == nil {
+		t.Fatal("expected error for 'maybe' Bool()")
+	}
+}
+
+func TestFlowSequenceTopLevel(t *testing.T) {
+	input := "[one, two, three]"
+	node, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if node.Kind != SequenceNode {
+		t.Fatalf("expected SequenceNode, got %s", node.Kind)
+	}
+	items := node.Slice()
+	if len(items) != 3 {
+		t.Fatalf("expected 3 items, got %d", len(items))
+	}
+	assertEqual(t, items[0].String(), "one")
+	assertEqual(t, items[1].String(), "two")
+	assertEqual(t, items[2].String(), "three")
+}
+
+func TestFlowMapTopLevel(t *testing.T) {
+	input := "{key1: val1, key2: val2}"
+	node, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if node.Kind != MapNode {
+		t.Fatalf("expected MapNode, got %s", node.Kind)
+	}
+	assertEqual(t, node.Get("key1").String(), "val1")
+	assertEqual(t, node.Get("key2").String(), "val2")
+}
+
+func TestFlowSequenceInvalid(t *testing.T) {
+	// Missing closing bracket
+	_, err := parseFlowSequence("[a, b", 1)
+	if err == nil {
+		t.Fatal("expected error for invalid flow sequence")
+	}
+}
+
+func TestFlowMapInvalid(t *testing.T) {
+	// Missing closing brace
+	_, err := parseFlowMap("{a: 1", 1)
+	if err == nil {
+		t.Fatal("expected error for invalid flow map")
+	}
+}
+
+func TestFlowMapInvalidEntry(t *testing.T) {
+	// Entry without colon
+	_, err := parseFlowMap("{novalue}", 1)
+	if err == nil {
+		t.Fatal("expected error for flow map entry without colon")
+	}
+}
+
+func TestFlowSequenceNestedFlowMap(t *testing.T) {
+	input := "data: [{key: val1}, {key: val2}]"
+	node, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	items := node.Get("data").Slice()
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(items))
+	}
+	assertEqual(t, items[0].Get("key").String(), "val1")
+	assertEqual(t, items[1].Get("key").String(), "val2")
+}
+
+func TestSplitFlowItemsWithQuotes(t *testing.T) {
+	// Items inside quotes should not be split
+	items := splitFlowItems(`"a, b", 'c, d', e`)
+	if len(items) != 3 {
+		t.Fatalf("expected 3 items, got %d: %v", len(items), items)
+	}
+}
+
+func TestSplitFlowItemsWithEscape(t *testing.T) {
+	items := splitFlowItems(`"a\"b", c`)
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items, got %d: %v", len(items), items)
+	}
+}
+
+func TestSplitFlowItemsSingleQuoteEscape(t *testing.T) {
+	items := splitFlowItems(`'it''s', ok`)
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items, got %d: %v", len(items), items)
+	}
+}
+
+func TestLiteralBlockKeep(t *testing.T) {
+	input := "text: |+\n  hello\n  world\n\n"
+	node, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	val := node.Get("text").String()
+	if !strings.HasSuffix(val, "\n") {
+		t.Fatalf("expected trailing newline with |+, got %q", val)
+	}
+}
+
+func TestFoldedBlockKeep(t *testing.T) {
+	input := "text: >+\n  hello\n  world\n\n"
+	node, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	val := node.Get("text").String()
+	if !strings.HasSuffix(val, "\n") {
+		t.Fatalf("expected trailing newlines with >+, got %q", val)
+	}
+}
+
+func TestFoldedBlockWithBlankLines(t *testing.T) {
+	input := "text: >\n  paragraph one\n\n  paragraph two\n"
+	node, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	val := node.Get("text").String()
+	if !strings.Contains(val, "paragraph one") || !strings.Contains(val, "paragraph two") {
+		t.Fatalf("expected both paragraphs, got %q", val)
+	}
+}
+
+func TestLiteralBlockEmpty(t *testing.T) {
+	// Literal block with no content lines
+	input := "text: |\nother: value"
+	node, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// "text" should be empty because "other:" is at indent 0
+	val := node.Get("text").String()
+	if val != "" {
+		t.Fatalf("expected empty literal block, got %q", val)
+	}
+}
+
+func TestFoldedBlockEmpty(t *testing.T) {
+	input := "text: >\nother: value"
+	node, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	val := node.Get("text").String()
+	if val != "" {
+		t.Fatalf("expected empty folded block, got %q", val)
+	}
+}
+
+func TestBlockSequenceWithLiteralBlock(t *testing.T) {
+	input := "items:\n  - |\n    line1\n    line2\n"
+	node, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	items := node.Get("items").Slice()
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(items))
+	}
+	val := items[0].String()
+	if !strings.Contains(val, "line1") || !strings.Contains(val, "line2") {
+		t.Fatalf("expected literal content, got %q", val)
+	}
+}
+
+func TestBlockSequenceWithFoldedBlock(t *testing.T) {
+	input := "items:\n  - >\n    folded\n    text\n"
+	node, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	items := node.Get("items").Slice()
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(items))
+	}
+	val := items[0].String()
+	if !strings.Contains(val, "folded") {
+		t.Fatalf("expected folded content, got %q", val)
+	}
+}
+
+func TestBlockSequenceWithFlowMap(t *testing.T) {
+	input := "items:\n  - {name: test, value: 42}\n"
+	node, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	items := node.Get("items").Slice()
+	if len(items) != 1 {
+		t.Fatalf("expected 1 item, got %d", len(items))
+	}
+	// Flow map as sequence item is parsed; verify it has map kind
+	if items[0].Kind != MapNode {
+		t.Fatalf("expected MapNode, got %s", items[0].Kind)
+	}
+}
+
+func TestBlockSequenceEmptyItem(t *testing.T) {
+	input := "items:\n  -\n  - value"
+	node, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	items := node.Get("items").Slice()
+	if len(items) != 2 {
+		t.Fatalf("expected 2 items, got %d", len(items))
+	}
+}
+
+func TestBlockSequenceNestedSequence(t *testing.T) {
+	input := "matrix:\n  -\n    - inner1\n    - inner2\n"
+	node, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	matrix := node.Get("matrix").Slice()
+	if len(matrix) != 1 {
+		t.Fatalf("expected 1 outer item, got %d", len(matrix))
+	}
+	inner := matrix[0].Slice()
+	if len(inner) != 2 {
+		t.Fatalf("expected 2 inner items, got %d", len(inner))
+	}
+}
+
+func TestMaxNestingDepthMapping(t *testing.T) {
+	// Build YAML with > 10 nesting levels
+	var b strings.Builder
+	for i := 0; i < 12; i++ {
+		for j := 0; j < i; j++ {
+			b.WriteByte(' ')
+			b.WriteByte(' ')
+		}
+		b.WriteString("level: \n")
+	}
+	_, err := Parse([]byte(b.String()))
+	if err == nil {
+		t.Fatal("expected nesting depth error")
+	}
+	if !strings.Contains(err.Error(), "nesting depth") {
+		t.Fatalf("expected nesting depth error, got: %v", err)
+	}
+}
+
+func TestMaxNestingDepthSequence(t *testing.T) {
+	// Build YAML with deeply nested sequences
+	var b strings.Builder
+	for i := 0; i < 12; i++ {
+		for j := 0; j < i; j++ {
+			b.WriteByte(' ')
+			b.WriteByte(' ')
+		}
+		b.WriteString("- \n")
+	}
+	_, err := Parse([]byte(b.String()))
+	if err == nil {
+		t.Fatal("expected nesting depth error")
+	}
+}
+
+func TestUnescapeDoubleQuotedAllEscapes(t *testing.T) {
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		{`hello\nworld`, "hello\nworld"},
+		{`tab\there`, "tab\there"},
+		{`back\\slash`, "back\\slash"},
+		{`quote\"here`, "quote\"here"},
+		{`single\'quote`, "single'quote"},
+		{`return\rhere`, "return\rhere"},
+		{`null\0byte`, "null\x00byte"},
+		{`bell\aalert`, "bell\aalert"},
+		{`backspace\bhere`, "backspace\bhere"},
+		{`formfeed\fhere`, "formfeed\fhere"},
+		{`vtab\vhere`, "vtab\vhere"},
+		{`unknown\xescape`, "unknown\\xescape"},
+	}
+	for _, tt := range tests {
+		result := unescapeDoubleQuoted(tt.input)
+		if result != tt.expected {
+			t.Errorf("unescapeDoubleQuoted(%q) = %q, want %q", tt.input, result, tt.expected)
+		}
+	}
+}
+
+func TestCountIndentWithTabs(t *testing.T) {
+	result := countIndent("\t\tkey: value")
+	if result != 2 {
+		t.Fatalf("expected indent 2 for tabs, got %d", result)
+	}
+}
+
+func TestParseKeyValueQuotedKey(t *testing.T) {
+	key, val, ok := parseKeyValue("'quoted key': value")
+	if !ok {
+		t.Fatal("expected valid key-value pair")
+	}
+	if key != "quoted key" {
+		t.Fatalf("expected 'quoted key', got %q", key)
+	}
+	if val != "value" {
+		t.Fatalf("expected 'value', got %q", val)
+	}
+}
+
+func TestParseKeyValueEscapedColon(t *testing.T) {
+	// Colon not followed by space should not be treated as separator
+	key, val, ok := parseKeyValue("url: http://example.com:8080")
+	if !ok {
+		t.Fatal("expected valid key-value pair")
+	}
+	if key != "url" {
+		t.Fatalf("expected 'url', got %q", key)
+	}
+	if val != "http://example.com:8080" {
+		t.Fatalf("expected URL value, got %q", val)
+	}
+}
+
+func TestParseKeyValueNotKV(t *testing.T) {
+	_, _, ok := parseKeyValue("no colon here")
+	if ok {
+		t.Fatal("expected false for line without colon separator")
+	}
+}
+
+func TestStripInlineCommentAtStart(t *testing.T) {
+	result := stripInlineComment("# just a comment")
+	if result != "" {
+		t.Fatalf("expected empty string, got %q", result)
+	}
+}
+
+func TestStripInlineCommentInSingleQuotes(t *testing.T) {
+	result := stripInlineComment("'has # inside'")
+	if result != "'has # inside'" {
+		t.Fatalf("expected quoted string preserved, got %q", result)
+	}
+}
+
+func TestDuplicateKeys(t *testing.T) {
+	input := "key: first\nkey: second"
+	node, err := Parse([]byte(input))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Last value should win
+	assertEqual(t, node.Get("key").String(), "second")
+}
+
+func TestParseKeyValueColonAtEnd(t *testing.T) {
+	key, val, ok := parseKeyValue("key:")
+	if !ok {
+		t.Fatal("expected valid key-value pair for 'key:'")
+	}
+	if key != "key" {
+		t.Fatalf("expected 'key', got %q", key)
+	}
+	if val != "" {
+		t.Fatalf("expected empty value, got %q", val)
+	}
+}
+
+func TestParseKeyValueWithBackslash(t *testing.T) {
+	key, val, ok := parseKeyValue(`path\:esc: value`)
+	if !ok {
+		t.Fatal("expected valid key-value pair")
+	}
+	// The backslash escapes the colon in the key portion
+	if key == "" || val == "" {
+		t.Fatalf("expected non-empty key and value, got key=%q val=%q", key, val)
+	}
+}

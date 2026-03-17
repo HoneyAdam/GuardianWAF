@@ -1,7 +1,9 @@
 package proxy
 
 import (
+	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -696,5 +698,752 @@ func TestSingleJoiningSlash(t *testing.T) {
 		if got != tt.expected {
 			t.Errorf("singleJoiningSlash(%q, %q) = %q, want %q", tt.a, tt.b, got, tt.expected)
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Circuit Breaker - String() and default thresholds
+// ---------------------------------------------------------------------------
+
+func TestCircuitStateString(t *testing.T) {
+	tests := []struct {
+		state    CircuitState
+		expected string
+	}{
+		{CircuitClosed, "closed"},
+		{CircuitOpen, "open"},
+		{CircuitHalfOpen, "half-open"},
+		{CircuitState(99), "unknown"},
+	}
+
+	for _, tt := range tests {
+		got := tt.state.String()
+		if got != tt.expected {
+			t.Errorf("CircuitState(%d).String() = %q, want %q", tt.state, got, tt.expected)
+		}
+	}
+}
+
+func TestNewCircuitBreakerDefaults(t *testing.T) {
+	// Zero/negative values should use defaults
+	cb := NewCircuitBreaker(0, 0, 0)
+
+	host := "defaults.example.com"
+	// Should need 5 failures (default) to open
+	for i := 0; i < 4; i++ {
+		cb.RecordFailure(host)
+	}
+	if cb.State(host) != CircuitClosed {
+		t.Error("circuit should still be closed after 4 failures with default threshold of 5")
+	}
+	cb.RecordFailure(host)
+	if cb.State(host) != CircuitOpen {
+		t.Error("circuit should be open after 5 failures with default threshold")
+	}
+}
+
+func TestNewCircuitBreakerNegativeValues(t *testing.T) {
+	cb := NewCircuitBreaker(-1, -1, -1*time.Second)
+	host := "neg.example.com"
+
+	// Defaults: failureThreshold=5, successThreshold=2, timeout=30s
+	if !cb.Allow(host) {
+		t.Error("should allow initially")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Health Checker - Start/Stop lifecycle
+// ---------------------------------------------------------------------------
+
+func TestHealthCheckerStartStop(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	b := newTestBackend(server.URL, 1, true)
+	hc := NewHealthChecker([]*Backend{b}, 50*time.Millisecond, 2*time.Second, "/health")
+
+	hc.Start()
+	// Let it run a couple of cycles
+	time.Sleep(150 * time.Millisecond)
+	hc.Stop()
+
+	// Backend should still be healthy
+	if !b.IsHealthy() {
+		t.Error("backend should be healthy after successful health checks")
+	}
+}
+
+func TestHealthCheckerDefaultValues(t *testing.T) {
+	b := newTestBackend("http://127.0.0.1:1", 1, true)
+	// Pass zero values for interval, timeout, and empty path
+	hc := NewHealthChecker([]*Backend{b}, 0, 0, "")
+	if hc == nil {
+		t.Fatal("expected non-nil health checker")
+	}
+	// Just verify it was created with defaults (no panic)
+}
+
+// ---------------------------------------------------------------------------
+// Load Balancer - NewLoadBalancer factory
+// ---------------------------------------------------------------------------
+
+func TestNewLoadBalancerFactory(t *testing.T) {
+	backends := []*Backend{
+		newTestBackend("http://server1:80", 1, true),
+	}
+
+	tests := []struct {
+		algorithm string
+	}{
+		{"round_robin"},
+		{"weighted"},
+		{"least_conn"},
+		{"ip_hash"},
+		{"unknown_algo"}, // should default to round_robin
+	}
+
+	for _, tt := range tests {
+		lb := NewLoadBalancer(tt.algorithm, backends)
+		if lb == nil {
+			t.Errorf("NewLoadBalancer(%q) returned nil", tt.algorithm)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Weighted load balancer edge cases
+// ---------------------------------------------------------------------------
+
+func TestWeightedAllUnhealthy(t *testing.T) {
+	backends := []*Backend{
+		newTestBackend("http://server1:80", 3, false),
+		newTestBackend("http://server2:80", 1, false),
+	}
+
+	lb := NewWeighted(backends)
+	req := httptest.NewRequest("GET", "/", nil)
+	req.RemoteAddr = "10.0.0.1:1234"
+
+	selected := lb.Select(req)
+	if selected != nil {
+		t.Error("expected nil when all backends unhealthy")
+	}
+}
+
+func TestWeightedZeroWeights(t *testing.T) {
+	// Backends with zero weight should be treated as weight=1
+	backends := []*Backend{
+		newTestBackend("http://server1:80", 0, true),
+		newTestBackend("http://server2:80", 0, true),
+	}
+
+	lb := NewWeighted(backends)
+	counts := map[*Backend]int{}
+
+	for i := 0; i < 100; i++ {
+		req := httptest.NewRequest("GET", "/", nil)
+		req.RemoteAddr = "10.0.0.1:1234"
+		selected := lb.Select(req)
+		if selected == nil {
+			t.Fatal("expected non-nil backend")
+		}
+		counts[selected]++
+	}
+
+	// Both should get roughly equal distribution since both have effective weight=1
+	if counts[backends[0]] == 0 || counts[backends[1]] == 0 {
+		t.Errorf("expected both backends to receive requests: %d, %d", counts[backends[0]], counts[backends[1]])
+	}
+}
+
+// ---------------------------------------------------------------------------
+// LeastConn edge cases
+// ---------------------------------------------------------------------------
+
+func TestLeastConnAllUnhealthy(t *testing.T) {
+	backends := []*Backend{
+		newTestBackend("http://server1:80", 1, false),
+		newTestBackend("http://server2:80", 1, false),
+	}
+
+	lb := NewLeastConn(backends)
+	req := httptest.NewRequest("GET", "/", nil)
+
+	if lb.Select(req) != nil {
+		t.Error("expected nil when all backends unhealthy")
+	}
+}
+
+func TestLeastConnEqualConns(t *testing.T) {
+	backends := []*Backend{
+		newTestBackend("http://server1:80", 1, true),
+		newTestBackend("http://server2:80", 1, true),
+		newTestBackend("http://server3:80", 1, true),
+	}
+
+	// All have 0 active connections
+	lb := NewLeastConn(backends)
+	req := httptest.NewRequest("GET", "/", nil)
+
+	selected := lb.Select(req)
+	if selected == nil {
+		t.Error("expected non-nil backend when all healthy")
+	}
+}
+
+func TestLeastConnSkipsUnhealthy(t *testing.T) {
+	backends := []*Backend{
+		newTestBackend("http://server1:80", 1, false), // unhealthy, 0 conns
+		newTestBackend("http://server2:80", 1, true),  // healthy, 10 conns
+	}
+	backends[1].ActiveConns.Store(10)
+
+	lb := NewLeastConn(backends)
+	req := httptest.NewRequest("GET", "/", nil)
+
+	selected := lb.Select(req)
+	if selected != backends[1] {
+		t.Error("should select healthy backend even with more connections")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// IPHash edge cases
+// ---------------------------------------------------------------------------
+
+func TestIPHashAllUnhealthy(t *testing.T) {
+	backends := []*Backend{
+		newTestBackend("http://server1:80", 1, false),
+		newTestBackend("http://server2:80", 1, false),
+	}
+
+	lb := NewIPHash(backends)
+	req := httptest.NewRequest("GET", "/", nil)
+	req.RemoteAddr = "10.0.0.1:1234"
+
+	if lb.Select(req) != nil {
+		t.Error("expected nil when all backends unhealthy")
+	}
+}
+
+func TestIPHashDifferentIPs(t *testing.T) {
+	backends := make([]*Backend, 5)
+	for i := 0; i < 5; i++ {
+		backends[i] = newTestBackend(fmt.Sprintf("http://server%d:80", i), 1, true)
+	}
+
+	lb := NewIPHash(backends)
+
+	// Test multiple different IPs map to backends consistently
+	ips := []string{"1.1.1.1:100", "2.2.2.2:200", "3.3.3.3:300", "4.4.4.4:400", "5.5.5.5:500"}
+	for _, ip := range ips {
+		req1 := httptest.NewRequest("GET", "/", nil)
+		req1.RemoteAddr = ip
+		s1 := lb.Select(req1)
+
+		req2 := httptest.NewRequest("GET", "/other", nil)
+		req2.RemoteAddr = ip
+		s2 := lb.Select(req2)
+
+		if s1 != s2 {
+			t.Errorf("IP %s mapped to different backends", ip)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Backend String()
+// ---------------------------------------------------------------------------
+
+func TestBackendString(t *testing.T) {
+	b := newTestBackend("http://example.com:8080", 3, true)
+	s := b.String()
+	if !strings.Contains(s, "example.com:8080") {
+		t.Errorf("expected URL in string, got %q", s)
+	}
+	if !strings.Contains(s, "Weight: 3") {
+		t.Errorf("expected weight in string, got %q", s)
+	}
+	if !strings.Contains(s, "Healthy: true") {
+		t.Errorf("expected healthy status in string, got %q", s)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Proxy SetHealthChecker
+// ---------------------------------------------------------------------------
+
+func TestProxySetHealthChecker(t *testing.T) {
+	b := newTestBackend("http://127.0.0.1:1", 1, true)
+	proxy := NewProxy(Config{
+		Backends:     []*Backend{b},
+		LoadBalancer: "round_robin",
+	})
+
+	hc := NewHealthChecker([]*Backend{b}, 10*time.Second, 2*time.Second, "/health")
+	proxy.SetHealthChecker(hc)
+	// Just ensure it doesn't panic
+}
+
+// ---------------------------------------------------------------------------
+// Proxy with circuit breaker - failure path
+// ---------------------------------------------------------------------------
+
+func TestProxyCircuitBreakerRecordsFailure(t *testing.T) {
+	// Backend that's unreachable to trigger failure recording
+	b := newTestBackend("http://127.0.0.1:1", 1, true)
+
+	cb := NewCircuitBreaker(10, 2, 10*time.Second) // high threshold so circuit stays closed
+
+	proxy := NewProxy(Config{
+		Backends:       []*Backend{b},
+		LoadBalancer:   "round_robin",
+		ConnectTimeout: 200 * time.Millisecond,
+		ReadTimeout:    200 * time.Millisecond,
+	})
+	proxy.SetCircuitBreaker(cb)
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.RemoteAddr = "10.0.0.1:1234"
+	rr := httptest.NewRecorder()
+
+	proxy.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadGateway {
+		t.Errorf("expected 502, got %d", rr.Code)
+	}
+}
+
+func TestProxyCircuitBreakerRecordsSuccess(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ok"))
+	}))
+	defer backend.Close()
+
+	b := newTestBackend(backend.URL, 1, true)
+	cb := NewCircuitBreaker(5, 2, 10*time.Second)
+
+	proxy := NewProxy(Config{
+		Backends:     []*Backend{b},
+		LoadBalancer: "round_robin",
+	})
+	proxy.SetCircuitBreaker(cb)
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.RemoteAddr = "10.0.0.1:1234"
+	rr := httptest.NewRecorder()
+
+	proxy.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rr.Code)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Proxy header forwarding edge cases
+// ---------------------------------------------------------------------------
+
+func TestProxyXForwardedForAppends(t *testing.T) {
+	var receivedHeaders http.Header
+
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedHeaders = r.Header.Clone()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer backend.Close()
+
+	b := newTestBackend(backend.URL, 1, true)
+	proxy := NewProxy(Config{
+		Backends:     []*Backend{b},
+		LoadBalancer: "round_robin",
+	})
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.RemoteAddr = "192.168.1.1:12345"
+	req.Header.Set("X-Forwarded-For", "10.0.0.1")
+	req.Header.Set("X-Real-IP", "10.0.0.1")
+	req.Header.Set("X-Forwarded-Host", "original.host.com")
+	req.Header.Set("X-Forwarded-Proto", "https")
+	rr := httptest.NewRecorder()
+
+	proxy.ServeHTTP(rr, req)
+
+	// X-Forwarded-For should be appended
+	xff := receivedHeaders.Get("X-Forwarded-For")
+	if xff != "10.0.0.1, 192.168.1.1" {
+		t.Errorf("expected X-Forwarded-For '10.0.0.1, 192.168.1.1', got %q", xff)
+	}
+
+	// X-Real-IP should be preserved (not overwritten)
+	xri := receivedHeaders.Get("X-Real-IP")
+	if xri != "10.0.0.1" {
+		t.Errorf("expected X-Real-IP '10.0.0.1' (preserved), got %q", xri)
+	}
+
+	// X-Forwarded-Host should be preserved
+	xfh := receivedHeaders.Get("X-Forwarded-Host")
+	if xfh != "original.host.com" {
+		t.Errorf("expected X-Forwarded-Host 'original.host.com', got %q", xfh)
+	}
+
+	// X-Forwarded-Proto should be preserved
+	xfp := receivedHeaders.Get("X-Forwarded-Proto")
+	if xfp != "https" {
+		t.Errorf("expected X-Forwarded-Proto 'https', got %q", xfp)
+	}
+}
+
+func TestProxyRemoteAddrWithoutPort(t *testing.T) {
+	var receivedHeaders http.Header
+
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedHeaders = r.Header.Clone()
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer backend.Close()
+
+	b := newTestBackend(backend.URL, 1, true)
+	proxy := NewProxy(Config{
+		Backends:     []*Backend{b},
+		LoadBalancer: "round_robin",
+	})
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.RemoteAddr = "192.168.1.1" // no port
+	rr := httptest.NewRecorder()
+
+	proxy.ServeHTTP(rr, req)
+
+	xff := receivedHeaders.Get("X-Forwarded-For")
+	if xff != "192.168.1.1" {
+		t.Errorf("expected X-Forwarded-For '192.168.1.1', got %q", xff)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ClientIP edge cases
+// ---------------------------------------------------------------------------
+
+func TestClientIPWithoutPort(t *testing.T) {
+	req := httptest.NewRequest("GET", "/", nil)
+	req.RemoteAddr = "192.168.1.1" // no port
+	got := ClientIP(req)
+	if got != "192.168.1.1" {
+		t.Errorf("ClientIP() = %q, want %q", got, "192.168.1.1")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Proxy FlushInterval streaming path
+// ---------------------------------------------------------------------------
+
+func TestProxyFlushIntervalStreaming(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Streaming", "true")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("chunk1"))
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
+		}
+		w.Write([]byte("chunk2"))
+	}))
+	defer backend.Close()
+
+	b := newTestBackend(backend.URL, 1, true)
+	proxy := NewProxy(Config{
+		Backends:      []*Backend{b},
+		LoadBalancer:  "round_robin",
+		FlushInterval: 10 * time.Millisecond,
+	})
+
+	req := httptest.NewRequest("GET", "/stream", nil)
+	req.RemoteAddr = "10.0.0.1:1234"
+	rr := httptest.NewRecorder()
+
+	proxy.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rr.Code)
+	}
+
+	body := rr.Body.String()
+	if !strings.Contains(body, "chunk1") || !strings.Contains(body, "chunk2") {
+		t.Errorf("expected streaming body with chunks, got %q", body)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// WebSocket - HandleWebSocket with net.Pipe
+// ---------------------------------------------------------------------------
+
+func TestHandleWebSocketFullFlow(t *testing.T) {
+	// Create a backend that accepts the upgrade and echoes
+	backendListener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to create listener: %v", err)
+	}
+	defer backendListener.Close()
+
+	go func() {
+		conn, err := backendListener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+
+		// Read the upgrade request
+		buf := make([]byte, 4096)
+		n, _ := conn.Read(buf)
+		_ = n
+
+		// Send upgrade response
+		response := "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"
+		conn.Write([]byte(response))
+
+		// Echo data back
+		for {
+			n, err := conn.Read(buf)
+			if err != nil {
+				return
+			}
+			conn.Write(buf[:n])
+		}
+	}()
+
+	backendURL, _ := url.Parse("http://" + backendListener.Addr().String())
+	b := &Backend{
+		URL:     backendURL,
+		Weight:  1,
+		Healthy: true,
+	}
+
+	proxy := NewProxy(Config{
+		Backends:       []*Backend{b},
+		LoadBalancer:   "round_robin",
+		ConnectTimeout: 2 * time.Second,
+	})
+
+	// Create a test server for the proxy
+	proxyServer := httptest.NewServer(proxy)
+	defer proxyServer.Close()
+
+	proxyURL, _ := url.Parse(proxyServer.URL)
+
+	// Connect to the proxy with WebSocket upgrade headers
+	conn, err := net.Dial("tcp", proxyURL.Host)
+	if err != nil {
+		t.Fatalf("failed to connect to proxy: %v", err)
+	}
+	defer conn.Close()
+
+	// Send WebSocket upgrade request
+	upgradeReq := "GET /ws HTTP/1.1\r\nHost: " + proxyURL.Host + "\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n"
+	conn.Write([]byte(upgradeReq))
+
+	// Read the response
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	buf := make([]byte, 4096)
+	n, err := conn.Read(buf)
+	if err != nil {
+		t.Fatalf("failed to read upgrade response: %v", err)
+	}
+
+	resp := string(buf[:n])
+	if !strings.Contains(resp, "101") {
+		t.Errorf("expected 101 Switching Protocols, got %q", resp)
+	}
+
+	// Send a message
+	testMsg := "hello websocket"
+	conn.Write([]byte(testMsg))
+
+	// Read echo response
+	conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	n, err = conn.Read(buf)
+	if err != nil {
+		t.Fatalf("failed to read echo: %v", err)
+	}
+
+	if string(buf[:n]) != testMsg {
+		t.Errorf("expected echo %q, got %q", testMsg, string(buf[:n]))
+	}
+}
+
+func TestHandleWebSocketDialFailure(t *testing.T) {
+	// Backend that's unreachable
+	b := newTestBackend("http://127.0.0.1:1", 1, true)
+
+	proxy := NewProxy(Config{
+		Backends:       []*Backend{b},
+		LoadBalancer:   "round_robin",
+		ConnectTimeout: 200 * time.Millisecond,
+	})
+
+	// Create a request with WebSocket upgrade headers
+	req := httptest.NewRequest("GET", "/ws", nil)
+	req.Header.Set("Upgrade", "websocket")
+	req.Header.Set("Connection", "Upgrade")
+	req.RemoteAddr = "10.0.0.1:1234"
+
+	rr := httptest.NewRecorder()
+	proxy.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadGateway {
+		t.Errorf("expected 502 for unreachable WebSocket backend, got %d", rr.Code)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// WebSocket port inference
+// ---------------------------------------------------------------------------
+
+func TestIsWebSocketUpgrade_ExtraHeaderVariations(t *testing.T) {
+	// Cover connection header containing "upgrade" among other tokens
+	req := httptest.NewRequest("GET", "/ws", nil)
+	req.Header.Set("Upgrade", "websocket")
+	req.Header.Set("Connection", "keep-alive, Upgrade")
+	if !IsWebSocketUpgrade(req) {
+		t.Error("expected WebSocket upgrade to be detected")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Proxy with no backends
+// ---------------------------------------------------------------------------
+
+func TestProxyNoBackends(t *testing.T) {
+	proxy := NewProxy(Config{
+		Backends:     nil,
+		LoadBalancer: "round_robin",
+	})
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.RemoteAddr = "10.0.0.1:1234"
+	rr := httptest.NewRecorder()
+
+	proxy.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected 503, got %d", rr.Code)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Proxy with all config defaults
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// CircuitBreaker Allow default branch and State for unknown host
+// ---------------------------------------------------------------------------
+
+func TestCircuitBreakerStateUnknownHost(t *testing.T) {
+	cb := NewCircuitBreaker(3, 2, 100*time.Millisecond)
+
+	// State for a host that has never been seen should return CircuitClosed
+	state := cb.State("never-seen.example.com")
+	if state != CircuitClosed {
+		t.Errorf("expected CircuitClosed for unknown host, got %v", state)
+	}
+}
+
+func TestCircuitBreakerRecordSuccessOnClosed(t *testing.T) {
+	cb := NewCircuitBreaker(5, 2, 100*time.Millisecond)
+	host := "success-closed.example.com"
+
+	// Record some failures
+	cb.RecordFailure(host)
+	cb.RecordFailure(host)
+
+	// Record success should reset failures
+	cb.RecordSuccess(host)
+
+	// After reset, need full 5 failures to open
+	for i := 0; i < 4; i++ {
+		cb.RecordFailure(host)
+	}
+	if cb.State(host) != CircuitClosed {
+		t.Error("expected circuit to be closed - success should have reset failure count")
+	}
+	cb.RecordFailure(host)
+	if cb.State(host) != CircuitOpen {
+		t.Error("expected circuit to be open after 5 failures")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// WebSocket - port inference for https/wss and no-port cases
+// ---------------------------------------------------------------------------
+
+func TestHandleWebSocketHTTPSPortInference(t *testing.T) {
+	// Test that HandleWebSocket adds :443 for https backends without port
+	b := newTestBackend("https://example.com", 1, true)
+
+	proxy := NewProxy(Config{
+		Backends:       []*Backend{b},
+		LoadBalancer:   "round_robin",
+		ConnectTimeout: 200 * time.Millisecond,
+	})
+
+	req := httptest.NewRequest("GET", "/ws", nil)
+	req.Header.Set("Upgrade", "websocket")
+	req.Header.Set("Connection", "Upgrade")
+	req.RemoteAddr = "10.0.0.1:1234"
+
+	rr := httptest.NewRecorder()
+	proxy.ServeHTTP(rr, req)
+
+	// Should get 502 because example.com:443 is unreachable, but exercises the port inference code
+	if rr.Code != http.StatusBadGateway {
+		t.Errorf("expected 502, got %d", rr.Code)
+	}
+}
+
+func TestHandleWebSocketHTTPPortInference(t *testing.T) {
+	// Test that HandleWebSocket adds :80 for http backends without port
+	b := newTestBackend("http://example.com", 1, true)
+
+	proxy := NewProxy(Config{
+		Backends:       []*Backend{b},
+		LoadBalancer:   "round_robin",
+		ConnectTimeout: 200 * time.Millisecond,
+	})
+
+	req := httptest.NewRequest("GET", "/ws", nil)
+	req.Header.Set("Upgrade", "websocket")
+	req.Header.Set("Connection", "Upgrade")
+	req.RemoteAddr = "10.0.0.1:1234"
+
+	rr := httptest.NewRecorder()
+	proxy.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusBadGateway {
+		t.Errorf("expected 502, got %d", rr.Code)
+	}
+}
+
+func TestProxyConfigDefaults(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer backend.Close()
+
+	b := newTestBackend(backend.URL, 1, true)
+	// Pass zero values for all config fields - should use defaults
+	proxy := NewProxy(Config{
+		Backends: []*Backend{b},
+	})
+
+	req := httptest.NewRequest("GET", "/", nil)
+	req.RemoteAddr = "10.0.0.1:1234"
+	rr := httptest.NewRecorder()
+	proxy.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", rr.Code)
 	}
 }

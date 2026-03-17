@@ -807,6 +807,393 @@ func BenchmarkTokenize(b *testing.B) {
 	}
 }
 
+func TestMakeFinding_LongMatchTruncation(t *testing.T) {
+	longMatch := strings.Repeat("x", 250)
+	f := makeFinding(50, engine.SeverityHigh, "test", longMatch, "query", 0.8)
+	if len(f.MatchedValue) > 200 {
+		t.Errorf("expected matched value truncated to <= 200 chars, got %d", len(f.MatchedValue))
+	}
+	if f.MatchedValue[len(f.MatchedValue)-3:] != "..." {
+		t.Error("expected truncated value to end with '...'")
+	}
+}
+
+func TestStripQuotes_EdgeCases(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"single char", "x", "x"},
+		{"empty string", "", ""},
+		{"mismatched quotes", "'hello\"", "'hello\""},
+		{"single quotes", "'hello'", "hello"},
+		{"double quotes", `"hello"`, "hello"},
+		{"backticks", "`hello`", "hello"},
+		{"just quotes", "''", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := stripQuotes(tt.input)
+			if got != tt.want {
+				t.Errorf("stripQuotes(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExtractRange_BoundaryEdgeCases(t *testing.T) {
+	tokens := []Token{
+		{Type: TokenKeyword, Value: "SELECT"},
+		{Type: TokenWildcard, Value: "*"},
+		{Type: TokenKeyword, Value: "FROM"},
+	}
+
+	// start < 0 should be clamped to 0
+	result := extractRange(tokens, -5, 2)
+	if !strings.Contains(result, "SELECT") {
+		t.Errorf("expected result to start from token 0, got %q", result)
+	}
+
+	// end >= len(tokens) should be clamped to len(tokens)-1
+	result2 := extractRange(tokens, 0, 100)
+	if !strings.Contains(result2, "FROM") {
+		t.Errorf("expected result to include last token, got %q", result2)
+	}
+
+	// empty tokens
+	result3 := extractRange(nil, 0, 0)
+	if result3 != "" {
+		t.Errorf("expected empty result for nil tokens, got %q", result3)
+	}
+}
+
+func TestTokenizer_UnterminatedString(t *testing.T) {
+	// Unterminated string -- the quote should be emitted as a standalone token
+	tokens := Tokenize("'unterminated")
+	if len(tokens) == 0 {
+		t.Fatal("expected at least one token")
+	}
+	// First token should be the lone quote
+	if tokens[0].Type != TokenStringLiteral {
+		t.Errorf("expected StringLiteral for unterminated quote, got %v", tokens[0].Type)
+	}
+}
+
+func TestTokenizer_UnterminatedBlockComment(t *testing.T) {
+	// Unterminated block comment
+	tokens := Tokenize("/* unterminated comment")
+	if len(tokens) == 0 {
+		t.Fatal("expected at least one token")
+	}
+	found := false
+	for _, tok := range tokens {
+		if tok.Type == TokenComment {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected a comment token for unterminated block comment")
+	}
+}
+
+func TestTokenizer_NestedCommentStyle(t *testing.T) {
+	// /* comment */ with content after
+	tokens := Tokenize("/* test */ SELECT")
+	hasComment := false
+	hasKeyword := false
+	for _, tok := range tokens {
+		if tok.Type == TokenComment {
+			hasComment = true
+		}
+		if tok.Type == TokenKeyword && tok.Value == "SELECT" {
+			hasKeyword = true
+		}
+	}
+	if !hasComment || !hasKeyword {
+		t.Errorf("expected both comment and keyword, hasComment=%v hasKeyword=%v", hasComment, hasKeyword)
+	}
+}
+
+func TestTokenizer_BinaryLiteral(t *testing.T) {
+	tokens := Tokenize("0B1010")
+	found := false
+	for _, tok := range tokens {
+		if tok.Type == TokenNumericLiteral && tok.Value == "0B1010" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected binary literal 0B1010, tokens: %v", tokens)
+	}
+}
+
+func TestTokenizer_EscapedQuoteAtEnd(t *testing.T) {
+	// Backslash at the very end of a quoted string before close
+	tokens := Tokenize("'test\\'")
+	if len(tokens) == 0 {
+		t.Fatal("expected at least one token")
+	}
+}
+
+func TestAnalyzeTokens_EmptyTokens(t *testing.T) {
+	findings := AnalyzeTokens(nil, "query")
+	if len(findings) != 0 {
+		t.Errorf("expected no findings for nil tokens, got %d", len(findings))
+	}
+
+	findings2 := AnalyzeTokens([]Token{}, "query")
+	if len(findings2) != 0 {
+		t.Errorf("expected no findings for empty tokens, got %d", len(findings2))
+	}
+}
+
+func TestHasTautology_InsufficientTokens(t *testing.T) {
+	// Only 2 tokens from startIdx, need at least 3
+	tokens := []Token{
+		{Type: TokenNumericLiteral, Value: "1"},
+		{Type: TokenOperator, Value: "="},
+	}
+	result := hasTautology(tokens, 0)
+	if result {
+		t.Error("expected false for insufficient tokens")
+	}
+}
+
+func TestHasTautology_CommentsBeforeAllOperands(t *testing.T) {
+	// Comments interspersed: 1 /* comment */ = /* comment */ 1
+	tokens := []Token{
+		{Type: TokenComment, Value: "/* c1 */"},
+		{Type: TokenNumericLiteral, Value: "1"},
+		{Type: TokenComment, Value: "/* c2 */"},
+		{Type: TokenOperator, Value: "="},
+		{Type: TokenComment, Value: "/* c3 */"},
+		{Type: TokenNumericLiteral, Value: "1"},
+	}
+	result := hasTautology(tokens, 0)
+	if !result {
+		t.Error("expected true for 1=1 with comments")
+	}
+}
+
+func TestHasTautology_NonEqualOperator(t *testing.T) {
+	// 1 < 1 -- should not be a tautology
+	tokens := []Token{
+		{Type: TokenNumericLiteral, Value: "1"},
+		{Type: TokenOperator, Value: "<"},
+		{Type: TokenNumericLiteral, Value: "1"},
+	}
+	result := hasTautology(tokens, 0)
+	if result {
+		t.Error("expected false for non-equal operator")
+	}
+}
+
+func TestHasTautology_CrossTypeTautology(t *testing.T) {
+	// 'a' = a (string vs identifier -- cross-type tautology)
+	tokens := []Token{
+		{Type: TokenStringLiteral, Value: "'a'"},
+		{Type: TokenOperator, Value: "="},
+		{Type: TokenOther, Value: "a"},
+	}
+	result := hasTautology(tokens, 0)
+	if !result {
+		t.Error("expected true for cross-type tautology 'a'=a")
+	}
+}
+
+func TestCheckExecString_WithComment(t *testing.T) {
+	// EXEC /* comment */ 'command'
+	findings := Detect("EXEC /* comment */ 'normal_value'", "query")
+	hasExec := false
+	for _, f := range findings {
+		if strings.Contains(f.Description, "EXEC") {
+			hasExec = true
+		}
+	}
+	if !hasExec {
+		t.Error("expected EXEC detection with comment before arg")
+	}
+}
+
+func TestCheckExecString_ExecuteKeyword(t *testing.T) {
+	findings := Detect("EXECUTE sp_executesql", "query")
+	hasExec := false
+	for _, f := range findings {
+		if strings.Contains(f.Description, "EXEC") {
+			hasExec = true
+		}
+	}
+	if !hasExec {
+		t.Error("expected EXECUTE detection")
+	}
+}
+
+func TestCheckMultipleDangerousKeywords_TwoKeywords(t *testing.T) {
+	// Only 2 dangerous keywords -- should NOT trigger the bonus
+	findings := Detect("SELECT DROP", "query")
+	hasMultiple := false
+	for _, f := range findings {
+		if strings.Contains(f.Description, "Multiple dangerous") {
+			hasMultiple = true
+		}
+	}
+	if hasMultiple {
+		t.Error("should not detect 'multiple dangerous keywords' with only 2")
+	}
+}
+
+func TestCheckMultipleDangerousKeywords_ThreeKeywords(t *testing.T) {
+	// 3 dangerous keywords -- should trigger the bonus
+	findings := Detect("SELECT DROP DELETE", "query")
+	hasMultiple := false
+	for _, f := range findings {
+		if strings.Contains(f.Description, "Multiple dangerous") {
+			hasMultiple = true
+		}
+	}
+	if !hasMultiple {
+		t.Error("expected 'multiple dangerous keywords' detection with 3+ keywords")
+	}
+}
+
+func TestCheckIntoOutfile_WithComment(t *testing.T) {
+	// INTO /* comment */ OUTFILE
+	findings := Detect("INTO /* comment */ OUTFILE '/tmp/test'", "query")
+	hasInto := false
+	for _, f := range findings {
+		if strings.Contains(f.Description, "INTO OUTFILE") {
+			hasInto = true
+		}
+	}
+	if !hasInto {
+		t.Error("expected INTO OUTFILE detection with comment")
+	}
+}
+
+func TestCheckStackedQuery_WithComment(t *testing.T) {
+	// ; /* comment */ DROP
+	findings := Detect("; /* comment */ DROP TABLE users", "query")
+	hasStacked := false
+	for _, f := range findings {
+		if strings.Contains(f.Description, "Stacked query") {
+			hasStacked = true
+		}
+	}
+	if !hasStacked {
+		t.Error("expected stacked query detection with comment between ; and keyword")
+	}
+}
+
+func TestCheckTimeBasedBlind_WaitforDelay(t *testing.T) {
+	// WAITFOR /* comment */ DELAY
+	findings := Detect("WAITFOR DELAY '0:0:5'", "query")
+	hasWaitfor := false
+	for _, f := range findings {
+		if strings.Contains(f.Description, "WAITFOR DELAY") {
+			hasWaitfor = true
+		}
+	}
+	if !hasWaitfor {
+		t.Error("expected WAITFOR DELAY detection")
+	}
+}
+
+func TestCheckTimeBasedBlind_WaitforWithoutDelay(t *testing.T) {
+	// WAITFOR followed by something other than DELAY
+	findings := Detect("WAITFOR TIME '12:00:00'", "query")
+	// Should not detect WAITFOR DELAY specifically
+	for _, f := range findings {
+		if strings.Contains(f.Description, "WAITFOR DELAY") {
+			t.Error("should not detect WAITFOR DELAY when TIME follows")
+		}
+	}
+}
+
+func TestTokenizer_AtSignIdentifier(t *testing.T) {
+	tokens := Tokenize("@@version")
+	found := false
+	for _, tok := range tokens {
+		if tok.Value == "@@version" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected @@version token, got %v", tokens)
+	}
+}
+
+func TestTokenizer_DotInIdentifier(t *testing.T) {
+	tokens := Tokenize("dbo.users")
+	found := false
+	for _, tok := range tokens {
+		if tok.Value == "dbo.users" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected dbo.users token, got %v", tokens)
+	}
+}
+
+func TestDetect_IsolatedKeywordScoring(t *testing.T) {
+	// A single dangerous keyword should produce a low score
+	findings := Detect("DROP", "query")
+	totalScore := 0
+	for _, f := range findings {
+		totalScore += f.Score
+	}
+	if totalScore != 10 {
+		t.Errorf("isolated keyword DROP: expected score 10, got %d", totalScore)
+	}
+}
+
+func TestContainsSQLContent(t *testing.T) {
+	if !containsSQLContent("hello OR world") {
+		t.Error("expected true for 'hello OR world'")
+	}
+	if !containsSQLContent("SELECT something") {
+		t.Error("expected true for 'SELECT something'")
+	}
+	if containsSQLContent("hello world") {
+		t.Error("expected false for 'hello world'")
+	}
+	if !containsSQLContent("test SLEEP more") {
+		t.Error("expected true for 'test SLEEP more'")
+	}
+}
+
+func TestCheckUnionSelect_UnionWithoutSelect(t *testing.T) {
+	// UNION followed by non-SELECT keyword -- should not trigger
+	findings := Detect("UNION DROP", "query")
+	hasUnionSelect := false
+	for _, f := range findings {
+		if strings.Contains(f.Description, "UNION SELECT") {
+			hasUnionSelect = true
+		}
+	}
+	if hasUnionSelect {
+		t.Error("should not detect UNION SELECT when SELECT is not present")
+	}
+}
+
+func TestCheckBooleanInjection_ANDWithoutPrecedingString(t *testing.T) {
+	// AND with tautology but no preceding string literal
+	findings := Detect("id AND 1=1", "query")
+	hasBoolInjWithTautology := false
+	for _, f := range findings {
+		if strings.Contains(f.Description, "tautology") {
+			hasBoolInjWithTautology = true
+		}
+	}
+	// Should still detect tautology via OR/AND path
+	if !hasBoolInjWithTautology {
+		t.Error("expected tautology detection for 'id AND 1=1'")
+	}
+}
+
 func BenchmarkDetect(b *testing.B) {
 	input := "' UNION SELECT username, password FROM users WHERE id=1 OR 1=1 --"
 	b.ResetTimer()

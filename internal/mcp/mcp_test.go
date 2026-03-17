@@ -1002,3 +1002,447 @@ func TestHandlerRemoveBlacklist(t *testing.T) {
 
 // Ensure unused import for fmt doesn't cause issues in tests
 var _ = fmt.Sprintf
+
+// --- Additional tests for uncovered handler error paths ---
+
+func TestHandlerRemoveWhitelistMissingIP(t *testing.T) {
+	input := sendRequest(1, "tools/call", map[string]interface{}{
+		"name":      "guardianwaf_remove_whitelist",
+		"arguments": map[string]interface{}{},
+	})
+	output := &bytes.Buffer{}
+	s := NewServer(strings.NewReader(input), output)
+	s.SetEngine(newMockEngine())
+	s.RegisterAllTools()
+	s.Run()
+
+	resp := readResponse(t, output.String())
+	result, _ := resp.Result.(map[string]interface{})
+	isError, _ := result["isError"].(bool)
+	if !isError {
+		t.Fatal("expected isError=true for missing ip on remove_whitelist")
+	}
+}
+
+func TestHandlerAddBlacklistMissingIP(t *testing.T) {
+	input := sendRequest(1, "tools/call", map[string]interface{}{
+		"name":      "guardianwaf_add_blacklist",
+		"arguments": map[string]interface{}{},
+	})
+	output := &bytes.Buffer{}
+	s := NewServer(strings.NewReader(input), output)
+	s.SetEngine(newMockEngine())
+	s.RegisterAllTools()
+	s.Run()
+
+	resp := readResponse(t, output.String())
+	result, _ := resp.Result.(map[string]interface{})
+	isError, _ := result["isError"].(bool)
+	if !isError {
+		t.Fatal("expected isError=true for missing ip on add_blacklist")
+	}
+}
+
+func TestHandlerRemoveBlacklistMissingIP(t *testing.T) {
+	input := sendRequest(1, "tools/call", map[string]interface{}{
+		"name":      "guardianwaf_remove_blacklist",
+		"arguments": map[string]interface{}{},
+	})
+	output := &bytes.Buffer{}
+	s := NewServer(strings.NewReader(input), output)
+	s.SetEngine(newMockEngine())
+	s.RegisterAllTools()
+	s.Run()
+
+	resp := readResponse(t, output.String())
+	result, _ := resp.Result.(map[string]interface{})
+	isError, _ := result["isError"].(bool)
+	if !isError {
+		t.Fatal("expected isError=true for missing ip on remove_blacklist")
+	}
+}
+
+func TestHandlerAddRateLimitMissingID(t *testing.T) {
+	input := sendRequest(1, "tools/call", map[string]interface{}{
+		"name":      "guardianwaf_add_ratelimit",
+		"arguments": map[string]interface{}{"limit": 100, "window": "1m"},
+	})
+	output := &bytes.Buffer{}
+	s := NewServer(strings.NewReader(input), output)
+	s.SetEngine(newMockEngine())
+	s.RegisterAllTools()
+	s.Run()
+
+	resp := readResponse(t, output.String())
+	result, _ := resp.Result.(map[string]interface{})
+	isError, _ := result["isError"].(bool)
+	if !isError {
+		t.Fatal("expected isError=true for missing id on add_ratelimit")
+	}
+}
+
+func TestHandlerAddRateLimitZeroLimit(t *testing.T) {
+	input := sendRequest(1, "tools/call", map[string]interface{}{
+		"name":      "guardianwaf_add_ratelimit",
+		"arguments": map[string]interface{}{"id": "r1", "limit": 0, "window": "1m"},
+	})
+	output := &bytes.Buffer{}
+	s := NewServer(strings.NewReader(input), output)
+	s.SetEngine(newMockEngine())
+	s.RegisterAllTools()
+	s.Run()
+
+	resp := readResponse(t, output.String())
+	result, _ := resp.Result.(map[string]interface{})
+	isError, _ := result["isError"].(bool)
+	if !isError {
+		t.Fatal("expected isError=true for zero limit on add_ratelimit")
+	}
+}
+
+func TestHandlerAddRateLimitMissingWindow(t *testing.T) {
+	input := sendRequest(1, "tools/call", map[string]interface{}{
+		"name":      "guardianwaf_add_ratelimit",
+		"arguments": map[string]interface{}{"id": "r1", "limit": 100},
+	})
+	output := &bytes.Buffer{}
+	s := NewServer(strings.NewReader(input), output)
+	s.SetEngine(newMockEngine())
+	s.RegisterAllTools()
+	s.Run()
+
+	resp := readResponse(t, output.String())
+	result, _ := resp.Result.(map[string]interface{})
+	isError, _ := result["isError"].(bool)
+	if !isError {
+		t.Fatal("expected isError=true for missing window on add_ratelimit")
+	}
+}
+
+func TestHandlerRemoveRateLimitMissingID(t *testing.T) {
+	input := sendRequest(1, "tools/call", map[string]interface{}{
+		"name":      "guardianwaf_remove_ratelimit",
+		"arguments": map[string]interface{}{},
+	})
+	output := &bytes.Buffer{}
+	s := NewServer(strings.NewReader(input), output)
+	s.SetEngine(newMockEngine())
+	s.RegisterAllTools()
+	s.Run()
+
+	resp := readResponse(t, output.String())
+	result, _ := resp.Result.(map[string]interface{})
+	isError, _ := result["isError"].(bool)
+	if !isError {
+		t.Fatal("expected isError=true for missing id on remove_ratelimit")
+	}
+}
+
+func TestHandlerAddExclusionMissingPath(t *testing.T) {
+	input := sendRequest(1, "tools/call", map[string]interface{}{
+		"name":      "guardianwaf_add_exclusion",
+		"arguments": map[string]interface{}{"detectors": []string{"sqli"}},
+	})
+	output := &bytes.Buffer{}
+	s := NewServer(strings.NewReader(input), output)
+	s.SetEngine(newMockEngine())
+	s.RegisterAllTools()
+	s.Run()
+
+	resp := readResponse(t, output.String())
+	result, _ := resp.Result.(map[string]interface{})
+	isError, _ := result["isError"].(bool)
+	if !isError {
+		t.Fatal("expected isError=true for missing path on add_exclusion")
+	}
+}
+
+func TestHandlerAddExclusionMissingDetectors(t *testing.T) {
+	input := sendRequest(1, "tools/call", map[string]interface{}{
+		"name":      "guardianwaf_add_exclusion",
+		"arguments": map[string]interface{}{"path": "/test"},
+	})
+	output := &bytes.Buffer{}
+	s := NewServer(strings.NewReader(input), output)
+	s.SetEngine(newMockEngine())
+	s.RegisterAllTools()
+	s.Run()
+
+	resp := readResponse(t, output.String())
+	result, _ := resp.Result.(map[string]interface{})
+	isError, _ := result["isError"].(bool)
+	if !isError {
+		t.Fatal("expected isError=true for missing detectors on add_exclusion")
+	}
+}
+
+func TestHandlerRemoveExclusionMissingPath(t *testing.T) {
+	input := sendRequest(1, "tools/call", map[string]interface{}{
+		"name":      "guardianwaf_remove_exclusion",
+		"arguments": map[string]interface{}{},
+	})
+	output := &bytes.Buffer{}
+	s := NewServer(strings.NewReader(input), output)
+	s.SetEngine(newMockEngine())
+	s.RegisterAllTools()
+	s.Run()
+
+	resp := readResponse(t, output.String())
+	result, _ := resp.Result.(map[string]interface{})
+	isError, _ := result["isError"].(bool)
+	if !isError {
+		t.Fatal("expected isError=true for missing path on remove_exclusion")
+	}
+}
+
+func TestHandlerSetModeMissing(t *testing.T) {
+	input := sendRequest(1, "tools/call", map[string]interface{}{
+		"name":      "guardianwaf_set_mode",
+		"arguments": map[string]interface{}{},
+	})
+	output := &bytes.Buffer{}
+	s := NewServer(strings.NewReader(input), output)
+	s.SetEngine(newMockEngine())
+	s.RegisterAllTools()
+	s.Run()
+
+	resp := readResponse(t, output.String())
+	result, _ := resp.Result.(map[string]interface{})
+	isError, _ := result["isError"].(bool)
+	if !isError {
+		t.Fatal("expected isError=true for missing mode")
+	}
+}
+
+func TestHandlerTestRequestMissingURL(t *testing.T) {
+	input := sendRequest(1, "tools/call", map[string]interface{}{
+		"name":      "guardianwaf_test_request",
+		"arguments": map[string]interface{}{"method": "GET"},
+	})
+	output := &bytes.Buffer{}
+	s := NewServer(strings.NewReader(input), output)
+	s.SetEngine(newMockEngine())
+	s.RegisterAllTools()
+	s.Run()
+
+	resp := readResponse(t, output.String())
+	result, _ := resp.Result.(map[string]interface{})
+	isError, _ := result["isError"].(bool)
+	if !isError {
+		t.Fatal("expected isError=true for missing url on test_request")
+	}
+}
+
+func TestHandlerTestRequestDefaultMethod(t *testing.T) {
+	input := sendRequest(1, "tools/call", map[string]interface{}{
+		"name":      "guardianwaf_test_request",
+		"arguments": map[string]interface{}{"url": "/test"},
+	})
+	output := &bytes.Buffer{}
+	s := NewServer(strings.NewReader(input), output)
+	s.SetEngine(newMockEngine())
+	s.RegisterAllTools()
+	s.Run()
+
+	resp := readResponse(t, output.String())
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %v", resp.Error)
+	}
+	result, _ := resp.Result.(map[string]interface{})
+	isError, _ := result["isError"].(bool)
+	if isError {
+		t.Fatal("expected success for test_request with default method")
+	}
+}
+
+func TestHandlerGetTopIPsDefaultCount(t *testing.T) {
+	input := sendRequest(1, "tools/call", map[string]interface{}{
+		"name":      "guardianwaf_get_top_ips",
+		"arguments": map[string]interface{}{},
+	})
+	output := &bytes.Buffer{}
+	s := NewServer(strings.NewReader(input), output)
+	s.SetEngine(newMockEngine())
+	s.RegisterAllTools()
+	s.Run()
+
+	resp := readResponse(t, output.String())
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %v", resp.Error)
+	}
+}
+
+func TestHandlerGetTopIPsNilParams(t *testing.T) {
+	input := sendRequest(1, "tools/call", map[string]interface{}{
+		"name": "guardianwaf_get_top_ips",
+	})
+	output := &bytes.Buffer{}
+	s := NewServer(strings.NewReader(input), output)
+	s.SetEngine(newMockEngine())
+	s.RegisterAllTools()
+	s.Run()
+
+	resp := readResponse(t, output.String())
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %v", resp.Error)
+	}
+}
+
+func TestHandlerGetEvents(t *testing.T) {
+	input := sendRequest(1, "tools/call", map[string]interface{}{
+		"name":      "guardianwaf_get_events",
+		"arguments": map[string]interface{}{},
+	})
+	output := &bytes.Buffer{}
+	s := NewServer(strings.NewReader(input), output)
+	s.SetEngine(newMockEngine())
+	s.RegisterAllTools()
+	s.Run()
+
+	resp := readResponse(t, output.String())
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %v", resp.Error)
+	}
+}
+
+func TestHandlerGetConfig(t *testing.T) {
+	input := sendRequest(1, "tools/call", map[string]interface{}{
+		"name":      "guardianwaf_get_config",
+		"arguments": map[string]interface{}{},
+	})
+	output := &bytes.Buffer{}
+	s := NewServer(strings.NewReader(input), output)
+	s.SetEngine(newMockEngine())
+	s.RegisterAllTools()
+	s.Run()
+
+	resp := readResponse(t, output.String())
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %v", resp.Error)
+	}
+}
+
+func TestHandlerInvalidJSON(t *testing.T) {
+	// Test handler with completely invalid JSON as arguments
+	tests := []struct {
+		name string
+		tool string
+	}{
+		{"add_whitelist", "guardianwaf_add_whitelist"},
+		{"remove_whitelist", "guardianwaf_remove_whitelist"},
+		{"add_blacklist", "guardianwaf_add_blacklist"},
+		{"remove_blacklist", "guardianwaf_remove_blacklist"},
+		{"add_ratelimit", "guardianwaf_add_ratelimit"},
+		{"remove_ratelimit", "guardianwaf_remove_ratelimit"},
+		{"add_exclusion", "guardianwaf_add_exclusion"},
+		{"remove_exclusion", "guardianwaf_remove_exclusion"},
+		{"set_mode", "guardianwaf_set_mode"},
+		{"test_request", "guardianwaf_test_request"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Send with invalid arguments (a string instead of object)
+			reqStr := fmt.Sprintf(`{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"%s","arguments":"not-json-object"}}`, tt.tool)
+			input := reqStr + "\n"
+			output := &bytes.Buffer{}
+			s := NewServer(strings.NewReader(input), output)
+			s.SetEngine(newMockEngine())
+			s.RegisterAllTools()
+			s.Run()
+
+			resp := readResponse(t, output.String())
+			if resp.Error != nil {
+				// Some may fail at JSON-RPC level
+				return
+			}
+			result, ok := resp.Result.(map[string]interface{})
+			if !ok {
+				return
+			}
+			isError, _ := result["isError"].(bool)
+			if !isError {
+				t.Fatalf("expected isError=true for invalid arguments to %s", tt.tool)
+			}
+		})
+	}
+}
+
+func TestHandlerNoEngineAllTools(t *testing.T) {
+	// Test each handler returns error when engine is nil
+	tools := []struct {
+		name string
+		args map[string]interface{}
+	}{
+		{"guardianwaf_get_stats", map[string]interface{}{}},
+		{"guardianwaf_get_events", map[string]interface{}{}},
+		{"guardianwaf_get_config", map[string]interface{}{}},
+		{"guardianwaf_get_detectors", map[string]interface{}{}},
+		{"guardianwaf_get_top_ips", map[string]interface{}{"count": 5}},
+		{"guardianwaf_add_whitelist", map[string]interface{}{"ip": "1.2.3.4"}},
+		{"guardianwaf_remove_whitelist", map[string]interface{}{"ip": "1.2.3.4"}},
+		{"guardianwaf_add_blacklist", map[string]interface{}{"ip": "1.2.3.4"}},
+		{"guardianwaf_remove_blacklist", map[string]interface{}{"ip": "1.2.3.4"}},
+		{"guardianwaf_set_mode", map[string]interface{}{"mode": "enforce"}},
+		{"guardianwaf_add_ratelimit", map[string]interface{}{"id": "r1", "limit": 100, "window": "1m"}},
+		{"guardianwaf_remove_ratelimit", map[string]interface{}{"id": "r1"}},
+		{"guardianwaf_add_exclusion", map[string]interface{}{"path": "/test", "detectors": []string{"sqli"}}},
+		{"guardianwaf_remove_exclusion", map[string]interface{}{"path": "/test"}},
+		{"guardianwaf_test_request", map[string]interface{}{"url": "/test"}},
+	}
+
+	for _, tt := range tools {
+		t.Run(tt.name, func(t *testing.T) {
+			input := sendRequest(1, "tools/call", map[string]interface{}{
+				"name":      tt.name,
+				"arguments": tt.args,
+			})
+			output := &bytes.Buffer{}
+			s := NewServer(strings.NewReader(input), output)
+			// No engine set
+			s.RegisterAllTools()
+			s.Run()
+
+			resp := readResponse(t, output.String())
+			if resp.Error != nil {
+				return
+			}
+			result, ok := resp.Result.(map[string]interface{})
+			if !ok {
+				t.Fatal("result is not a map")
+			}
+			isError, _ := result["isError"].(bool)
+			if !isError {
+				t.Fatalf("expected isError=true for %s with no engine", tt.name)
+			}
+		})
+	}
+}
+
+func TestHandlerAddRateLimitDefaults(t *testing.T) {
+	// Test that scope and action default values are applied
+	input := sendRequest(1, "tools/call", map[string]interface{}{
+		"name": "guardianwaf_add_ratelimit",
+		"arguments": map[string]interface{}{
+			"id":     "test",
+			"limit":  100,
+			"window": "1m",
+			// scope and action omitted
+		},
+	})
+	output := &bytes.Buffer{}
+	s := NewServer(strings.NewReader(input), output)
+	s.SetEngine(newMockEngine())
+	s.RegisterAllTools()
+	s.Run()
+
+	resp := readResponse(t, output.String())
+	if resp.Error != nil {
+		t.Fatalf("unexpected error: %v", resp.Error)
+	}
+	result, _ := resp.Result.(map[string]interface{})
+	isError, _ := result["isError"].(bool)
+	if isError {
+		t.Fatal("expected success for add_ratelimit with defaults")
+	}
+}

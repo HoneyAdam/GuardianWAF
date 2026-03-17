@@ -379,3 +379,109 @@ func TestIPACL_AutoBanIncrementCount(t *testing.T) {
 		t.Fatalf("expected reason 'second', got %q", reason)
 	}
 }
+
+func TestIPACL_InvalidWhitelistConfig(t *testing.T) {
+	cfg := Config{
+		Enabled:   true,
+		Whitelist: []string{"totally-invalid-ip!!!"},
+	}
+	_, err := NewLayer(cfg)
+	if err == nil {
+		t.Fatal("expected error for invalid whitelist entry")
+	}
+}
+
+func TestIPACL_AutoBanMaxTTL_NoCap(t *testing.T) {
+	// When MaxTTL is 0, no capping should occur
+	cfg := Config{
+		Enabled: true,
+		AutoBan: AutoBanConfig{
+			Enabled: true,
+			MaxTTL:  0,
+		},
+	}
+	layer, err := NewLayer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	layer.AddAutoBan("9.9.9.9", "test", 1*time.Hour)
+
+	layer.mu.RLock()
+	entry := layer.autoBan["9.9.9.9"]
+	layer.mu.RUnlock()
+
+	remaining := time.Until(entry.ExpiresAt)
+	if remaining < 55*time.Minute {
+		t.Fatalf("expected TTL near 1 hour (no cap), got %v", remaining)
+	}
+}
+
+func TestIPACL_RemoveAutoBan_NonExistent(t *testing.T) {
+	cfg := Config{
+		Enabled: true,
+		AutoBan: AutoBanConfig{Enabled: true},
+	}
+	layer, err := NewLayer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Should not panic when removing non-existent entry
+	layer.RemoveAutoBan("99.99.99.99")
+
+	layer.mu.RLock()
+	_, exists := layer.autoBan["99.99.99.99"]
+	layer.mu.RUnlock()
+
+	if exists {
+		t.Fatal("entry should not exist after removing non-existent IP")
+	}
+}
+
+func TestIPACL_IPv6Blacklist(t *testing.T) {
+	cfg := Config{
+		Enabled:   true,
+		Blacklist: []string{"2001:db8::/32"},
+	}
+	layer, err := NewLayer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := &engine.RequestContext{
+		ClientIP: net.ParseIP("2001:db8::1"),
+		Headers:  map[string][]string{},
+		Cookies:  map[string]string{},
+	}
+
+	result := layer.Process(ctx)
+	if result.Action != engine.ActionBlock {
+		t.Fatalf("expected block for IPv6 in blacklist, got %v", result.Action)
+	}
+}
+
+func TestIPACL_ConcurrentAddRemoveCleanup(t *testing.T) {
+	cfg := Config{
+		Enabled: true,
+		AutoBan: AutoBanConfig{Enabled: true},
+	}
+	layer, err := NewLayer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 20; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			ip := net.IPv4(10, 0, byte(id/256), byte(id%256)).String()
+			layer.AddAutoBan(ip, "test", 1*time.Millisecond)
+			time.Sleep(2 * time.Millisecond)
+			layer.CleanupExpired()
+			layer.RemoveAutoBan(ip)
+		}(i)
+	}
+	wg.Wait()
+}

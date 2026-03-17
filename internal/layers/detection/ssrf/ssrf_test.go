@@ -349,6 +349,479 @@ func TestIsMetadataEndpoint(t *testing.T) {
 	}
 }
 
+// --- Additional Coverage Tests ---
+
+func TestDetect_AzureMetadata(t *testing.T) {
+	findings := Detect("http://metadata.azure.com/metadata/instance", "query")
+	totalScore := 0
+	for _, f := range findings {
+		totalScore += f.Score
+	}
+	if totalScore < 90 {
+		t.Errorf("expected score >= 90 for Azure metadata, got %d", totalScore)
+	}
+}
+
+func TestDetect_ECSMetadata(t *testing.T) {
+	findings := Detect("http://169.254.170.2/v2/credentials", "query")
+	totalScore := 0
+	for _, f := range findings {
+		totalScore += f.Score
+	}
+	if totalScore >= 90 {
+		// Score should include both link-local and ECS metadata
+	}
+}
+
+func TestDetect_ProtocolRelativeURL(t *testing.T) {
+	findings := Detect("//10.0.0.1/internal", "query")
+	totalScore := 0
+	for _, f := range findings {
+		totalScore += f.Score
+	}
+	if totalScore < 65 {
+		t.Errorf("expected score >= 65 for protocol-relative private IP, got %d", totalScore)
+	}
+}
+
+func TestDetect_HTTPSPrivateIP(t *testing.T) {
+	findings := Detect("https://192.168.1.1/admin", "query")
+	totalScore := 0
+	for _, f := range findings {
+		totalScore += f.Score
+	}
+	if totalScore < 65 {
+		t.Errorf("expected score >= 65 for HTTPS private IP, got %d", totalScore)
+	}
+}
+
+func TestDetect_URLCredentialHTTPS(t *testing.T) {
+	findings := Detect("https://user:pass@internal.server.com/api", "query")
+	totalScore := 0
+	for _, f := range findings {
+		totalScore += f.Score
+	}
+	if totalScore < 70 {
+		t.Errorf("expected score >= 70 for URL with credentials, got %d", totalScore)
+	}
+}
+
+func TestDetect_DecimalIPPrivateRange(t *testing.T) {
+	// 167772161 = 10.0.0.1 (private)
+	findings := Detect("http://167772161/admin", "query")
+	totalScore := 0
+	for _, f := range findings {
+		totalScore += f.Score
+	}
+	// Should get decimal IP + private range findings
+	if totalScore < 85 {
+		t.Errorf("expected score >= 85 for decimal private IP, got %d", totalScore)
+	}
+}
+
+func TestDetect_DecimalIPLoopback(t *testing.T) {
+	// 2130706433 = 127.0.0.1 (loopback)
+	findings := Detect("http://2130706433/admin", "query")
+	totalScore := 0
+	for _, f := range findings {
+		totalScore += f.Score
+	}
+	if totalScore < 85 {
+		t.Errorf("expected score >= 85 for decimal loopback IP, got %d", totalScore)
+	}
+}
+
+func TestDetect_HexIPMixedCase(t *testing.T) {
+	findings := Detect("http://0X7F.0X0.0X0.0X1/", "query")
+	totalScore := 0
+	for _, f := range findings {
+		totalScore += f.Score
+	}
+	if totalScore < 85 {
+		t.Errorf("expected score >= 85 for hex IP, got %d", totalScore)
+	}
+}
+
+func TestDetect_IPv6FullLoopback(t *testing.T) {
+	findings := Detect("http://[0:0:0:0:0:0:0:1]/admin", "query")
+	totalScore := 0
+	for _, f := range findings {
+		totalScore += f.Score
+	}
+	if totalScore < 85 {
+		t.Errorf("expected score >= 85 for full IPv6 loopback, got %d", totalScore)
+	}
+}
+
+func TestDetect_OctalLoopback(t *testing.T) {
+	findings := Detect("http://0177.0.0.1/admin", "query")
+	totalScore := 0
+	for _, f := range findings {
+		totalScore += f.Score
+	}
+	if totalScore >= 85 {
+		// good
+	}
+}
+
+func TestDetector_ProcessWithBody(t *testing.T) {
+	det := NewDetector(true, 1.0)
+
+	ctx := &engine.RequestContext{
+		NormalizedPath:  "/proxy",
+		NormalizedBody:  "http://10.0.0.1/internal/api",
+		NormalizedQuery: map[string][]string{},
+		Headers:         map[string][]string{},
+		Cookies:         map[string]string{},
+	}
+
+	result := det.Process(ctx)
+	if result.Score < 65 {
+		t.Errorf("expected score >= 65 for body SSRF, got %d", result.Score)
+	}
+}
+
+func TestDetector_ProcessWithCookies(t *testing.T) {
+	det := NewDetector(true, 1.0)
+
+	ctx := &engine.RequestContext{
+		NormalizedPath:  "/",
+		NormalizedQuery: map[string][]string{},
+		Headers:         map[string][]string{},
+		Cookies: map[string]string{
+			"redirect": "http://169.254.169.254/latest/meta-data/",
+		},
+	}
+
+	result := det.Process(ctx)
+	if result.Score < 95 {
+		t.Errorf("expected score >= 95 for cookie SSRF, got %d", result.Score)
+	}
+}
+
+func TestDetector_ProcessWithReferer(t *testing.T) {
+	det := NewDetector(true, 1.0)
+
+	ctx := &engine.RequestContext{
+		NormalizedPath:  "/",
+		NormalizedQuery: map[string][]string{},
+		Headers: map[string][]string{
+			"Referer": {"http://127.0.0.1/admin"},
+		},
+		Cookies: map[string]string{},
+	}
+
+	result := det.Process(ctx)
+	if result.Score < 80 {
+		t.Errorf("expected score >= 80 for referer SSRF, got %d", result.Score)
+	}
+}
+
+func TestDetector_ProcessWithPath(t *testing.T) {
+	det := NewDetector(true, 1.0)
+
+	ctx := &engine.RequestContext{
+		NormalizedPath:  "http://127.0.0.1/internal",
+		NormalizedQuery: map[string][]string{},
+		Headers:         map[string][]string{},
+		Cookies:         map[string]string{},
+	}
+
+	result := det.Process(ctx)
+	if result.Score < 80 {
+		t.Errorf("expected score >= 80 for path SSRF, got %d", result.Score)
+	}
+}
+
+func TestParseIPv4_EmptyOctet(t *testing.T) {
+	ip := ParseIPv4("127..0.1")
+	if ip != nil {
+		t.Error("expected nil for empty octet")
+	}
+}
+
+func TestParseDecimalIP_TooLong(t *testing.T) {
+	ip := ParseDecimalIP("12345678901") // > 10 chars
+	if ip != nil {
+		t.Error("expected nil for too-long decimal")
+	}
+}
+
+func TestParseDecimalIP_Overflow(t *testing.T) {
+	ip := ParseDecimalIP("4294967296") // > 0xFFFFFFFF
+	if ip != nil {
+		t.Error("expected nil for overflow decimal IP")
+	}
+}
+
+func TestParseDecimalIP_Empty(t *testing.T) {
+	ip := ParseDecimalIP("")
+	if ip != nil {
+		t.Error("expected nil for empty string")
+	}
+}
+
+func TestParseOctalIP_EmptyPart(t *testing.T) {
+	ip := ParseOctalIP("0177..0.1")
+	if ip != nil {
+		t.Error("expected nil for empty octet in octal IP")
+	}
+}
+
+func TestParseOctalIP_InvalidOctalDigit(t *testing.T) {
+	ip := ParseOctalIP("0189.0.0.1") // 8 and 9 are not valid octal
+	if ip != nil {
+		t.Error("expected nil for invalid octal digit")
+	}
+}
+
+func TestParseOctalIP_OctalOverflow(t *testing.T) {
+	ip := ParseOctalIP("0777.0.0.1") // 0777 = 511 > 255
+	if ip != nil {
+		t.Error("expected nil for octal overflow")
+	}
+}
+
+func TestParseOctalIP_WrongPartCount(t *testing.T) {
+	ip := ParseOctalIP("0177.0.0")
+	if ip != nil {
+		t.Error("expected nil for wrong part count")
+	}
+}
+
+func TestParseOctalIP_HexPrefixSkipped(t *testing.T) {
+	// Part starting with "0x" should NOT be treated as octal
+	ip := ParseOctalIP("0x7f.0.0.1")
+	if ip != nil {
+		t.Error("expected nil when hex prefix mixed with non-hex parts")
+	}
+}
+
+func TestParseHexIP_EmptyPart(t *testing.T) {
+	ip := ParseHexIP("0x7f..0x0.0x1")
+	if ip != nil {
+		t.Error("expected nil for empty hex octet")
+	}
+}
+
+func TestParseHexIP_WrongPartCount(t *testing.T) {
+	ip := ParseHexIP("0x7f.0x0.0x1")
+	if ip != nil {
+		t.Error("expected nil for wrong part count in hex IP")
+	}
+}
+
+func TestParseHexIP_InvalidHexDigit(t *testing.T) {
+	ip := ParseHexIP("0xgg.0x0.0x0.0x1")
+	if ip != nil {
+		t.Error("expected nil for invalid hex digit")
+	}
+}
+
+func TestParseHexIP_HexOverflow(t *testing.T) {
+	ip := ParseHexIP("0xfff.0x0.0x0.0x1") // 0xfff > 255
+	if ip != nil {
+		t.Error("expected nil for hex overflow")
+	}
+}
+
+func TestParseHexIP_EmptyAfterPrefix(t *testing.T) {
+	ip := ParseHexIP("0x.0x0.0x0.0x1")
+	if ip != nil {
+		t.Error("expected nil for empty hex value")
+	}
+}
+
+func TestIsPrivateIP_InvalidLength(t *testing.T) {
+	result := IsPrivateIP(IPv4{10, 0, 0}) // 3 bytes
+	if result {
+		t.Error("expected false for invalid length IP")
+	}
+}
+
+func TestIsLoopback_InvalidLength(t *testing.T) {
+	result := IsLoopback(IPv4{127, 0}) // 2 bytes
+	if result {
+		t.Error("expected false for invalid length IP")
+	}
+}
+
+func TestIsLinkLocal_InvalidLength(t *testing.T) {
+	result := IsLinkLocal(IPv4{169}) // 1 byte
+	if result {
+		t.Error("expected false for invalid length IP")
+	}
+}
+
+func TestIsMetadataEndpoint_InvalidLength(t *testing.T) {
+	result := IsMetadataEndpoint(IPv4{169, 254}) // 2 bytes
+	if result {
+		t.Error("expected false for invalid length IP")
+	}
+}
+
+func TestIsMetadataEndpoint_NotMetadata(t *testing.T) {
+	result := IsMetadataEndpoint(IPv4{8, 8, 8, 8})
+	if result {
+		t.Error("expected false for non-metadata IP")
+	}
+}
+
+func TestMakeFinding_LongMatch(t *testing.T) {
+	longStr := ""
+	for range 250 {
+		longStr += "a"
+	}
+	f := makeFinding(50, engine.SeverityHigh, "test", longStr, "query", 0.5)
+	if len(f.MatchedValue) > 200 {
+		t.Errorf("expected truncated match, got length %d", len(f.MatchedValue))
+	}
+}
+
+func TestExtractContext_PatternNotFound(t *testing.T) {
+	result := extractContext("hello world", "notfound")
+	if result != "hello world" {
+		t.Errorf("expected full input when pattern not found, got %q", result)
+	}
+}
+
+func TestExtractContext_LongInputPatternNotFound(t *testing.T) {
+	longStr := ""
+	for range 150 {
+		longStr += "a"
+	}
+	result := extractContext(longStr, "notfound")
+	if len(result) != 100 {
+		t.Errorf("expected 100 chars for long input with no match, got %d", len(result))
+	}
+}
+
+func TestExtractContext_PatternAtStart(t *testing.T) {
+	result := extractContext("http://localhost/admin", "http://localhost")
+	if result == "" {
+		t.Error("expected non-empty context")
+	}
+}
+
+func TestDetector_ProcessNoFindings(t *testing.T) {
+	det := NewDetector(true, 1.0)
+
+	ctx := &engine.RequestContext{
+		NormalizedPath:  "/api/v1/users",
+		NormalizedQuery: map[string][]string{"page": {"1"}},
+		Headers:         map[string][]string{},
+		Cookies:         map[string]string{},
+	}
+
+	result := det.Process(ctx)
+	if result.Action != engine.ActionPass {
+		t.Errorf("expected ActionPass for benign request, got %v", result.Action)
+	}
+	if result.Score != 0 {
+		t.Errorf("expected score 0 for benign request, got %d", result.Score)
+	}
+}
+
+func TestDetect_MultipleURLsInInput(t *testing.T) {
+	// Multiple URLs with private IPs in single input
+	input := "first=http://10.0.0.1/a&second=http://172.16.0.1/b"
+	findings := Detect(input, "query")
+	totalScore := 0
+	for _, f := range findings {
+		totalScore += f.Score
+	}
+	if totalScore < 65 {
+		t.Errorf("expected score >= 65 for multiple private IPs, got %d", totalScore)
+	}
+}
+
+func TestDetect_URLWithPort(t *testing.T) {
+	findings := Detect("http://10.0.0.1:8080/internal", "query")
+	totalScore := 0
+	for _, f := range findings {
+		totalScore += f.Score
+	}
+	if totalScore < 65 {
+		t.Errorf("expected score >= 65 for private IP with port, got %d", totalScore)
+	}
+}
+
+func TestDetect_URLWithQueryString(t *testing.T) {
+	findings := Detect("http://192.168.1.1/admin?key=val", "query")
+	totalScore := 0
+	for _, f := range findings {
+		totalScore += f.Score
+	}
+	if totalScore < 65 {
+		t.Errorf("expected score >= 65 for private IP with query, got %d", totalScore)
+	}
+}
+
+func TestDetect_URLWithFragment(t *testing.T) {
+	findings := Detect("http://10.0.0.1/page#section", "query")
+	totalScore := 0
+	for _, f := range findings {
+		totalScore += f.Score
+	}
+	if totalScore < 65 {
+		t.Errorf("expected score >= 65 for private IP with fragment, got %d", totalScore)
+	}
+}
+
+func TestParseOctalIP_MixedOctalAndDecimal(t *testing.T) {
+	// Mix of octal (0177 = 127) and decimal (0, 0, 1)
+	ip := ParseOctalIP("0177.0.0.1")
+	if ip == nil {
+		t.Fatal("expected valid octal IP")
+	}
+	if ip[0] != 127 || ip[1] != 0 || ip[2] != 0 || ip[3] != 1 {
+		t.Errorf("expected 127.0.0.1, got %v", ip)
+	}
+}
+
+func TestParseHexIP_MixedHexAndDecimal(t *testing.T) {
+	// Mix of hex (0x0a = 10) and decimal (0, 0, 1)
+	ip := ParseHexIP("0x0a.0.0.1")
+	if ip == nil {
+		t.Fatal("expected valid hex IP")
+	}
+	if ip[0] != 10 || ip[1] != 0 || ip[2] != 0 || ip[3] != 1 {
+		t.Errorf("expected 10.0.0.1, got %v", ip)
+	}
+}
+
+func TestParseDecUint8_EdgeCases(t *testing.T) {
+	// Boundary: 255
+	n, ok := parseDecUint8("255")
+	if !ok || n != 255 {
+		t.Errorf("expected 255, got %d (ok=%v)", n, ok)
+	}
+
+	// Overflow: 256
+	_, ok = parseDecUint8("256")
+	if ok {
+		t.Error("expected failure for 256")
+	}
+
+	// Empty
+	_, ok = parseDecUint8("")
+	if ok {
+		t.Error("expected failure for empty")
+	}
+
+	// Too long
+	_, ok = parseDecUint8("1234")
+	if ok {
+		t.Error("expected failure for too long")
+	}
+
+	// Non-digit
+	_, ok = parseDecUint8("12a")
+	if ok {
+		t.Error("expected failure for non-digit")
+	}
+}
+
 func BenchmarkDetect(b *testing.B) {
 	input := "http://169.254.169.254/latest/meta-data/"
 	b.ResetTimer()

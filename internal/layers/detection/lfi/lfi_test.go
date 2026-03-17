@@ -243,6 +243,207 @@ func TestDetect_WrapperSchemes(t *testing.T) {
 	}
 }
 
+func TestDetector_Process_BodyCookieReferer(t *testing.T) {
+	det := NewDetector(true, 1.0)
+
+	// Test body scanning
+	ctx := &engine.RequestContext{
+		NormalizedPath:  "/safe",
+		NormalizedQuery: map[string][]string{},
+		NormalizedBody:  "../../../../etc/passwd",
+		Headers:         map[string][]string{},
+		Cookies:         map[string]string{},
+	}
+	result := det.Process(ctx)
+	if result.Score < 50 {
+		t.Errorf("body scan: expected score >= 50, got %d", result.Score)
+	}
+	hasBody := false
+	for _, f := range result.Findings {
+		if f.Location == "body" {
+			hasBody = true
+		}
+	}
+	if !hasBody {
+		t.Error("expected findings with location 'body'")
+	}
+
+	// Test cookie scanning
+	ctx2 := &engine.RequestContext{
+		NormalizedPath:  "/safe",
+		NormalizedQuery: map[string][]string{},
+		Headers:         map[string][]string{},
+		Cookies: map[string]string{
+			"session": "../../../../etc/passwd",
+		},
+	}
+	result2 := det.Process(ctx2)
+	if result2.Score < 50 {
+		t.Errorf("cookie scan: expected score >= 50, got %d", result2.Score)
+	}
+
+	// Test Referer header scanning
+	ctx3 := &engine.RequestContext{
+		NormalizedPath:  "/safe",
+		NormalizedQuery: map[string][]string{},
+		Headers: map[string][]string{
+			"Referer": {"../../../../etc/passwd"},
+		},
+		Cookies: map[string]string{},
+	}
+	result3 := det.Process(ctx3)
+	if result3.Score < 50 {
+		t.Errorf("referer scan: expected score >= 50, got %d", result3.Score)
+	}
+}
+
+func TestDetector_Process_NoFindings(t *testing.T) {
+	det := NewDetector(true, 1.0)
+	ctx := &engine.RequestContext{
+		NormalizedPath:  "/safe/page",
+		NormalizedQuery: map[string][]string{"q": {"hello"}},
+		Headers:         map[string][]string{},
+		Cookies:         map[string]string{},
+	}
+	result := det.Process(ctx)
+	if result.Action != engine.ActionPass {
+		t.Errorf("expected ActionPass for benign request, got %v", result.Action)
+	}
+	if result.Score != 0 {
+		t.Errorf("expected score 0, got %d", result.Score)
+	}
+}
+
+func TestMakeFinding_LongMatchTruncation(t *testing.T) {
+	// Create a matched value longer than 200 chars to trigger truncation
+	longMatch := ""
+	for i := 0; i < 250; i++ {
+		longMatch += "x"
+	}
+	f := makeFinding(50, engine.SeverityHigh, "test", longMatch, "query", 0.8)
+	if len(f.MatchedValue) > 200 {
+		t.Errorf("expected matched value truncated to <= 200 chars, got %d", len(f.MatchedValue))
+	}
+	if f.MatchedValue[len(f.MatchedValue)-3:] != "..." {
+		t.Error("expected truncated value to end with '...'")
+	}
+}
+
+func TestExtractContext_PatternNotFound(t *testing.T) {
+	// Pattern not found, short input (< 100)
+	result := extractContext("short input", "notfound")
+	if result != "short input" {
+		t.Errorf("expected full input when pattern not found, got %q", result)
+	}
+
+	// Pattern not found, long input (> 100)
+	longInput := ""
+	for i := 0; i < 150; i++ {
+		longInput += "a"
+	}
+	result2 := extractContext(longInput, "notfound")
+	if len(result2) != 100 {
+		t.Errorf("expected truncated to 100 chars when pattern not found, got %d", len(result2))
+	}
+}
+
+func TestExtractContext_LongResult(t *testing.T) {
+	// Create input where extractContext produces a result > 200 chars
+	// Pattern at the start, with a very long input after it
+	longInput := "../../" + string(make([]byte, 300))
+	for i := 6; i < len(longInput); i++ {
+		// Replace null bytes with 'a'
+		longInput = longInput[:i] + "a" + longInput[i+1:]
+	}
+	result := extractContext(longInput, "../../")
+	if len(result) > 200 {
+		t.Errorf("expected result truncated to <= 200 chars, got %d", len(result))
+	}
+}
+
+func TestDetect_WindowsDriveLetterMidString(t *testing.T) {
+	// Windows drive letter not at start, preceded by non-letter boundary
+	findings := Detect("=c:\\windows\\system32", "query")
+	totalScore := 0
+	for _, f := range findings {
+		totalScore += f.Score
+	}
+	if totalScore < 50 {
+		t.Errorf("expected score >= 50 for windows drive after boundary, got %d", totalScore)
+	}
+
+	// Windows drive letter preceded by a letter (should NOT match)
+	findings2 := Detect("abc:\\test", "query")
+	hasWindowsDrive := false
+	for _, f := range findings2 {
+		if f.Description == "Windows drive letter path detected" {
+			hasWindowsDrive = true
+		}
+	}
+	if hasWindowsDrive {
+		t.Error("should not detect drive letter when preceded by a letter")
+	}
+}
+
+func TestDetect_GenericPHPWrapper(t *testing.T) {
+	// Generic php:// (not php://filter or php://input)
+	findings := Detect("php://stderr", "query")
+	totalScore := 0
+	for _, f := range findings {
+		totalScore += f.Score
+	}
+	if totalScore < 50 {
+		t.Errorf("expected score >= 50 for generic php:// wrapper, got %d", totalScore)
+	}
+}
+
+func TestDetect_ZipWrapper(t *testing.T) {
+	findings := Detect("zip://archive.zip#dir/file.txt", "query")
+	totalScore := 0
+	for _, f := range findings {
+		totalScore += f.Score
+	}
+	if totalScore >= 60 {
+		// zip:// should be detected
+	}
+	if totalScore < 60 {
+		t.Errorf("expected score >= 60 for zip:// wrapper, got %d", totalScore)
+	}
+}
+
+func TestDetect_MacOSSensitivePaths(t *testing.T) {
+	findings := Detect("/private/etc/passwd", "query")
+	totalScore := 0
+	for _, f := range findings {
+		totalScore += f.Score
+	}
+	if totalScore < 50 {
+		t.Errorf("expected score >= 50 for macOS sensitive path, got %d", totalScore)
+	}
+}
+
+func TestDetect_OverlongUTF8_C1_9C(t *testing.T) {
+	findings := Detect("..%c1%9cetc/passwd", "query")
+	totalScore := 0
+	for _, f := range findings {
+		totalScore += f.Score
+	}
+	if totalScore < 90 {
+		t.Errorf("expected score >= 90 for overlong UTF-8 ..%%c1%%9c, got %d", totalScore)
+	}
+}
+
+func TestDetect_DoubleEncodedBackslash(t *testing.T) {
+	findings := Detect("..%255cetc/passwd", "query")
+	totalScore := 0
+	for _, f := range findings {
+		totalScore += f.Score
+	}
+	if totalScore < 50 {
+		t.Errorf("expected score >= 50 for double-encoded backslash, got %d", totalScore)
+	}
+}
+
 func BenchmarkDetect(b *testing.B) {
 	input := "../../../../etc/passwd"
 	b.ResetTimer()

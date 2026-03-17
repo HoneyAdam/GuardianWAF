@@ -964,3 +964,188 @@ func TestIsValidIPOrCIDR(t *testing.T) {
 		}
 	}
 }
+
+// --- Additional tests for uncovered LoadEnv paths ---
+
+func TestLoadEnv_TLSVars(t *testing.T) {
+	cfg := DefaultConfig()
+
+	os.Setenv("GWAF_TLS_ENABLED", "true")
+	os.Setenv("GWAF_TLS_LISTEN", ":9443")
+	os.Setenv("GWAF_TLS_CERT_FILE", "/etc/ssl/test.pem")
+	os.Setenv("GWAF_TLS_KEY_FILE", "/etc/ssl/test.key")
+	defer os.Unsetenv("GWAF_TLS_ENABLED")
+	defer os.Unsetenv("GWAF_TLS_LISTEN")
+	defer os.Unsetenv("GWAF_TLS_CERT_FILE")
+	defer os.Unsetenv("GWAF_TLS_KEY_FILE")
+
+	LoadEnv(cfg)
+
+	if !cfg.TLS.Enabled {
+		t.Fatal("expected TLS enabled")
+	}
+	if cfg.TLS.Listen != ":9443" {
+		t.Fatalf("expected TLS listen ':9443', got %q", cfg.TLS.Listen)
+	}
+	if cfg.TLS.CertFile != "/etc/ssl/test.pem" {
+		t.Fatalf("expected cert_file, got %q", cfg.TLS.CertFile)
+	}
+	if cfg.TLS.KeyFile != "/etc/ssl/test.key" {
+		t.Fatalf("expected key_file, got %q", cfg.TLS.KeyFile)
+	}
+}
+
+func TestLoadEnv_DashboardEnabled(t *testing.T) {
+	cfg := DefaultConfig()
+
+	os.Setenv("GWAF_DASHBOARD_ENABLED", "false")
+	defer os.Unsetenv("GWAF_DASHBOARD_ENABLED")
+
+	LoadEnv(cfg)
+
+	if cfg.Dashboard.Enabled {
+		t.Fatal("expected dashboard disabled from env")
+	}
+}
+
+func TestLoadEnv_InvalidIntIgnored(t *testing.T) {
+	cfg := DefaultConfig()
+	originalBlock := cfg.WAF.Detection.Threshold.Block
+
+	os.Setenv("GWAF_WAF_DETECTION_THRESHOLD_BLOCK", "not_a_number")
+	defer os.Unsetenv("GWAF_WAF_DETECTION_THRESHOLD_BLOCK")
+
+	LoadEnv(cfg)
+
+	// Should remain unchanged since parsing fails
+	if cfg.WAF.Detection.Threshold.Block != originalBlock {
+		t.Fatalf("expected threshold unchanged, got %d", cfg.WAF.Detection.Threshold.Block)
+	}
+}
+
+func TestLoadEnv_InvalidBoolIgnored(t *testing.T) {
+	cfg := DefaultConfig()
+
+	os.Setenv("GWAF_TLS_ENABLED", "not_a_bool")
+	defer os.Unsetenv("GWAF_TLS_ENABLED")
+
+	LoadEnv(cfg)
+
+	// Should remain unchanged
+	if cfg.TLS.Enabled {
+		t.Fatal("expected TLS still disabled (invalid bool ignored)")
+	}
+}
+
+// --- Additional validateListenAddr edge cases ---
+
+func TestValidate_EmptyListenAddress(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Listen = ""
+
+	err := Validate(cfg)
+	if err == nil {
+		t.Fatal("expected validation error for empty listen address")
+	}
+	ve := err.(*ValidationError)
+	found := false
+	for _, fe := range ve.Errors {
+		if fe.Field == "listen" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected error for 'listen', got: %v", ve.Errors)
+	}
+}
+
+func TestValidate_ListenAddressInvalidPort(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Listen = ":99999"
+
+	err := Validate(cfg)
+	if err == nil {
+		t.Fatal("expected validation error for port 99999")
+	}
+	ve := err.(*ValidationError)
+	found := false
+	for _, fe := range ve.Errors {
+		if fe.Field == "listen" && strings.Contains(fe.Message, "port") {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected port error for 'listen', got: %v", ve.Errors)
+	}
+}
+
+func TestValidate_TLSInvalidListenAddress(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.TLS.Enabled = true
+	cfg.TLS.CertFile = "/cert.pem"
+	cfg.TLS.KeyFile = "/key.pem"
+	cfg.TLS.Listen = "invalid-address"
+
+	err := Validate(cfg)
+	if err == nil {
+		t.Fatal("expected validation error for invalid TLS listen")
+	}
+	ve := err.(*ValidationError)
+	found := false
+	for _, fe := range ve.Errors {
+		if fe.Field == "tls.listen" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected error for 'tls.listen', got: %v", ve.Errors)
+	}
+}
+
+func TestValidate_DashboardDisabledSkipsValidation(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Dashboard.Enabled = false
+	cfg.Dashboard.Listen = "totally-invalid"
+	// Should not error since dashboard is disabled
+	err := Validate(cfg)
+	if err != nil {
+		t.Fatalf("expected no error when dashboard disabled, got: %v", err)
+	}
+}
+
+func TestValidate_TLSDisabledSkipsValidation(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.TLS.Enabled = false
+	cfg.TLS.CertFile = ""
+	cfg.TLS.KeyFile = ""
+	// Should not error since TLS is disabled
+	err := Validate(cfg)
+	if err != nil {
+		t.Fatalf("expected no error when TLS disabled, got: %v", err)
+	}
+}
+
+func TestLoadFile_PopulateError(t *testing.T) {
+	// Write a file with invalid nested values that cause populate errors
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bad_values.yaml")
+
+	// This should cause a populate error: boolean expected but got a mapping
+	badYAML := `tls:
+  enabled:
+    nested: value`
+	if err := os.WriteFile(path, []byte(badYAML), 0644); err != nil {
+		t.Fatalf("failed to write temp file: %v", err)
+	}
+
+	_, err := LoadFile(path)
+	if err == nil {
+		t.Fatal("expected error for invalid nested boolean value")
+	}
+	if !strings.Contains(err.Error(), "populating config") {
+		t.Fatalf("expected populating config error, got: %v", err)
+	}
+}

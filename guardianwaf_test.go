@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -375,5 +376,577 @@ func TestMultipleOptions(t *testing.T) {
 	}
 	if eng.cfg.WAF.BotDetection.Enabled {
 		t.Error("expected bot detection to be disabled")
+	}
+}
+
+// --- Additional Coverage Tests ---
+
+func TestNewFromFile_ValidConfig(t *testing.T) {
+	// Create a minimal valid YAML config file
+	tmpDir := t.TempDir()
+	cfgFile := tmpDir + "/guardianwaf.yaml"
+	content := "mode: monitor\n"
+	if err := os.WriteFile(cfgFile, []byte(content), 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	eng, err := NewFromFile(cfgFile)
+	if err != nil {
+		t.Fatalf("NewFromFile() error: %v", err)
+	}
+	defer eng.Close()
+
+	if eng.cfg.Mode != "monitor" {
+		t.Errorf("expected mode 'monitor', got %q", eng.cfg.Mode)
+	}
+}
+
+func TestNewFromFile_InvalidPath(t *testing.T) {
+	_, err := NewFromFile("/nonexistent/path/guardianwaf.yaml")
+	if err == nil {
+		t.Error("expected error for invalid file path")
+	}
+}
+
+func TestNewFromFile_InvalidYAML(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgFile := tmpDir + "/bad.yaml"
+	// Write invalid UTF-8 bytes to trigger parse error
+	content := []byte{0xff, 0xfe, 0x80, 0x81}
+	if err := os.WriteFile(cfgFile, content, 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	_, err := NewFromFile(cfgFile)
+	if err == nil {
+		t.Error("expected error for invalid YAML")
+	}
+}
+
+func TestNewFromFile_WithOptions(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgFile := tmpDir + "/guardianwaf.yaml"
+	content := "mode: enforce\n"
+	if err := os.WriteFile(cfgFile, []byte(content), 0644); err != nil {
+		t.Fatalf("WriteFile failed: %v", err)
+	}
+
+	eng, err := NewFromFile(cfgFile, WithMode(ModeMonitor), WithThreshold(80, 40))
+	if err != nil {
+		t.Fatalf("NewFromFile() error: %v", err)
+	}
+	defer eng.Close()
+
+	if eng.cfg.Mode != ModeMonitor {
+		t.Errorf("expected mode overridden to 'monitor', got %q", eng.cfg.Mode)
+	}
+	if eng.cfg.WAF.Detection.Threshold.Block != 80 {
+		t.Errorf("expected block threshold 80, got %d", eng.cfg.WAF.Detection.Threshold.Block)
+	}
+}
+
+func TestNewWithDefaults_WithOptions(t *testing.T) {
+	eng, err := NewWithDefaults(WithMode(ModeDisabled))
+	if err != nil {
+		t.Fatalf("NewWithDefaults() error: %v", err)
+	}
+	defer eng.Close()
+
+	if eng.cfg.Mode != ModeDisabled {
+		t.Errorf("expected mode %q, got %q", ModeDisabled, eng.cfg.Mode)
+	}
+}
+
+func TestWithMaxURLLength_Option(t *testing.T) {
+	eng, err := New(Config{}, WithMaxURLLength(2048))
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	defer eng.Close()
+
+	if eng.cfg.WAF.Sanitizer.MaxURLLength != 2048 {
+		t.Errorf("expected max URL length 2048, got %d", eng.cfg.WAF.Sanitizer.MaxURLLength)
+	}
+}
+
+func TestWithMaxHeaderSize_Option(t *testing.T) {
+	eng, err := New(Config{}, WithMaxHeaderSize(8192))
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	defer eng.Close()
+
+	if eng.cfg.WAF.Sanitizer.MaxHeaderSize != 8192 {
+		t.Errorf("expected max header size 8192, got %d", eng.cfg.WAF.Sanitizer.MaxHeaderSize)
+	}
+}
+
+func TestWithIPWhitelist_Option(t *testing.T) {
+	eng, err := New(Config{}, WithIPWhitelist("10.0.0.1", "10.0.0.2"))
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	defer eng.Close()
+
+	wl := eng.cfg.WAF.IPACL.Whitelist
+	found := 0
+	for _, ip := range wl {
+		if ip == "10.0.0.1" || ip == "10.0.0.2" {
+			found++
+		}
+	}
+	if found != 2 {
+		t.Errorf("expected 2 whitelisted IPs, found %d in %v", found, wl)
+	}
+}
+
+func TestWithIPBlacklist_Option(t *testing.T) {
+	eng, err := New(Config{}, WithIPBlacklist("192.168.1.1"))
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	defer eng.Close()
+
+	bl := eng.cfg.WAF.IPACL.Blacklist
+	found := false
+	for _, ip := range bl {
+		if ip == "192.168.1.1" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("expected 192.168.1.1 in blacklist, got %v", bl)
+	}
+}
+
+func TestWithSecurityHeaders_Option(t *testing.T) {
+	eng, err := New(Config{}, WithSecurityHeaders(true))
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	defer eng.Close()
+
+	if !eng.cfg.WAF.Response.SecurityHeaders.Enabled {
+		t.Error("expected security headers to be enabled")
+	}
+}
+
+func TestWithDataMasking_Option(t *testing.T) {
+	eng, err := New(Config{}, WithDataMasking(true))
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	defer eng.Close()
+
+	if !eng.cfg.WAF.Response.DataMasking.Enabled {
+		t.Error("expected data masking to be enabled")
+	}
+}
+
+func TestWithMaxEvents_Option(t *testing.T) {
+	eng, err := New(Config{}, WithMaxEvents(5000))
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	defer eng.Close()
+
+	if eng.cfg.Events.MaxEvents != 5000 {
+		t.Errorf("expected max events 5000, got %d", eng.cfg.Events.MaxEvents)
+	}
+}
+
+func TestCheck_XSSRequest(t *testing.T) {
+	eng, err := New(Config{
+		Mode:      ModeEnforce,
+		Threshold: ThresholdConfig{Block: 50, Log: 25},
+	})
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	defer eng.Close()
+
+	req := httptest.NewRequest("GET", "/search?q=%3Cscript%3Ealert(1)%3C/script%3E", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) TestBrowser/1.0")
+
+	result := eng.Check(req)
+	if !result.Blocked {
+		t.Error("XSS request should be blocked")
+	}
+	if result.TotalScore < 50 {
+		t.Errorf("expected score >= 50, got %d", result.TotalScore)
+	}
+}
+
+func TestCheck_BenignRequest(t *testing.T) {
+	eng, err := New(Config{
+		Mode:      ModeEnforce,
+		Threshold: ThresholdConfig{Block: 50, Log: 25},
+	})
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	defer eng.Close()
+
+	req := httptest.NewRequest("GET", "/api/users?page=1&limit=20", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) TestBrowser/1.0")
+
+	result := eng.Check(req)
+	if result.Blocked {
+		t.Error("benign request should not be blocked")
+	}
+	if result.Action == "block" {
+		t.Error("benign request action should not be block")
+	}
+}
+
+func TestStats_MultipleRequests(t *testing.T) {
+	eng, err := New(Config{
+		Mode:      ModeEnforce,
+		Threshold: ThresholdConfig{Block: 50, Log: 25},
+	})
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	defer eng.Close()
+
+	// Multiple clean requests
+	for range 5 {
+		req := httptest.NewRequest("GET", "/test", nil)
+		req.RemoteAddr = "127.0.0.1:12345"
+		req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) TestBrowser/1.0")
+		eng.Check(req)
+	}
+
+	stats := eng.Stats()
+	if stats.TotalRequests != 5 {
+		t.Errorf("expected 5 total requests, got %d", stats.TotalRequests)
+	}
+}
+
+func TestClose_Idempotent(t *testing.T) {
+	eng, err := New(Config{})
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+
+	// First close should succeed
+	if err := eng.Close(); err != nil {
+		t.Errorf("first Close() error: %v", err)
+	}
+}
+
+func TestConvertConfig_AllFields(t *testing.T) {
+	cfg := Config{
+		Mode: ModeMonitor,
+		Detection: DetectionConfig{
+			SQLi:          DetectorConfig{Enabled: true, Multiplier: 1.5},
+			XSS:           DetectorConfig{Enabled: true, Multiplier: 2.0},
+			PathTraversal: DetectorConfig{Enabled: false, Multiplier: 0.5},
+			CmdInjection:  DetectorConfig{Enabled: true, Multiplier: 1.0},
+			XXE:           DetectorConfig{Enabled: true, Multiplier: 1.0},
+			SSRF:          DetectorConfig{Enabled: true, Multiplier: 1.0},
+		},
+		Threshold: ThresholdConfig{Block: 80, Log: 40},
+		Sanitizer: SanitizerConfig{
+			MaxURLLength:  4096,
+			MaxHeaderSize: 16384,
+			MaxBodySize:   10 * 1024 * 1024,
+		},
+		IPACL: IPACLConfig{
+			Whitelist: []string{"10.0.0.1"},
+			Blacklist: []string{"192.168.1.1"},
+		},
+		RateLimit: RateLimitConfig{
+			Enabled: true,
+			Rules: []RateLimitRule{
+				{ID: "global", Scope: "ip", Limit: 100, Window: time.Minute, Burst: 10, Action: "block"},
+			},
+		},
+		Bot: BotConfig{
+			Enabled:            true,
+			BlockEmpty:         true,
+			BlockKnownScanners: true,
+		},
+		Response: ResponseConfig{
+			SecurityHeaders: true,
+			DataMasking:     true,
+		},
+		Events: EventsConfig{
+			MaxEvents: 5000,
+		},
+	}
+
+	internal := convertConfig(cfg)
+
+	if internal.Mode != ModeMonitor {
+		t.Errorf("expected mode monitor, got %q", internal.Mode)
+	}
+	if internal.WAF.Detection.Threshold.Block != 80 {
+		t.Errorf("expected block threshold 80, got %d", internal.WAF.Detection.Threshold.Block)
+	}
+	if internal.WAF.Detection.Threshold.Log != 40 {
+		t.Errorf("expected log threshold 40, got %d", internal.WAF.Detection.Threshold.Log)
+	}
+	if internal.WAF.Sanitizer.MaxURLLength != 4096 {
+		t.Errorf("expected max URL length 4096, got %d", internal.WAF.Sanitizer.MaxURLLength)
+	}
+	if internal.WAF.Sanitizer.MaxHeaderSize != 16384 {
+		t.Errorf("expected max header size 16384, got %d", internal.WAF.Sanitizer.MaxHeaderSize)
+	}
+	if internal.WAF.Sanitizer.MaxBodySize != 10*1024*1024 {
+		t.Errorf("expected max body size, got %d", internal.WAF.Sanitizer.MaxBodySize)
+	}
+	if len(internal.WAF.IPACL.Whitelist) == 0 {
+		t.Error("expected non-empty whitelist")
+	}
+	if len(internal.WAF.IPACL.Blacklist) == 0 {
+		t.Error("expected non-empty blacklist")
+	}
+	if !internal.WAF.RateLimit.Enabled {
+		t.Error("expected rate limit to be enabled")
+	}
+	if len(internal.WAF.RateLimit.Rules) != 1 {
+		t.Errorf("expected 1 rate limit rule, got %d", len(internal.WAF.RateLimit.Rules))
+	}
+	if !internal.WAF.BotDetection.UserAgent.BlockEmpty {
+		t.Error("expected BlockEmpty to be true")
+	}
+	if !internal.WAF.BotDetection.UserAgent.BlockKnownScanners {
+		t.Error("expected BlockKnownScanners to be true")
+	}
+	if !internal.WAF.Response.SecurityHeaders.Enabled {
+		t.Error("expected security headers enabled")
+	}
+	if !internal.WAF.Response.DataMasking.Enabled {
+		t.Error("expected data masking enabled")
+	}
+	if internal.Events.MaxEvents != 5000 {
+		t.Errorf("expected 5000 max events, got %d", internal.Events.MaxEvents)
+	}
+
+	// Verify detector configs
+	sqli, ok := internal.WAF.Detection.Detectors["sqli"]
+	if !ok {
+		t.Fatal("expected sqli detector")
+	}
+	if !sqli.Enabled {
+		t.Error("expected sqli enabled")
+	}
+	if sqli.Multiplier != 1.5 {
+		t.Errorf("expected sqli multiplier 1.5, got %f", sqli.Multiplier)
+	}
+
+	xss, ok := internal.WAF.Detection.Detectors["xss"]
+	if !ok {
+		t.Fatal("expected xss detector")
+	}
+	if xss.Multiplier != 2.0 {
+		t.Errorf("expected xss multiplier 2.0, got %f", xss.Multiplier)
+	}
+
+	lfi, ok := internal.WAF.Detection.Detectors["lfi"]
+	if !ok {
+		t.Fatal("expected lfi detector")
+	}
+	if lfi.Enabled {
+		t.Error("expected lfi to be disabled")
+	}
+}
+
+func TestConvertConfig_EmptyConfig(t *testing.T) {
+	cfg := Config{}
+	internal := convertConfig(cfg)
+
+	// Should get defaults
+	if internal.Mode != ModeEnforce {
+		t.Errorf("expected default mode enforce, got %q", internal.Mode)
+	}
+}
+
+func TestConvertConfig_DetectorWithZeroMultiplier(t *testing.T) {
+	cfg := Config{
+		Detection: DetectionConfig{
+			SQLi: DetectorConfig{Enabled: true, Multiplier: 0},
+		},
+	}
+	internal := convertConfig(cfg)
+
+	sqli := internal.WAF.Detection.Detectors["sqli"]
+	if sqli.Multiplier != 1.0 {
+		t.Errorf("expected multiplier default 1.0 when 0, got %f", sqli.Multiplier)
+	}
+}
+
+func TestConvertConfig_RateLimitNoRules(t *testing.T) {
+	cfg := Config{
+		RateLimit: RateLimitConfig{
+			Enabled: true,
+			Rules:   nil,
+		},
+	}
+	internal := convertConfig(cfg)
+	if !internal.WAF.RateLimit.Enabled {
+		t.Error("expected rate limit to be enabled")
+	}
+}
+
+func TestConvertConfig_BotDisabled(t *testing.T) {
+	cfg := Config{
+		Bot: BotConfig{
+			Enabled: false,
+		},
+	}
+	internal := convertConfig(cfg)
+	if internal.WAF.BotDetection.Enabled {
+		t.Error("expected bot detection to be disabled")
+	}
+}
+
+func TestWithDetector_NilDetectors(t *testing.T) {
+	// WithDetector should handle nil Detectors map
+	eng, err := New(Config{}, WithDetector("custom", true, 3.0))
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	defer eng.Close()
+
+	dc, ok := eng.cfg.WAF.Detection.Detectors["custom"]
+	if !ok {
+		t.Fatal("expected custom detector config")
+	}
+	if !dc.Enabled || dc.Multiplier != 3.0 {
+		t.Errorf("expected enabled=true, multiplier=3.0, got %v/%f", dc.Enabled, dc.Multiplier)
+	}
+}
+
+func TestOnEvent_MultipleCallbacks(t *testing.T) {
+	eng, err := New(Config{
+		Mode:      ModeEnforce,
+		Threshold: ThresholdConfig{Block: 50, Log: 25},
+	})
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+
+	var mu1, mu2 sync.Mutex
+	var received1, received2 []Event
+
+	eng.OnEvent(func(event Event) {
+		mu1.Lock()
+		received1 = append(received1, event)
+		mu1.Unlock()
+	})
+	eng.OnEvent(func(event Event) {
+		mu2.Lock()
+		received2 = append(received2, event)
+		mu2.Unlock()
+	})
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) TestBrowser/1.0")
+	eng.Check(req)
+
+	time.Sleep(100 * time.Millisecond)
+
+	mu1.Lock()
+	c1 := len(received1)
+	mu1.Unlock()
+	mu2.Lock()
+	c2 := len(received2)
+	mu2.Unlock()
+
+	eng.Close()
+
+	if c1 == 0 {
+		t.Error("callback 1 should have received events")
+	}
+	if c2 == 0 {
+		t.Error("callback 2 should have received events")
+	}
+}
+
+func TestMiddleware_MonitorMode_CleanRequest(t *testing.T) {
+	eng, err := New(Config{
+		Mode:      ModeMonitor,
+		Threshold: ThresholdConfig{Block: 50, Log: 25},
+	})
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	defer eng.Close()
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintln(w, "OK")
+	})
+
+	wrapped := eng.Middleware(handler)
+
+	// Clean request in monitor mode should pass through
+	req := httptest.NewRequest("GET", "/api/users?page=1", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) TestBrowser/1.0")
+	rr := httptest.NewRecorder()
+
+	wrapped.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Errorf("expected status 200 for clean request in monitor mode, got %d", rr.Code)
+	}
+}
+
+func TestNew_WithAllDetectionConfig(t *testing.T) {
+	eng, err := New(Config{
+		Detection: DetectionConfig{
+			SQLi:          DetectorConfig{Enabled: true, Multiplier: 1.0},
+			XSS:           DetectorConfig{Enabled: true, Multiplier: 1.0},
+			PathTraversal: DetectorConfig{Enabled: true, Multiplier: 1.0},
+			CmdInjection:  DetectorConfig{Enabled: true, Multiplier: 1.0},
+			XXE:           DetectorConfig{Enabled: true, Multiplier: 1.0},
+			SSRF:          DetectorConfig{Enabled: true, Multiplier: 1.0},
+		},
+	})
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	defer eng.Close()
+
+	detectors := eng.cfg.WAF.Detection.Detectors
+	for _, name := range []string{"sqli", "xss", "lfi", "cmdi", "xxe", "ssrf"} {
+		dc, ok := detectors[name]
+		if !ok {
+			t.Errorf("expected detector %q", name)
+			continue
+		}
+		if !dc.Enabled {
+			t.Errorf("expected detector %q to be enabled", name)
+		}
+	}
+}
+
+func TestNew_EmptyConfigDefaults(t *testing.T) {
+	eng, err := New(Config{})
+	if err != nil {
+		t.Fatalf("New() error: %v", err)
+	}
+	defer eng.Close()
+
+	// Verify default detectors are enabled
+	detectors := eng.cfg.WAF.Detection.Detectors
+	for _, name := range []string{"sqli", "xss", "lfi", "cmdi", "xxe", "ssrf"} {
+		dc, ok := detectors[name]
+		if !ok {
+			t.Errorf("expected default detector %q", name)
+			continue
+		}
+		if !dc.Enabled {
+			t.Errorf("expected default detector %q to be enabled", name)
+		}
+		if dc.Multiplier != 1.0 {
+			t.Errorf("expected default multiplier 1.0 for %q, got %f", name, dc.Multiplier)
+		}
 	}
 }

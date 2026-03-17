@@ -2,6 +2,7 @@ package dashboard
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -605,5 +606,726 @@ func TestReloadConfig(t *testing.T) {
 
 	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// UpdateConfig endpoint
+// ---------------------------------------------------------------------------
+
+func TestUpdateConfig(t *testing.T) {
+	d := testDashboard(t, "")
+	ts := httptest.NewServer(d.Handler())
+	defer ts.Close()
+
+	body := strings.NewReader(`{"mode":"monitor","threshold":75}`)
+	req, _ := http.NewRequest("PUT", ts.URL+"/api/v1/config", body)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var data map[string]any
+	json.NewDecoder(resp.Body).Decode(&data)
+	if data["message"] != "Configuration update received" {
+		t.Errorf("unexpected message: %v", data["message"])
+	}
+}
+
+func TestUpdateConfig_InvalidJSON(t *testing.T) {
+	d := testDashboard(t, "")
+	ts := httptest.NewServer(d.Handler())
+	defer ts.Close()
+
+	body := strings.NewReader(`{invalid json}`)
+	req, _ := http.NewRequest("PUT", ts.URL+"/api/v1/config", body)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid JSON, got %d", resp.StatusCode)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Events with filters
+// ---------------------------------------------------------------------------
+
+func TestGetEvents_WithFilters(t *testing.T) {
+	d := testDashboard(t, "")
+	ts := httptest.NewServer(d.Handler())
+	defer ts.Close()
+
+	// Test with min_score, since, until, action, client_ip, path, sort_by, sort_order
+	resp, err := http.Get(ts.URL + "/api/v1/events?min_score=10&action=block&client_ip=1.2.3.4&path=/api&sort_by=score&sort_order=desc&since=2024-01-01T00:00:00Z&until=2025-01-01T00:00:00Z")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var data map[string]any
+	json.NewDecoder(resp.Body).Decode(&data)
+	if _, ok := data["events"]; !ok {
+		t.Error("missing 'events' field")
+	}
+}
+
+func TestGetEvents_InvalidLimitAndOffset(t *testing.T) {
+	d := testDashboard(t, "")
+	ts := httptest.NewServer(d.Handler())
+	defer ts.Close()
+
+	// Invalid limit/offset values should fall back to defaults
+	resp, err := http.Get(ts.URL + "/api/v1/events?limit=abc&offset=xyz")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var data map[string]any
+	json.NewDecoder(resp.Body).Decode(&data)
+	// defaults: limit=50, offset=0
+	if int(data["limit"].(float64)) != 50 {
+		t.Errorf("expected default limit 50, got %v", data["limit"])
+	}
+	if int(data["offset"].(float64)) != 0 {
+		t.Errorf("expected default offset 0, got %v", data["offset"])
+	}
+}
+
+func TestGetEvents_LargeLimitCapped(t *testing.T) {
+	d := testDashboard(t, "")
+	ts := httptest.NewServer(d.Handler())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/api/v1/events?limit=5000")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	var data map[string]any
+	json.NewDecoder(resp.Body).Decode(&data)
+	if int(data["limit"].(float64)) != 1000 {
+		t.Errorf("expected capped limit 1000, got %v", data["limit"])
+	}
+}
+
+func TestGetEvent_EmptyID(t *testing.T) {
+	d := testDashboard(t, "")
+	ts := httptest.NewServer(d.Handler())
+	defer ts.Close()
+
+	// Path value extraction: request with valid but non-existent ID
+	resp, err := http.Get(ts.URL + "/api/v1/events/some-id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", resp.StatusCode)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Blacklist CRUD
+// ---------------------------------------------------------------------------
+
+func TestBlacklistCRUD(t *testing.T) {
+	d := testDashboard(t, "")
+	ts := httptest.NewServer(d.Handler())
+	defer ts.Close()
+
+	// List (empty)
+	resp, err := http.Get(ts.URL + "/api/v1/rules/blacklist")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("list: expected 200, got %d", resp.StatusCode)
+	}
+
+	// Add
+	body := strings.NewReader(`{"value":"10.0.0.0/8","reason":"suspicious"}`)
+	resp, err = http.Post(ts.URL+"/api/v1/rules/blacklist", "application/json", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var entry RuleEntry
+	json.NewDecoder(resp.Body).Decode(&entry)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("add: expected 201, got %d", resp.StatusCode)
+	}
+	if entry.ID == "" {
+		t.Fatal("add: expected non-empty ID")
+	}
+	if entry.Value != "10.0.0.0/8" {
+		t.Errorf("expected value '10.0.0.0/8', got %q", entry.Value)
+	}
+
+	// List (should have one)
+	resp, err = http.Get(ts.URL + "/api/v1/rules/blacklist")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var listResp map[string]any
+	json.NewDecoder(resp.Body).Decode(&listResp)
+	resp.Body.Close()
+	rules := listResp["rules"].([]any)
+	if len(rules) != 1 {
+		t.Fatalf("expected 1 rule, got %d", len(rules))
+	}
+
+	// Delete
+	req, _ := http.NewRequest("DELETE", ts.URL+"/api/v1/rules/blacklist/"+entry.ID, nil)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("delete: expected 200, got %d", resp.StatusCode)
+	}
+
+	// Delete non-existent
+	req, _ = http.NewRequest("DELETE", ts.URL+"/api/v1/rules/blacklist/999", nil)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("delete non-existent: expected 404, got %d", resp.StatusCode)
+	}
+}
+
+func TestBlacklistAdd_InvalidJSON(t *testing.T) {
+	d := testDashboard(t, "")
+	ts := httptest.NewServer(d.Handler())
+	defer ts.Close()
+
+	resp, err := http.Post(ts.URL+"/api/v1/rules/blacklist", "application/json", strings.NewReader("not json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid JSON, got %d", resp.StatusCode)
+	}
+}
+
+func TestBlacklistAdd_MissingValue(t *testing.T) {
+	d := testDashboard(t, "")
+	ts := httptest.NewServer(d.Handler())
+	defer ts.Close()
+
+	resp, err := http.Post(ts.URL+"/api/v1/rules/blacklist", "application/json", strings.NewReader(`{"reason":"test"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for missing value, got %d", resp.StatusCode)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// RateLimit CRUD
+// ---------------------------------------------------------------------------
+
+func TestRateLimitCRUD(t *testing.T) {
+	d := testDashboard(t, "")
+	ts := httptest.NewServer(d.Handler())
+	defer ts.Close()
+
+	// List (empty)
+	resp, err := http.Get(ts.URL + "/api/v1/rules/ratelimit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("list: expected 200, got %d", resp.StatusCode)
+	}
+
+	// Add
+	body := strings.NewReader(`{"path":"/api","limit":100,"window":"1m","action":"block"}`)
+	resp, err = http.Post(ts.URL+"/api/v1/rules/ratelimit", "application/json", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var entry RateLimitEntry
+	json.NewDecoder(resp.Body).Decode(&entry)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("add: expected 201, got %d", resp.StatusCode)
+	}
+	if entry.ID == "" {
+		t.Fatal("add: expected non-empty ID")
+	}
+	if entry.Limit != 100 {
+		t.Errorf("expected limit 100, got %d", entry.Limit)
+	}
+
+	// Delete
+	req, _ := http.NewRequest("DELETE", ts.URL+"/api/v1/rules/ratelimit/"+entry.ID, nil)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("delete: expected 200, got %d", resp.StatusCode)
+	}
+
+	// Delete non-existent
+	req, _ = http.NewRequest("DELETE", ts.URL+"/api/v1/rules/ratelimit/999", nil)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("delete non-existent: expected 404, got %d", resp.StatusCode)
+	}
+}
+
+func TestRateLimitAdd_InvalidJSON(t *testing.T) {
+	d := testDashboard(t, "")
+	ts := httptest.NewServer(d.Handler())
+	defer ts.Close()
+
+	resp, err := http.Post(ts.URL+"/api/v1/rules/ratelimit", "application/json", strings.NewReader("not json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid JSON, got %d", resp.StatusCode)
+	}
+}
+
+func TestRateLimitAdd_InvalidLimit(t *testing.T) {
+	d := testDashboard(t, "")
+	ts := httptest.NewServer(d.Handler())
+	defer ts.Close()
+
+	resp, err := http.Post(ts.URL+"/api/v1/rules/ratelimit", "application/json", strings.NewReader(`{"path":"/api","limit":0}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for zero limit, got %d", resp.StatusCode)
+	}
+}
+
+func TestRateLimitAdd_NegativeLimit(t *testing.T) {
+	d := testDashboard(t, "")
+	ts := httptest.NewServer(d.Handler())
+	defer ts.Close()
+
+	resp, err := http.Post(ts.URL+"/api/v1/rules/ratelimit", "application/json", strings.NewReader(`{"path":"/api","limit":-5}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for negative limit, got %d", resp.StatusCode)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Exclusions CRUD
+// ---------------------------------------------------------------------------
+
+func TestExclusionsCRUD(t *testing.T) {
+	d := testDashboard(t, "")
+	ts := httptest.NewServer(d.Handler())
+	defer ts.Close()
+
+	// List (empty)
+	resp, err := http.Get(ts.URL + "/api/v1/rules/exclusions")
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("list: expected 200, got %d", resp.StatusCode)
+	}
+
+	// Add
+	body := strings.NewReader(`{"path":"/health","detectors":["sqli","xss"],"reason":"false positive"}`)
+	resp, err = http.Post(ts.URL+"/api/v1/rules/exclusions", "application/json", body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var entry ExclusionEntry
+	json.NewDecoder(resp.Body).Decode(&entry)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		t.Fatalf("add: expected 201, got %d", resp.StatusCode)
+	}
+	if entry.ID == "" {
+		t.Fatal("add: expected non-empty ID")
+	}
+	if entry.Path != "/health" {
+		t.Errorf("expected path '/health', got %q", entry.Path)
+	}
+	if len(entry.Detectors) != 2 {
+		t.Errorf("expected 2 detectors, got %d", len(entry.Detectors))
+	}
+
+	// Delete
+	req, _ := http.NewRequest("DELETE", ts.URL+"/api/v1/rules/exclusions/"+entry.ID, nil)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("delete: expected 200, got %d", resp.StatusCode)
+	}
+
+	// Delete non-existent
+	req, _ = http.NewRequest("DELETE", ts.URL+"/api/v1/rules/exclusions/999", nil)
+	resp, err = http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("delete non-existent: expected 404, got %d", resp.StatusCode)
+	}
+}
+
+func TestExclusionAdd_InvalidJSON(t *testing.T) {
+	d := testDashboard(t, "")
+	ts := httptest.NewServer(d.Handler())
+	defer ts.Close()
+
+	resp, err := http.Post(ts.URL+"/api/v1/rules/exclusions", "application/json", strings.NewReader("not json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid JSON, got %d", resp.StatusCode)
+	}
+}
+
+func TestExclusionAdd_MissingPath(t *testing.T) {
+	d := testDashboard(t, "")
+	ts := httptest.NewServer(d.Handler())
+	defer ts.Close()
+
+	resp, err := http.Post(ts.URL+"/api/v1/rules/exclusions", "application/json", strings.NewReader(`{"detectors":["sqli"]}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for missing path, got %d", resp.StatusCode)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Whitelist add error cases
+// ---------------------------------------------------------------------------
+
+func TestWhitelistAdd_InvalidJSON(t *testing.T) {
+	d := testDashboard(t, "")
+	ts := httptest.NewServer(d.Handler())
+	defer ts.Close()
+
+	resp, err := http.Post(ts.URL+"/api/v1/rules/whitelist", "application/json", strings.NewReader("not json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid JSON, got %d", resp.StatusCode)
+	}
+}
+
+func TestWhitelistAdd_MissingValue(t *testing.T) {
+	d := testDashboard(t, "")
+	ts := httptest.NewServer(d.Handler())
+	defer ts.Close()
+
+	resp, err := http.Post(ts.URL+"/api/v1/rules/whitelist", "application/json", strings.NewReader(`{"reason":"test"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400 for missing value, got %d", resp.StatusCode)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// SSE Broadcaster edge cases
+// ---------------------------------------------------------------------------
+
+func TestSSEBroadcasterDropsWhenFull(t *testing.T) {
+	b := NewSSEBroadcaster()
+
+	// Create a client with buffer of 1
+	ch := make(chan string, 1)
+	b.addClient(ch)
+
+	// Fill the buffer
+	b.Broadcast("evt1", `{"n":1}`)
+	// Second broadcast should be dropped silently
+	b.Broadcast("evt2", `{"n":2}`)
+
+	msg := <-ch
+	if !strings.Contains(msg, "evt1") {
+		t.Errorf("expected first event, got %q", msg)
+	}
+
+	// Channel should be empty now (second was dropped)
+	select {
+	case m := <-ch:
+		t.Errorf("expected no more messages, got %q", m)
+	default:
+		// expected
+	}
+
+	b.removeClient(ch)
+}
+
+func TestSSEBroadcasterMultipleClients(t *testing.T) {
+	b := NewSSEBroadcaster()
+
+	channels := make([]chan string, 5)
+	for i := range channels {
+		channels[i] = make(chan string, 64)
+		b.addClient(channels[i])
+	}
+
+	if b.ClientCount() != 5 {
+		t.Fatalf("expected 5 clients, got %d", b.ClientCount())
+	}
+
+	b.Broadcast("multi", `{"all":true}`)
+
+	for i, ch := range channels {
+		msg := <-ch
+		if !strings.Contains(msg, "multi") {
+			t.Errorf("client %d: expected 'multi' event, got %q", i, msg)
+		}
+	}
+
+	for _, ch := range channels {
+		b.removeClient(ch)
+	}
+
+	if b.ClientCount() != 0 {
+		t.Fatalf("expected 0 clients, got %d", b.ClientCount())
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Dashboard SSE() and API() accessors
+// ---------------------------------------------------------------------------
+
+func TestDashboardSSEAccessor(t *testing.T) {
+	d := testDashboard(t, "")
+	sse := d.SSE()
+	if sse == nil {
+		t.Fatal("expected non-nil SSE broadcaster")
+	}
+}
+
+func TestDashboardAPIAccessor(t *testing.T) {
+	d := testDashboard(t, "")
+	api := d.API()
+	if api == nil {
+		t.Fatal("expected non-nil API")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// actionString
+// ---------------------------------------------------------------------------
+
+func TestActionString(t *testing.T) {
+	tests := []struct {
+		action   engine.Action
+		expected string
+	}{
+		{engine.ActionPass, "pass"},
+		{engine.ActionBlock, "block"},
+		{engine.ActionLog, "log"},
+		{engine.ActionChallenge, "challenge"},
+	}
+
+	for _, tt := range tests {
+		got := actionString(tt.action)
+		if got != tt.expected {
+			t.Errorf("actionString(%v) = %q, want %q", tt.action, got, tt.expected)
+		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// SSE HandleSSE - not flusher
+// ---------------------------------------------------------------------------
+
+func TestSSEHandleSSE_NoFlusher(t *testing.T) {
+	b := NewSSEBroadcaster()
+
+	// Use a minimal ResponseWriter that doesn't implement http.Flusher
+	w := &noFlushWriter{header: http.Header{}, code: 0}
+	r := httptest.NewRequest("GET", "/sse", nil)
+
+	b.HandleSSE(w, r)
+
+	if w.code != http.StatusInternalServerError {
+		t.Errorf("expected 500 when flusher not supported, got %d", w.code)
+	}
+}
+
+// noFlushWriter is an http.ResponseWriter that does NOT implement http.Flusher.
+type noFlushWriter struct {
+	header http.Header
+	code   int
+	body   []byte
+}
+
+func (w *noFlushWriter) Header() http.Header         { return w.header }
+func (w *noFlushWriter) WriteHeader(code int)         { w.code = code }
+func (w *noFlushWriter) Write(b []byte) (int, error)  { w.body = append(w.body, b...); return len(b), nil }
+
+// ---------------------------------------------------------------------------
+// Static file - index.html path
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// SSE HandleSSE - message delivery through context cancellation
+// ---------------------------------------------------------------------------
+
+func TestSSEHandleSSE_MessageAndCancel(t *testing.T) {
+	b := NewSSEBroadcaster()
+
+	// Use httptest server to get a proper flusher
+	ts := httptest.NewServer(http.HandlerFunc(b.HandleSSE))
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	// Read the initial connection message
+	buf := make([]byte, 512)
+	n, _ := resp.Body.Read(buf)
+	initial := string(buf[:n])
+	if !strings.Contains(initial, "connected") {
+		t.Errorf("expected initial 'connected' event, got %q", initial)
+	}
+
+	// Send a broadcast message
+	b.Broadcast("update", `{"key":"value"}`)
+
+	// Read the broadcast message
+	n, _ = resp.Body.Read(buf)
+	msg := string(buf[:n])
+	if !strings.Contains(msg, "update") {
+		t.Errorf("expected 'update' event, got %q", msg)
+	}
+
+	// Close the response body to trigger context cancellation on the server side
+	resp.Body.Close()
+}
+
+// ---------------------------------------------------------------------------
+// Events Query error path
+// ---------------------------------------------------------------------------
+
+// errorEventStore returns an error from Query to cover the error path.
+type errorEventStore struct {
+	events.EventStore
+}
+
+func (e *errorEventStore) Store(_ engine.Event) error                               { return nil }
+func (e *errorEventStore) Query(_ events.EventFilter) ([]engine.Event, int, error)  { return nil, 0, fmt.Errorf("query failed") }
+func (e *errorEventStore) Get(_ string) (*engine.Event, error)                      { return nil, fmt.Errorf("not found") }
+func (e *errorEventStore) Recent(_ int) ([]engine.Event, error)                     { return nil, nil }
+func (e *errorEventStore) Count(_ events.EventFilter) (int, error)                  { return 0, nil }
+func (e *errorEventStore) Close() error                                             { return nil }
+
+func TestGetEvents_QueryError(t *testing.T) {
+	eng := testEngine(t)
+	store := &errorEventStore{}
+	d := NewDashboard(eng, store, "")
+	ts := httptest.NewServer(d.Handler())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/api/v1/events")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusInternalServerError {
+		t.Fatalf("expected 500 for query error, got %d", resp.StatusCode)
+	}
+}
+
+func TestServeIndexHTML(t *testing.T) {
+	d := testDashboard(t, "")
+	ts := httptest.NewServer(d.Handler())
+	defer ts.Close()
+
+	resp, err := http.Get(ts.URL + "/index.html")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200, got %d", resp.StatusCode)
+	}
+
+	ct := resp.Header.Get("Content-Type")
+	if !strings.Contains(ct, "text/html") {
+		t.Errorf("expected text/html, got %q", ct)
 	}
 }

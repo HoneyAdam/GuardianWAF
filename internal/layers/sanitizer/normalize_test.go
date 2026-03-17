@@ -406,3 +406,262 @@ func TestCanonicalizePath_Backslashes(t *testing.T) {
 		t.Errorf("CanonicalizePath(%q) = %q, want %q", input, got, want)
 	}
 }
+
+func TestCanonicalizePath_EmptyString(t *testing.T) {
+	got := CanonicalizePath("")
+	if got != "" {
+		t.Errorf("CanonicalizePath(%q) = %q, want %q", "", got, "")
+	}
+}
+
+func TestCanonicalizePath_AllDots(t *testing.T) {
+	// Segment that is only dots should be cleaned to empty and skipped
+	got := CanonicalizePath("/foo/..../bar")
+	if got != "/foo/bar" {
+		t.Errorf("CanonicalizePath(%q) = %q, want %q", "/foo/..../bar", got, "/foo/bar")
+	}
+}
+
+func TestCanonicalizePath_NoLeadingSlash(t *testing.T) {
+	got := CanonicalizePath("foo/bar")
+	if got != "foo/bar" {
+		t.Errorf("CanonicalizePath(%q) = %q, want %q", "foo/bar", got, "foo/bar")
+	}
+}
+
+func TestCanonicalizePath_OnlyDotDot(t *testing.T) {
+	// All .. segments resolve to root
+	got := CanonicalizePath("/../../..")
+	if got != "/" {
+		t.Errorf("CanonicalizePath(%q) = %q, want %q", "/../../..", got, "/")
+	}
+}
+
+func TestDecodeURLRecursive_MaxIterations(t *testing.T) {
+	// Create a 6-deep encoding that exceeds the 5-iteration limit
+	// %25 -> % (one decode layer)
+	// So %252525252527 needs 6 decodes to reach '
+	// 6 layers: start with ' (0x27)
+	// Layer 1: %27
+	// Layer 2: %2527
+	// Layer 3: %252527
+	// Layer 4: %25252527
+	// Layer 5: %2525252527
+	// Layer 6: %252525252527
+	input := "%252525252527"
+	got := DecodeURLRecursive(input)
+	// After 5 iterations it should NOT be fully decoded to '
+	// because it needs 6 iterations
+	if got == "'" {
+		t.Errorf("DecodeURLRecursive should cap at 5 iterations, but fully decoded 6-deep encoding")
+	}
+}
+
+func TestDecodeURLRecursive_EmptyString(t *testing.T) {
+	got := DecodeURLRecursive("")
+	if got != "" {
+		t.Errorf("DecodeURLRecursive(%q) = %q, want %q", "", got, "")
+	}
+}
+
+func TestDecodeURLOnce_IncompletePercent(t *testing.T) {
+	// A % at the very end of a string
+	got := DecodeURLRecursive("%")
+	if got != "%" {
+		t.Errorf("DecodeURLRecursive(%q) = %q, want %q", "%", got, "%")
+	}
+
+	// A % with only one hex char after
+	got2 := DecodeURLRecursive("%2")
+	if got2 != "%2" {
+		t.Errorf("DecodeURLRecursive(%q) = %q, want %q", "%2", got2, "%2")
+	}
+}
+
+func TestDecodeURLOnce_PartialUnicodeEscape(t *testing.T) {
+	// %u with invalid hex chars
+	got := DecodeURLRecursive("%u00ZZ")
+	if got != "%u00ZZ" {
+		t.Errorf("DecodeURLRecursive(%q) = %q, want %q", "%u00ZZ", got, "%u00ZZ")
+	}
+
+	// %u with only 2 valid hex digits (not enough)
+	got2 := DecodeURLRecursive("%u00")
+	if got2 != "%u00" {
+		t.Errorf("DecodeURLRecursive(%q) = %q, want %q", "%u00", got2, "%u00")
+	}
+
+	// %U uppercase
+	got3 := DecodeURLRecursive("%U0041")
+	if got3 != "A" {
+		t.Errorf("DecodeURLRecursive(%q) = %q, want %q", "%U0041", got3, "A")
+	}
+}
+
+func TestNormalizeUnicode_InvalidUTF8(t *testing.T) {
+	// Invalid UTF-8: byte 0xFF is never valid in UTF-8
+	input := string([]byte{0xFF, 0xFE, 'h', 'e', 'l', 'l', 'o'})
+	got := NormalizeUnicode(input)
+	// Should not crash, should handle RuneError gracefully
+	if len(got) == 0 {
+		t.Error("NormalizeUnicode returned empty for input with invalid UTF-8")
+	}
+	if got[len(got)-5:] != "hello" {
+		t.Errorf("expected 'hello' suffix, got %q", got)
+	}
+}
+
+func TestNormalizeUnicode_EmptyString(t *testing.T) {
+	got := NormalizeUnicode("")
+	if got != "" {
+		t.Errorf("NormalizeUnicode(%q) = %q, want %q", "", got, "")
+	}
+}
+
+func TestDecodeHTMLEntities_UnknownEntity(t *testing.T) {
+	// Unknown named entity should be kept as-is
+	got := DecodeHTMLEntities("&foobar;")
+	if got != "&foobar;" {
+		t.Errorf("DecodeHTMLEntities(%q) = %q, want %q", "&foobar;", got, "&foobar;")
+	}
+}
+
+func TestDecodeHTMLEntities_AmpersandWithoutSemicolon(t *testing.T) {
+	// & not followed by ;
+	got := DecodeHTMLEntities("foo & bar")
+	if got != "foo & bar" {
+		t.Errorf("DecodeHTMLEntities(%q) = %q, want %q", "foo & bar", got, "foo & bar")
+	}
+}
+
+func TestDecodeHTMLEntities_HexEntityUpperX(t *testing.T) {
+	// &#X3C; (uppercase X)
+	got := DecodeHTMLEntities("&#X3C;")
+	if got != "<" {
+		t.Errorf("DecodeHTMLEntities(%q) = %q, want %q", "&#X3C;", got, "<")
+	}
+}
+
+func TestDecodeHTMLEntities_InvalidNumericEntity(t *testing.T) {
+	// Invalid hex entity
+	got := DecodeHTMLEntities("&#xZZ;")
+	if got != "&#xZZ;" {
+		t.Errorf("DecodeHTMLEntities(%q) = %q, want %q", "&#xZZ;", got, "&#xZZ;")
+	}
+
+	// Invalid decimal entity
+	got2 := DecodeHTMLEntities("&#abc;")
+	if got2 != "&#abc;" {
+		t.Errorf("DecodeHTMLEntities(%q) = %q, want %q", "&#abc;", got2, "&#abc;")
+	}
+}
+
+func TestParseHexEntity_EdgeCases(t *testing.T) {
+	// Empty string
+	val, ok := parseHexEntity("")
+	if ok {
+		t.Errorf("expected false for empty hex entity, got val=%d", val)
+	}
+
+	// Too long (> 6 chars)
+	val, ok = parseHexEntity("1234567")
+	if ok {
+		t.Errorf("expected false for too-long hex entity, got val=%d", val)
+	}
+
+	// Invalid character in hex
+	val, ok = parseHexEntity("GG")
+	if ok {
+		t.Errorf("expected false for invalid hex char, got val=%d", val)
+	}
+}
+
+func TestParseDecEntity_EdgeCases(t *testing.T) {
+	// Empty string
+	val, ok := parseDecEntity("")
+	if ok {
+		t.Errorf("expected false for empty dec entity, got val=%d", val)
+	}
+
+	// Too long (> 7 chars)
+	val, ok = parseDecEntity("12345678")
+	if ok {
+		t.Errorf("expected false for too-long dec entity, got val=%d", val)
+	}
+
+	// Invalid character
+	val, ok = parseDecEntity("12a")
+	if ok {
+		t.Errorf("expected false for invalid dec char, got val=%d", val)
+	}
+}
+
+func TestTruncate_EdgeCases(t *testing.T) {
+	// String shorter than maxLen
+	got := truncate("hi", 200)
+	if got != "hi" {
+		t.Errorf("truncate(%q, 200) = %q, want %q", "hi", got, "hi")
+	}
+
+	// maxLen <= 3
+	got2 := truncate("hello world", 3)
+	if got2 != "hel" {
+		t.Errorf("truncate(%q, 3) = %q, want %q", "hello world", got2, "hel")
+	}
+
+	// maxLen == 2
+	got3 := truncate("hello world", 2)
+	if got3 != "he" {
+		t.Errorf("truncate(%q, 2) = %q, want %q", "hello world", got3, "he")
+	}
+
+	// Normal truncation
+	got4 := truncate("hello world test", 10)
+	if got4 != "hello w..." {
+		t.Errorf("truncate(%q, 10) = %q, want %q", "hello world test", got4, "hello w...")
+	}
+
+	// Exactly at limit
+	got5 := truncate("hi", 2)
+	if got5 != "hi" {
+		t.Errorf("truncate(%q, 2) = %q, want %q", "hi", got5, "hi")
+	}
+}
+
+func TestNormalizeWhitespace_EmptyString(t *testing.T) {
+	got := NormalizeWhitespace("")
+	if got != "" {
+		t.Errorf("NormalizeWhitespace(%q) = %q, want %q", "", got, "")
+	}
+}
+
+func TestNormalizeWhitespace_OnlyWhitespace(t *testing.T) {
+	got := NormalizeWhitespace("   \t\n  ")
+	if got != "" {
+		t.Errorf("NormalizeWhitespace(%q) = %q, want %q", "   \\t\\n  ", got, "")
+	}
+}
+
+func TestNormalizeWhitespace_ControlChars(t *testing.T) {
+	// 0x7F is DEL, which is a control character
+	input := "hello\x7Fworld"
+	got := NormalizeWhitespace(input)
+	if got != "hello world" {
+		t.Errorf("NormalizeWhitespace with DEL char = %q, want %q", got, "hello world")
+	}
+}
+
+func TestDecodeHTMLEntities_NamedEntityNbsp(t *testing.T) {
+	got := DecodeHTMLEntities("&nbsp;")
+	if got != "\u00A0" {
+		t.Errorf("DecodeHTMLEntities(%q) = %q, want %q", "&nbsp;", got, "\u00A0")
+	}
+}
+
+func TestDecodeHTMLEntities_NumericEntityLargeValue(t *testing.T) {
+	// &#8364; is the Euro sign
+	got := DecodeHTMLEntities("&#8364;")
+	if got != "\u20AC" {
+		t.Errorf("DecodeHTMLEntities(%q) = %q, want %q", "&#8364;", got, "\u20AC")
+	}
+}

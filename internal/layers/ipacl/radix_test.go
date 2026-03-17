@@ -304,3 +304,104 @@ func TestRadixTree_BareIPv4(t *testing.T) {
 		t.Fatal("should not find 1.2.3.5")
 	}
 }
+
+func TestRadixTree_RemoveInvalidCIDR(t *testing.T) {
+	tree := NewRadixTree()
+	err := tree.Remove("invalid-cidr!!!")
+	if err == nil {
+		t.Fatal("expected error for invalid CIDR removal")
+	}
+}
+
+func TestRadixTree_RemoveAlreadyRemoved(t *testing.T) {
+	tree := NewRadixTree()
+	if err := tree.Insert("10.0.0.0/8", "net"); err != nil {
+		t.Fatal(err)
+	}
+	if err := tree.Remove("10.0.0.0/8"); err != nil {
+		t.Fatal(err)
+	}
+	// Remove the same entry again -- node exists but hasValue is false
+	err := tree.Remove("10.0.0.0/8")
+	if err == nil {
+		t.Fatal("expected error when removing already-removed entry")
+	}
+}
+
+func TestRadixTree_IPv6CIDRRange(t *testing.T) {
+	tree := NewRadixTree()
+
+	if err := tree.Insert("fe80::/10", "link-local"); err != nil {
+		t.Fatalf("Insert IPv6 CIDR failed: %v", err)
+	}
+
+	// Should match within the range
+	val, found := tree.Lookup(net.ParseIP("fe80::1"))
+	if !found {
+		t.Fatal("expected to find fe80::1 in fe80::/10")
+	}
+	if val != "link-local" {
+		t.Fatalf("expected link-local, got %v", val)
+	}
+
+	// Also test fe80::ffff:ffff which is still in /10
+	val, found = tree.Lookup(net.ParseIP("fe80::ffff:ffff"))
+	if !found {
+		t.Fatal("expected to find fe80::ffff:ffff in fe80::/10")
+	}
+	if val != "link-local" {
+		t.Fatalf("expected link-local, got %v", val)
+	}
+
+	// Outside the range
+	_, found = tree.Lookup(net.ParseIP("fd00::1"))
+	if found {
+		t.Fatal("should not find fd00::1 in fe80::/10")
+	}
+}
+
+func TestRadixTree_BareIPv6(t *testing.T) {
+	tree := NewRadixTree()
+
+	if err := tree.Insert("fe80::1", "link-local-host"); err != nil {
+		t.Fatalf("Insert bare IPv6 failed: %v", err)
+	}
+
+	val, found := tree.Lookup(net.ParseIP("fe80::1"))
+	if !found {
+		t.Fatal("expected to find fe80::1")
+	}
+	if val != "link-local-host" {
+		t.Fatalf("expected link-local-host, got %v", val)
+	}
+
+	_, found = tree.Lookup(net.ParseIP("fe80::2"))
+	if found {
+		t.Fatal("should not find fe80::2")
+	}
+}
+
+func TestRadixTree_RootValueMatch(t *testing.T) {
+	tree := NewRadixTree()
+
+	// Insert ::/0 which matches everything (root value)
+	if err := tree.Insert("::/0", "all"); err != nil {
+		t.Fatalf("Insert ::/0 failed: %v", err)
+	}
+
+	// Any IP should match
+	val, found := tree.Lookup(net.ParseIP("1.2.3.4"))
+	if !found {
+		t.Fatal("expected to find 1.2.3.4 via ::/0")
+	}
+	if val != "all" {
+		t.Fatalf("expected all, got %v", val)
+	}
+}
+
+func TestIPToBits_NilIP(t *testing.T) {
+	bits := ipToBits(nil)
+	if bits != nil {
+		t.Fatalf("expected nil for nil IP, got %v", bits)
+	}
+}

@@ -388,3 +388,468 @@ func TestAddRemoveFingerprint(t *testing.T) {
 		t.Errorf("expected FingerprintUnknown after remove, got %v", info.Category)
 	}
 }
+
+// --- Additional tests for uncovered code paths ---
+
+func TestScoreToBehaviorSeverity(t *testing.T) {
+	tests := []struct {
+		score    int
+		expected engine.Severity
+	}{
+		{100, engine.SeverityHigh},
+		{80, engine.SeverityHigh},
+		{60, engine.SeverityMedium},
+		{40, engine.SeverityMedium},
+		{30, engine.SeverityLow},
+		{20, engine.SeverityLow},
+		{10, engine.SeverityInfo},
+		{0, engine.SeverityInfo},
+	}
+	for _, tt := range tests {
+		got := scoreToBehaviorSeverity(tt.score)
+		if got != tt.expected {
+			t.Errorf("scoreToBehaviorSeverity(%d) = %v, want %v", tt.score, got, tt.expected)
+		}
+	}
+}
+
+func TestLayer_BehaviorMgr(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Behavior.Enabled = true
+	layer := NewLayer(cfg)
+
+	bm := layer.BehaviorMgr()
+	if bm == nil {
+		t.Fatal("expected non-nil BehaviorManager when behavior enabled")
+	}
+
+	// Test with behavior disabled
+	cfg2 := DefaultConfig()
+	cfg2.Behavior.Enabled = false
+	layer2 := NewLayer(cfg2)
+	bm2 := layer2.BehaviorMgr()
+	if bm2 != nil {
+		t.Fatal("expected nil BehaviorManager when behavior disabled")
+	}
+}
+
+func TestTruncateUA(t *testing.T) {
+	tests := []struct {
+		ua     string
+		maxLen int
+		want   string
+	}{
+		{"short", 10, "short"},
+		{"abcde", 5, "abcde"},
+		{"abcdefghij", 5, "ab..."},
+		{"abcdefghij", 3, "abc"},
+		{"abcdefghij", 2, "ab"},
+		{"abcdefghij", 1, "a"},
+	}
+	for _, tt := range tests {
+		got := truncateUA(tt.ua, tt.maxLen)
+		if got != tt.want {
+			t.Errorf("truncateUA(%q, %d) = %q, want %q", tt.ua, tt.maxLen, got, tt.want)
+		}
+	}
+}
+
+func TestLayer_ProcessWithBehavior(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Mode = "enforce"
+	cfg.TLSFingerprint.Enabled = false
+	cfg.Behavior.Enabled = true
+	cfg.Behavior.RPSThreshold = 1 // very low threshold
+	cfg.Behavior.Window = 5 * time.Second
+	layer := NewLayer(cfg)
+
+	// Simulate many requests to trigger behavior detection
+	for i := 0; i < 50; i++ {
+		ctx := newTestContext("Mozilla/5.0 Chrome", "192.168.1.1")
+		layer.Process(ctx)
+	}
+
+	// The next request should detect high RPS
+	ctx := newTestContext("Mozilla/5.0 Chrome", "192.168.1.1")
+	result := layer.Process(ctx)
+
+	if result.Score == 0 {
+		t.Error("expected non-zero score from behavior analysis")
+	}
+}
+
+func TestLayer_ProcessWithNilClientIP(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.TLSFingerprint.Enabled = false
+	cfg.Behavior.Enabled = true
+	layer := NewLayer(cfg)
+
+	ctx := newTestContext("Mozilla/5.0 Chrome", "")
+	// ctx.ClientIP is nil
+	result := layer.Process(ctx)
+	// Should still work, just skip behavior analysis
+	if result.Action != engine.ActionPass {
+		t.Errorf("expected ActionPass for normal browser with no IP, got %v", result.Action)
+	}
+}
+
+func TestLayer_ProcessEnforceHighScore(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Mode = "enforce"
+	cfg.TLSFingerprint.Enabled = false
+	cfg.Behavior.Enabled = false
+	layer := NewLayer(cfg)
+
+	// Known scanner gets score 85 -> should block in enforce mode
+	ctx := newTestContext("sqlmap/1.5", "10.0.0.1")
+	result := layer.Process(ctx)
+
+	if result.Action != engine.ActionBlock {
+		t.Errorf("expected ActionBlock for high score scanner in enforce mode, got %v", result.Action)
+	}
+}
+
+func TestLayer_ProcessEnforceMediumScore(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Mode = "enforce"
+	cfg.TLSFingerprint.Enabled = false
+	cfg.Behavior.Enabled = false
+	layer := NewLayer(cfg)
+
+	// Empty UA gets score 40 -> should challenge in enforce mode
+	ctx := newTestContext("", "10.0.0.1")
+	delete(ctx.Headers, "User-Agent")
+	result := layer.Process(ctx)
+
+	if result.Action != engine.ActionChallenge {
+		t.Errorf("expected ActionChallenge for medium score in enforce mode, got %v", result.Action)
+	}
+}
+
+func TestLayer_ProcessEnforceLowScore(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Mode = "enforce"
+	cfg.TLSFingerprint.Enabled = false
+	cfg.Behavior.Enabled = false
+	layer := NewLayer(cfg)
+
+	// CLI tool gets score 15 -> should log in enforce mode
+	ctx := newTestContext("curl/7.68.0", "10.0.0.1")
+	result := layer.Process(ctx)
+
+	if result.Action != engine.ActionLog {
+		t.Errorf("expected ActionLog for low score in enforce mode, got %v", result.Action)
+	}
+}
+
+func TestLayer_EmptyUABlockDisabled(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.TLSFingerprint.Enabled = false
+	cfg.Behavior.Enabled = false
+	cfg.UserAgent.BlockEmpty = false
+	layer := NewLayer(cfg)
+
+	ctx := newTestContext("", "10.0.0.1")
+	delete(ctx.Headers, "User-Agent")
+	result := layer.Process(ctx)
+
+	// With BlockEmpty=false, empty UA should pass
+	if result.Action != engine.ActionPass {
+		t.Errorf("expected ActionPass with BlockEmpty=false, got %v", result.Action)
+	}
+}
+
+func TestLayer_ProcessWithTLSFingerprint(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Mode = "enforce"
+	cfg.TLSFingerprint.Enabled = true
+	cfg.UserAgent.Enabled = false
+	cfg.Behavior.Enabled = false
+	layer := NewLayer(cfg)
+
+	ctx := newTestContext("", "10.0.0.1")
+	ctx.TLSVersion = 771
+	ctx.TLSCipherSuite = 49195
+	result := layer.Process(ctx)
+
+	// Unknown fingerprints return score 0, so action should be pass
+	if result.Action != engine.ActionPass {
+		t.Errorf("expected ActionPass for unknown TLS fingerprint, got %v", result.Action)
+	}
+}
+
+func TestLayer_AnalyzeTLSFingerprint_KnownBad(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Mode = "enforce"
+	cfg.TLSFingerprint.Enabled = true
+	cfg.UserAgent.Enabled = false
+	cfg.Behavior.Enabled = false
+
+	// Add a fingerprint that will match our test TLS params
+	testFP := ComputeJA3(771, []uint16{49195}, nil, nil, nil)
+	AddFingerprint(testFP.Hash, FingerprintInfo{Name: "test-bad", Category: FingerprintBad, Score: 80})
+	defer RemoveFingerprint(testFP.Hash)
+
+	layer := NewLayer(cfg)
+
+	ctx := newTestContext("", "10.0.0.1")
+	ctx.TLSVersion = 771
+	ctx.TLSCipherSuite = 49195
+	result := layer.Process(ctx)
+
+	if result.Score == 0 {
+		t.Error("expected non-zero score for known bad TLS fingerprint")
+	}
+	if len(result.Findings) == 0 {
+		t.Error("expected findings for known bad TLS fingerprint")
+	}
+}
+
+func TestLayer_AnalyzeTLSFingerprint_KnownSuspicious(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Mode = "enforce"
+	cfg.TLSFingerprint.Enabled = true
+	cfg.UserAgent.Enabled = false
+	cfg.Behavior.Enabled = false
+
+	testFP := ComputeJA3(772, []uint16{49196}, nil, nil, nil)
+	AddFingerprint(testFP.Hash, FingerprintInfo{Name: "test-sus", Category: FingerprintSuspicious, Score: 40})
+	defer RemoveFingerprint(testFP.Hash)
+
+	layer := NewLayer(cfg)
+
+	ctx := newTestContext("", "10.0.0.1")
+	ctx.TLSVersion = 772
+	ctx.TLSCipherSuite = 49196
+	result := layer.Process(ctx)
+
+	if result.Score == 0 {
+		t.Error("expected non-zero score for suspicious TLS fingerprint")
+	}
+}
+
+func TestLayer_AnalyzeTLSFingerprint_KnownGood(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Mode = "enforce"
+	cfg.TLSFingerprint.Enabled = true
+	cfg.UserAgent.Enabled = false
+	cfg.Behavior.Enabled = false
+
+	testFP := ComputeJA3(773, []uint16{49197}, nil, nil, nil)
+	AddFingerprint(testFP.Hash, FingerprintInfo{Name: "test-good", Category: FingerprintGood, Score: 0})
+	defer RemoveFingerprint(testFP.Hash)
+
+	layer := NewLayer(cfg)
+
+	ctx := newTestContext("", "10.0.0.1")
+	ctx.TLSVersion = 773
+	ctx.TLSCipherSuite = 49197
+	result := layer.Process(ctx)
+
+	// Good fingerprint with score 0 should pass
+	if result.Action != engine.ActionPass {
+		t.Errorf("expected ActionPass for known good TLS fingerprint, got %v", result.Action)
+	}
+}
+
+func TestBehaviorTracker_AdvanceLargeElapsed(t *testing.T) {
+	cfg := BehaviorConfig{
+		Window:             5 * time.Second,
+		RPSThreshold:       100,
+		UniquePathsPerMin:  100,
+		ErrorRateThreshold: 50,
+		TimingStdDevMs:     0,
+	}
+	bm := NewBehaviorManager(cfg)
+
+	ip := "10.0.0.50"
+	bm.Record(ip, "/test", false, time.Millisecond)
+
+	// Force a large time advance by sleeping briefly and then recording again
+	// The advance function should handle ticks > size correctly
+	tracker := bm.getOrCreate(ip)
+	tracker.mu.Lock()
+	// Simulate large time jump
+	tracker.lastTick = time.Now().Add(-10 * time.Second)
+	tracker.mu.Unlock()
+
+	bm.Record(ip, "/test2", false, time.Millisecond)
+	// Should not panic
+}
+
+func TestBehaviorManager_CleanupRemovesOld(t *testing.T) {
+	cfg := BehaviorConfig{
+		Window:             1 * time.Millisecond,
+		RPSThreshold:       100,
+		UniquePathsPerMin:  100,
+		ErrorRateThreshold: 50,
+		TimingStdDevMs:     0,
+	}
+	bm := NewBehaviorManager(cfg)
+
+	bm.Record("10.0.0.1", "/test", false, time.Millisecond)
+	if bm.TrackerCount() != 1 {
+		t.Fatalf("expected 1 tracker, got %d", bm.TrackerCount())
+	}
+
+	// Manually set lastTick to the past to simulate old tracker
+	tracker := bm.getOrCreate("10.0.0.1")
+	tracker.mu.Lock()
+	tracker.lastTick = time.Now().Add(-10 * time.Second)
+	tracker.mu.Unlock()
+
+	bm.Cleanup()
+
+	if bm.TrackerCount() != 0 {
+		t.Fatalf("expected 0 trackers after cleanup, got %d", bm.TrackerCount())
+	}
+}
+
+func TestBehaviorManager_ConcurrentAccess(t *testing.T) {
+	cfg := BehaviorConfig{
+		Window:             5 * time.Second,
+		RPSThreshold:       100,
+		UniquePathsPerMin:  100,
+		ErrorRateThreshold: 50,
+		TimingStdDevMs:     0,
+	}
+	bm := NewBehaviorManager(cfg)
+
+	done := make(chan struct{})
+	// Concurrent recording from multiple goroutines
+	for i := 0; i < 10; i++ {
+		go func(id int) {
+			defer func() { done <- struct{}{} }()
+			ip := "10.0.0.1"
+			for j := 0; j < 100; j++ {
+				bm.Record(ip, "/path", false, time.Millisecond)
+			}
+		}(i)
+	}
+
+	for i := 0; i < 10; i++ {
+		<-done
+	}
+
+	// Should not panic and should have recorded
+	score, _ := bm.Analyze("10.0.0.1")
+	_ = score // just verify no panic
+}
+
+func TestBehaviorManager_TimingStdDevLow(t *testing.T) {
+	cfg := BehaviorConfig{
+		Window:             5 * time.Second,
+		RPSThreshold:       1000,
+		UniquePathsPerMin:  1000,
+		ErrorRateThreshold: 100,
+		TimingStdDevMs:     100, // Very high threshold to ensure machine-like detection
+	}
+	bm := NewBehaviorManager(cfg)
+
+	ip := "10.0.0.5"
+	// Record many requests with very consistent timing (low stddev)
+	for i := 0; i < 20; i++ {
+		bm.Record(ip, "/test", false, 50*time.Millisecond)
+	}
+
+	score, findings := bm.Analyze(ip)
+	hasTimingFinding := false
+	for _, f := range findings {
+		if f == "machine-like request timing detected" {
+			hasTimingFinding = true
+			break
+		}
+	}
+	if !hasTimingFinding {
+		t.Errorf("expected 'machine-like request timing detected', got score=%d findings=%v", score, findings)
+	}
+}
+
+func TestTimingStdDev_Empty(t *testing.T) {
+	result := timingStdDev(nil)
+	if result != 0 {
+		t.Fatalf("expected 0 for empty timings, got %f", result)
+	}
+}
+
+func TestTimingStdDev_SingleValue(t *testing.T) {
+	result := timingStdDev([]time.Duration{100 * time.Millisecond})
+	if result != 0 {
+		t.Fatalf("expected 0 for single timing, got %f", result)
+	}
+}
+
+func TestAnalyzeUserAgent_Wget(t *testing.T) {
+	score, _ := AnalyzeUserAgent("wget/1.21")
+	if score != 15 {
+		t.Errorf("expected score 15 for wget, got %d", score)
+	}
+}
+
+func TestAnalyzeUserAgent_LibwwwPerl(t *testing.T) {
+	score, _ := AnalyzeUserAgent("libwww-perl/6.67")
+	if score != 15 {
+		t.Errorf("expected score 15 for libwww-perl, got %d", score)
+	}
+}
+
+func TestAnalyzeUserAgent_Spider(t *testing.T) {
+	score, _ := AnalyzeUserAgent("MySpider/1.0")
+	if score != 30 {
+		t.Errorf("expected score 30 for unknown spider, got %d", score)
+	}
+}
+
+func TestAnalyzeUserAgent_Crawler(t *testing.T) {
+	score, _ := AnalyzeUserAgent("MyCrawler/1.0")
+	if score != 30 {
+		t.Errorf("expected score 30 for unknown crawler, got %d", score)
+	}
+}
+
+func TestLayer_UAHighScore_Severity(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Mode = "enforce"
+	cfg.TLSFingerprint.Enabled = false
+	cfg.Behavior.Enabled = false
+	layer := NewLayer(cfg)
+
+	// Scanner gets score 85 => SeverityHigh
+	ctx := newTestContext("sqlmap/1.5", "10.0.0.1")
+	result := layer.Process(ctx)
+
+	found := false
+	for _, f := range result.Findings {
+		if f.DetectorName == "botdetect-ua" && f.Severity == engine.SeverityHigh {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected SeverityHigh finding for scanner UA")
+	}
+}
+
+func TestLayer_UAMediumScore_Severity(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Mode = "enforce"
+	cfg.TLSFingerprint.Enabled = false
+	cfg.Behavior.Enabled = false
+	layer := NewLayer(cfg)
+
+	// Empty UA gets score 40 => SeverityMedium
+	ctx := newTestContext("", "10.0.0.1")
+	delete(ctx.Headers, "User-Agent")
+	result := layer.Process(ctx)
+
+	found := false
+	for _, f := range result.Findings {
+		if f.DetectorName == "botdetect-ua" && f.Severity == engine.SeverityMedium {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("expected SeverityMedium finding for empty UA")
+	}
+}
