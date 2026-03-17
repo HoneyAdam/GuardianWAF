@@ -97,5 +97,9 @@ temp/
 # Benchmark results
 *.bench
 
+# Website
+website/node_modules/
+website/dist/
+
 # Claude Code
 .claude/
