@@ -939,3 +939,131 @@ func TestEngine_Check_ScoreExactlyAtLogThreshold(t *testing.T) {
 		t.Errorf("expected ActionLog at exact log threshold, got %v", event.Action)
 	}
 }
+
+// --- applyResponseHook tests ---
+
+func TestApplyResponseHook_WithHook(t *testing.T) {
+	w := httptest.NewRecorder()
+	metadata := map[string]any{
+		"response_hook": func(w http.ResponseWriter) {
+			w.Header().Set("X-Test-Header", "applied")
+		},
+	}
+	applyResponseHook(w, metadata)
+	if w.Header().Get("X-Test-Header") != "applied" {
+		t.Error("expected response hook to set X-Test-Header")
+	}
+}
+
+func TestApplyResponseHook_NoHook(t *testing.T) {
+	w := httptest.NewRecorder()
+	metadata := map[string]any{}
+	applyResponseHook(w, metadata)
+	// Should not panic, no headers added
+	if len(w.Header()) != 0 {
+		t.Error("expected no headers when no hook is set")
+	}
+}
+
+func TestApplyResponseHook_WrongType(t *testing.T) {
+	w := httptest.NewRecorder()
+	metadata := map[string]any{
+		"response_hook": "not-a-function",
+	}
+	applyResponseHook(w, metadata)
+	// Should not panic
+	if len(w.Header()) != 0 {
+		t.Error("expected no headers for wrong type")
+	}
+}
+
+// --- Middleware with response hook (security headers) ---
+
+func TestMiddleware_AppliesSecurityHeaders(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.WAF.Response.SecurityHeaders.Enabled = true
+
+	e, cleanup := setupEngineWithLayers(t, cfg)
+	defer cleanup()
+
+	handler := e.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest("GET", "/test", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("User-Agent", "Mozilla/5.0 Chrome/120.0")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	// Verify security headers were applied
+	if rr.Header().Get("X-GuardianWAF-RequestID") == "" {
+		t.Error("expected X-GuardianWAF-RequestID header")
+	}
+}
+
+func TestMiddleware_LogAction(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.WAF.Detection.Threshold.Block = 100
+	cfg.WAF.Detection.Threshold.Log = 10
+
+	e, cleanup := setupEngineWithLayers(t, cfg)
+	defer cleanup()
+
+	handler := e.Middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// Medium-suspicion request — should be logged but not blocked
+	req := httptest.NewRequest("GET", "/search?q=SELECT+*+FROM", nil)
+	req.RemoteAddr = "127.0.0.1:12345"
+	req.Header.Set("User-Agent", "Mozilla/5.0 Chrome/120.0")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	// Should not be blocked (threshold is 100)
+	if rr.Code == http.StatusForbidden {
+		t.Error("expected non-blocked response for log threshold")
+	}
+}
+
+// setupEngineWithLayers creates a test engine with response layer
+func setupEngineWithLayers(t *testing.T, cfg *config.Config) (*Engine, func()) {
+	t.Helper()
+	store := newMockEventStore()
+	bus := newMockEventBus()
+	eng, err := NewEngine(cfg, store, bus)
+	if err != nil {
+		t.Fatalf("NewEngine error: %v", err)
+	}
+
+	// Add a response layer that sets security headers
+	if cfg.WAF.Response.SecurityHeaders.Enabled {
+		eng.AddLayer(OrderedLayer{
+			Layer: &mockResponseLayer{
+				securityHeaders: true,
+			},
+			Order: OrderResponse,
+		})
+	}
+
+	return eng, func() { eng.Close() }
+}
+
+// mockResponseLayer simulates the response layer setting a hook
+type mockResponseLayer struct {
+	securityHeaders bool
+}
+
+func (l *mockResponseLayer) Name() string { return "response" }
+
+func (l *mockResponseLayer) Process(ctx *RequestContext) LayerResult {
+	ctx.Metadata["response_config"] = "test"
+	if l.securityHeaders {
+		ctx.Metadata["response_hook"] = func(w http.ResponseWriter) {
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+			w.Header().Set("X-Frame-Options", "SAMEORIGIN")
+		}
+	}
+	return LayerResult{Action: ActionPass}
+}
