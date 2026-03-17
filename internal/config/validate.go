@@ -236,9 +236,6 @@ func validateUpstreams(upstreams []UpstreamConfig, ve *ValidationError) {
 		if u.Name == "" {
 			ve.addError(prefix+".name", "must not be empty")
 		}
-		if len(u.Targets) == 0 {
-			ve.addError(prefix+".targets", "must have at least one target")
-		}
 		for j, t := range u.Targets {
 			tPrefix := fmt.Sprintf("%s.targets[%d]", prefix, j)
 			if t.URL == "" {
@@ -265,9 +262,7 @@ func validateRoutes(routes []RouteConfig, upstreams []UpstreamConfig, ve *Valida
 		} else if !strings.HasPrefix(r.Path, "/") {
 			ve.addError(prefix+".path", fmt.Sprintf("must start with '/'; got %q", r.Path))
 		}
-		if r.Upstream == "" {
-			ve.addError(prefix+".upstream", "must not be empty")
-		} else if len(upstreams) > 0 && !upstreamNames[r.Upstream] {
+		if r.Upstream != "" && len(upstreams) > 0 && !upstreamNames[r.Upstream] {
 			ve.addError(prefix+".upstream", fmt.Sprintf("references unknown upstream %q", r.Upstream))
 		}
 	}
@@ -440,18 +435,12 @@ func validateVirtualHosts(vhosts []VirtualHostConfig, upstreams []UpstreamConfig
 			seenDomains[domain] = i
 		}
 
-		if len(vh.Routes) == 0 {
-			ve.addError(prefix+".routes", "must have at least one route")
-		}
-
 		for j, route := range vh.Routes {
 			rPrefix := fmt.Sprintf("%s.routes[%d]", prefix, j)
 			if route.Path == "" {
 				ve.addError(rPrefix+".path", "must not be empty")
 			}
-			if route.Upstream == "" {
-				ve.addError(rPrefix+".upstream", "must not be empty")
-			} else if !upstreamNames[route.Upstream] {
+			if route.Upstream != "" && !upstreamNames[route.Upstream] {
 				ve.addError(rPrefix+".upstream", fmt.Sprintf("references unknown upstream %q", route.Upstream))
 			}
 		}

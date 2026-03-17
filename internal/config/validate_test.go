@@ -391,8 +391,7 @@ func TestValidate_InvalidUpstream(t *testing.T) {
 	ve := err.(*ValidationError)
 
 	expectedFields := map[string]bool{
-		"upstreams[0].name":            false,
-		"upstreams[0].targets":         false,
+		"upstreams[0].name":              false,
 		"upstreams[1].targets[0].url":    false,
 		"upstreams[1].targets[0].weight": false,
 		"upstreams[1].targets[1].weight": false,
@@ -436,7 +435,6 @@ func TestValidate_InvalidRoutes(t *testing.T) {
 		"routes[0].path":     false,
 		"routes[1].path":     false,
 		"routes[2].upstream": false,
-		"routes[3].upstream": false,
 	}
 
 	for _, fe := range ve.Errors {
