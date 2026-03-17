@@ -1,4 +1,4 @@
-.PHONY: build test lint bench fuzz clean run docker-build
+.PHONY: build test lint bench fuzz clean run docker-build smoke docker-test
 
 BINARY=guardianwaf
 VERSION?=$(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -42,3 +42,10 @@ cover:
 
 vet:
 	go vet ./...
+
+smoke: build
+	@bash scripts/smoke-test.sh ./$(BINARY)
+
+docker-test:
+	docker compose -f docker-compose.test.yml up --build --abort-on-container-exit --exit-code-from test-runner
+	@docker compose -f docker-compose.test.yml down -v

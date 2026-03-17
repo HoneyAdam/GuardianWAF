@@ -1,0 +1,122 @@
+# docker-test.yaml — Config for Docker-based smoke tests
+# Used by docker-compose.test.yml
+mode: enforce
+listen: ":8080"
+
+upstreams:
+  - name: backend
+    targets:
+      - url: "http://backend:3000"
+        weight: 1
+    health_check:
+      interval: 5s
+      timeout: 2s
+      path: /healthz
+
+routes:
+  - path: /
+    upstream: backend
+
+waf:
+  ip_acl:
+    enabled: true
+    blacklist:
+      - "198.51.100.0/24"
+
+  rate_limit:
+    enabled: true
+    rules:
+      - id: global
+        scope: ip
+        limit: 10000
+        window: 60s
+        burst: 1000
+        action: block
+
+  sanitizer:
+    enabled: true
+    max_url_length: 4096
+    max_header_size: 16384
+    max_header_count: 100
+    max_body_size: 10485760
+    max_cookie_size: 4096
+    allowed_methods:
+      - GET
+      - POST
+      - PUT
+      - PATCH
+      - DELETE
+      - HEAD
+      - OPTIONS
+    block_null_bytes: true
+    strip_hop_by_hop: true
+
+  detection:
+    enabled: true
+    threshold:
+      block: 50
+      log: 25
+    detectors:
+      sqli:
+        enabled: true
+        multiplier: 1.0
+      xss:
+        enabled: true
+        multiplier: 1.0
+      lfi:
+        enabled: true
+        multiplier: 1.0
+      cmdi:
+        enabled: true
+        multiplier: 1.0
+      xxe:
+        enabled: true
+        multiplier: 1.0
+      ssrf:
+        enabled: true
+        multiplier: 1.0
+
+  bot_detection:
+    enabled: true
+    mode: enforce
+    tls_fingerprint:
+      enabled: false
+    user_agent:
+      enabled: true
+      block_empty: true
+      block_known_scanners: true
+    behavior:
+      enabled: false
+
+  response:
+    security_headers:
+      enabled: true
+      x_frame_options: SAMEORIGIN
+      referrer_policy: strict-origin-when-cross-origin
+      permissions_policy: "camera=(), microphone=(), geolocation=()"
+      hsts:
+        enabled: true
+        max_age: 31536000
+        include_subdomains: true
+    data_masking:
+      enabled: true
+      mask_credit_cards: true
+      mask_ssn: true
+      mask_api_keys: true
+      strip_stack_traces: true
+    error_pages:
+      mode: production
+
+dashboard:
+  enabled: false
+
+mcp:
+  enabled: false
+
+logging:
+  level: warn
+  format: json
+  output: stderr
+
+events:
+  max_events: 10000
