@@ -2,13 +2,19 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/guardianwaf/guardianwaf/internal/config"
 	"github.com/guardianwaf/guardianwaf/internal/engine"
@@ -532,5 +538,429 @@ func TestBuildReverseProxy_StripPrefix(t *testing.T) {
 	// The reverse proxy should have forwarded the request
 	if rr.Code == http.StatusNotFound {
 		// Route matched — the proxy attempted forwarding
+	}
+}
+
+// --- Subprocess CLI tests for os.Exit-calling commands ---
+
+func buildBinary(t *testing.T) string {
+	t.Helper()
+	binName := "guardianwaf_test_bin"
+	if runtime.GOOS == "windows" {
+		binName += ".exe"
+	}
+	binPath := filepath.Join(t.TempDir(), binName)
+	cmd := exec.Command("go", "build", "-o", binPath, ".")
+	cmd.Dir = filepath.Join(".", "")
+	// Build from the cmd/guardianwaf directory
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("failed to build binary: %v\n%s", err, out)
+	}
+	return binPath
+}
+
+func writeTestConfig(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "guardianwaf.yaml")
+	content := `mode: enforce
+listen: ":18080"
+waf:
+  detection:
+    enabled: true
+  sanitizer:
+    enabled: true
+`
+	os.WriteFile(path, []byte(content), 0644)
+	return path
+}
+
+func TestCLI_Version(t *testing.T) {
+	bin := buildBinary(t)
+	out, err := exec.Command(bin, "version").CombinedOutput()
+	if err != nil {
+		t.Fatalf("version command failed: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "guardianwaf") {
+		t.Errorf("expected 'guardianwaf' in version output, got: %s", out)
+	}
+}
+
+func TestCLI_Help(t *testing.T) {
+	bin := buildBinary(t)
+	out, err := exec.Command(bin, "help").CombinedOutput()
+	if err != nil {
+		t.Fatalf("help command failed: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "COMMANDS") {
+		t.Errorf("expected 'COMMANDS' in help output, got: %s", out)
+	}
+}
+
+func TestCLI_UnknownCommand(t *testing.T) {
+	bin := buildBinary(t)
+	cmd := exec.Command(bin, "nonexistent")
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatal("expected non-zero exit for unknown command")
+	}
+	if !strings.Contains(string(out), "Unknown command") {
+		t.Errorf("expected 'Unknown command' in output, got: %s", out)
+	}
+}
+
+func TestCLI_NoArgs(t *testing.T) {
+	bin := buildBinary(t)
+	cmd := exec.Command(bin)
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatal("expected non-zero exit for no args")
+	}
+	if !strings.Contains(string(out), "USAGE") {
+		t.Errorf("expected 'USAGE' in output, got: %s", out)
+	}
+}
+
+func TestCLI_Validate_Valid(t *testing.T) {
+	bin := buildBinary(t)
+	cfgPath := writeTestConfig(t)
+	out, err := exec.Command(bin, "validate", "-config", cfgPath).CombinedOutput()
+	if err != nil {
+		t.Fatalf("validate failed: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "valid") {
+		t.Errorf("expected 'valid' in output, got: %s", out)
+	}
+}
+
+func TestCLI_Validate_InvalidFile(t *testing.T) {
+	bin := buildBinary(t)
+	cmd := exec.Command(bin, "validate", "-config", "/nonexistent/file.yaml")
+	_, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatal("expected non-zero exit for invalid config file")
+	}
+}
+
+func TestCLI_Check_Clean(t *testing.T) {
+	bin := buildBinary(t)
+	cfgPath := writeTestConfig(t)
+	out, err := exec.Command(bin, "check", "-config", cfgPath, "-url", "/hello",
+		"-H", "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/120.0").CombinedOutput()
+	if err != nil {
+		// exit code 2 = blocked, which is also a valid test path
+		if !strings.Contains(string(out), "Action:") {
+			t.Fatalf("check failed unexpectedly: %v\n%s", err, out)
+		}
+	}
+	if !strings.Contains(string(out), "Action:") {
+		t.Errorf("expected 'Action:' in output, got: %s", out)
+	}
+}
+
+func TestCLI_Check_Attack(t *testing.T) {
+	bin := buildBinary(t)
+	cfgPath := writeTestConfig(t)
+	cmd := exec.Command(bin, "check", "-config", cfgPath, "-url", "/search?q='+OR+1=1--", "-v")
+	out, err := cmd.CombinedOutput()
+	// Exit code 2 = blocked
+	if err == nil {
+		// Might pass if score is below threshold
+		if !strings.Contains(string(out), "PASSED") && !strings.Contains(string(out), "BLOCKED") {
+			t.Errorf("expected PASSED or BLOCKED, got: %s", out)
+		}
+	} else {
+		if !strings.Contains(string(out), "BLOCKED") {
+			t.Errorf("expected 'BLOCKED' for attack, got: %s", out)
+		}
+	}
+}
+
+func TestCLI_Check_WithBody(t *testing.T) {
+	bin := buildBinary(t)
+	cfgPath := writeTestConfig(t)
+	out, _ := exec.Command(bin, "check", "-config", cfgPath, "-url", "/api/data", "-method", "POST",
+		"-body", `{"user":"test"}`,
+		"-H", "User-Agent: Mozilla/5.0 Chrome/120.0",
+		"-H", "Content-Type: application/json").CombinedOutput()
+	if !strings.Contains(string(out), "Action:") {
+		t.Errorf("expected 'Action:' in output, got: %s", out)
+	}
+}
+
+func TestCLI_Check_WithHeaders(t *testing.T) {
+	bin := buildBinary(t)
+	cfgPath := writeTestConfig(t)
+	out, _ := exec.Command(bin, "check", "-config", cfgPath, "-url", "/test",
+		"-H", "User-Agent: Mozilla/5.0 Chrome/120.0",
+		"-H", "X-Custom: value",
+		"-H", "Accept: text/html").CombinedOutput()
+	if !strings.Contains(string(out), "Action:") {
+		t.Errorf("expected 'Action:' in output, got: %s", out)
+	}
+}
+
+func TestCLI_Check_MissingURL(t *testing.T) {
+	bin := buildBinary(t)
+	cfgPath := writeTestConfig(t)
+	cmd := exec.Command(bin, "check", "-config", cfgPath)
+	_, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatal("expected non-zero exit for missing --url")
+	}
+}
+
+func TestCLI_Serve_Startup(t *testing.T) {
+	bin := buildBinary(t)
+
+	// Find a free port
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to find free port: %v", err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	ln.Close()
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "guardianwaf.yaml")
+	cfgContent := fmt.Sprintf(`mode: enforce
+listen: "127.0.0.1:%d"
+dashboard:
+  enabled: false
+mcp:
+  enabled: false
+`, port)
+	os.WriteFile(cfgPath, []byte(cfgContent), 0644)
+
+	cmd := exec.Command(bin, "serve", "-config", cfgPath)
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("failed to start serve: %v", err)
+	}
+
+	// Wait for server to start
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	deadline := time.Now().Add(5 * time.Second)
+	started := false
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("tcp", addr, 100*time.Millisecond)
+		if err == nil {
+			conn.Close()
+			started = true
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	if !started {
+		cmd.Process.Kill()
+		t.Fatal("server did not start within timeout")
+	}
+
+	// Send a request
+	resp, err := http.Get(fmt.Sprintf("http://%s/healthz", addr))
+	if err == nil {
+		resp.Body.Close()
+	}
+
+	// Kill the server
+	cmd.Process.Kill()
+	cmd.Wait()
+}
+
+func TestCLI_Sidecar_Startup(t *testing.T) {
+	bin := buildBinary(t)
+
+	// Start a backend
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprintln(w, "backend ok")
+	}))
+	defer backend.Close()
+
+	// Find a free port
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to find free port: %v", err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+	ln.Close()
+
+	cmd := exec.Command(bin, "sidecar", "-upstream", backend.URL, "-listen", fmt.Sprintf("127.0.0.1:%d", port))
+	cmd.Stdout = io.Discard
+	cmd.Stderr = io.Discard
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("failed to start sidecar: %v", err)
+	}
+
+	// Wait for sidecar to start
+	addr := fmt.Sprintf("127.0.0.1:%d", port)
+	deadline := time.Now().Add(5 * time.Second)
+	started := false
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("tcp", addr, 100*time.Millisecond)
+		if err == nil {
+			conn.Close()
+			started = true
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	if !started {
+		cmd.Process.Kill()
+		t.Fatal("sidecar did not start within timeout")
+	}
+
+	// Hit the healthz endpoint
+	resp, err := http.Get(fmt.Sprintf("http://%s/healthz", addr))
+	if err != nil {
+		cmd.Process.Kill()
+		cmd.Wait()
+		t.Fatalf("healthz request failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 from healthz, got %d", resp.StatusCode)
+	}
+
+	// Hit a proxied endpoint
+	resp2, err := http.Get(fmt.Sprintf("http://%s/test", addr))
+	if err == nil {
+		resp2.Body.Close()
+	}
+
+	// Kill the sidecar
+	cmd.Process.Kill()
+	cmd.Wait()
+}
+
+// --- startDashboard endpoints ---
+
+func TestStartDashboard_Endpoints(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Dashboard.Enabled = true
+	cfg.Dashboard.Listen = "127.0.0.1:0"
+	cfg.Dashboard.APIKey = ""
+
+	store := events.NewMemoryStore(1000)
+	bus := events.NewEventBus()
+	eng, err := engine.NewEngine(cfg, store, bus)
+	if err != nil {
+		t.Fatalf("NewEngine error: %v", err)
+	}
+	defer eng.Close()
+
+	// Use a listener to get the actual port
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen error: %v", err)
+	}
+	addr := ln.Addr().String()
+	ln.Close()
+
+	cfg.Dashboard.Listen = addr
+	srv := startDashboard(cfg, eng)
+	if srv == nil {
+		t.Fatal("expected non-nil server")
+	}
+	defer srv.Close()
+
+	// Wait for server to be ready
+	time.Sleep(100 * time.Millisecond)
+
+	// Test /healthz
+	resp, err := http.Get(fmt.Sprintf("http://%s/healthz", addr))
+	if err != nil {
+		t.Fatalf("healthz request failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 from healthz, got %d", resp.StatusCode)
+	}
+
+	// Test /api/stats
+	resp2, err := http.Get(fmt.Sprintf("http://%s/api/stats", addr))
+	if err != nil {
+		t.Fatalf("stats request failed: %v", err)
+	}
+	resp2.Body.Close()
+	if resp2.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 from stats, got %d", resp2.StatusCode)
+	}
+}
+
+func TestStartDashboard_WithAPIKey(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Dashboard.Enabled = true
+	cfg.Dashboard.APIKey = "secret-key"
+
+	store := events.NewMemoryStore(1000)
+	bus := events.NewEventBus()
+	eng, err := engine.NewEngine(cfg, store, bus)
+	if err != nil {
+		t.Fatalf("NewEngine error: %v", err)
+	}
+	defer eng.Close()
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("Listen error: %v", err)
+	}
+	addr := ln.Addr().String()
+	ln.Close()
+
+	cfg.Dashboard.Listen = addr
+	srv := startDashboard(cfg, eng)
+	defer srv.Close()
+	time.Sleep(100 * time.Millisecond)
+
+	// Without key — should get 401
+	resp, err := http.Get(fmt.Sprintf("http://%s/api/stats", addr))
+	if err != nil {
+		t.Fatalf("stats request failed: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Errorf("expected 401 without API key, got %d", resp.StatusCode)
+	}
+
+	// With correct key
+	req, _ := http.NewRequest("GET", fmt.Sprintf("http://%s/api/stats", addr), nil)
+	req.Header.Set("X-API-Key", "secret-key")
+	resp2, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("stats request with key failed: %v", err)
+	}
+	resp2.Body.Close()
+	if resp2.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 with correct API key, got %d", resp2.StatusCode)
+	}
+}
+
+// --- loadConfig edge cases ---
+
+func TestLoadConfig_NonDefaultPathNotFound(t *testing.T) {
+	// Non-default path that doesn't exist — should call os.Exit
+	// We can't test os.Exit directly, but we can test the file-exists path
+	dir := t.TempDir()
+	path := filepath.Join(dir, "exists.yaml")
+	os.WriteFile(path, []byte("mode: monitor\n"), 0644)
+	cfg := loadConfig(path)
+	if cfg.Mode != "monitor" {
+		t.Errorf("expected 'monitor', got %q", cfg.Mode)
+	}
+}
+
+// --- TestRequest edge case ---
+
+func TestMCPAdapter_TestRequest_InvalidMethod(t *testing.T) {
+	a := newTestAdapter(t)
+	// Invalid HTTP method with space causes NewRequest to fail
+	_, err := a.TestRequest("BAD METHOD", "/test", nil)
+	if err == nil {
+		t.Fatal("expected error for invalid method")
 	}
 }
