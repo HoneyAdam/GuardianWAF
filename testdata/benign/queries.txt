@@ -1,0 +1,76 @@
+# Benign inputs that may superficially resemble attacks
+# These should NOT trigger WAF blocking
+
+# === Names with Apostrophes ===
+O'Brien
+O'Malley
+D'Angelo
+McDonald's
+It's a beautiful day
+John's car won't start
+Mary's lamb
+
+# === SQL-like Legitimate Text ===
+select your favorite color from the dropdown
+union of workers rallied at the square
+drop the package at the front door
+insert coin to continue
+update your profile information
+delete old files from your computer
+We need to select all items from the list
+The union members voted to approve the contract
+Please drop off the delivery at door 3
+Make sure to update your settings before continuing
+grant access to the shared folder
+
+# === HTML-like Content ===
+Use <b>bold</b> for emphasis
+The price is <$50
+Income > $100K
+a < b and b > c
+3 < 5 is true
+H&M store
+AT&T wireless
+Johnson & Johnson
+Tom & Jerry
+
+# === File Paths ===
+/home/user/documents/report.pdf
+C:\Users\john\Desktop\file.txt
+/var/log/application.log
+../images/logo.png
+./config/settings.json
+
+# === URLs ===
+https://www.example.com/search?q=hello+world
+http://localhost:3000/api/users
+ftp://files.example.com/pub/readme.txt
+https://example.com/path?page=1&sort=name
+
+# === Email Addresses ===
+user@example.com
+john.doe@company.org
+admin+test@gmail.com
+
+# === Code Snippets in Documentation ===
+Use alert() to show a message
+The script runs automatically
+function calculateTotal(items)
+for i := 0; i < len(items); i++
+if (count > 0 && status == "active")
+password = input("Enter password: ")
+config.set("timeout", 30)
+
+# === Mathematical / Scientific Text ===
+The result is 1=1 when x equals y
+If a=b and b=c then a=c
+SELECT model: choose between A or B
+The OR gate outputs 1 when either input is 1
+The AND gate requires both inputs to be 1
+
+# === Business Text ===
+Order #12345 was shipped
+Invoice total: $1,234.56
+Account balance: -$50.00
+SSN format: XXX-XX-XXXX (masked)
+Credit card: **** **** **** 1234

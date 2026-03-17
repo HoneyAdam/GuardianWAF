@@ -1,0 +1,105 @@
+# Sidecar mode configuration
+# WAF runs alongside a single backend, minimal overhead
+mode: enforce
+listen: ":8080"
+
+upstreams:
+  - name: app
+    targets:
+      - url: "http://127.0.0.1:3000"
+        weight: 1
+    health_check:
+      enabled: false
+
+routes:
+  - path: /
+    upstream: app
+    strip_prefix: false
+
+waf:
+  ip_acl:
+    enabled: true
+    auto_ban:
+      enabled: true
+      default_ttl: 30m
+      max_ttl: 2h
+
+  rate_limit:
+    enabled: true
+    rules:
+      - id: sidecar
+        scope: ip
+        limit: 500
+        window: 1m
+        burst: 25
+        action: block
+
+  sanitizer:
+    enabled: true
+    max_url_length: 4096
+    max_header_size: 4096
+    max_header_count: 50
+    max_body_size: 5242880
+    max_cookie_size: 4096
+    block_null_bytes: true
+    normalize_encoding: true
+    strip_hop_by_hop: true
+    allowed_methods: [GET, POST, PUT, DELETE, HEAD, OPTIONS]
+
+  detection:
+    enabled: true
+    threshold:
+      block: 50
+      log: 25
+    detectors:
+      sqli:
+        enabled: true
+        multiplier: 1.0
+      xss:
+        enabled: true
+        multiplier: 1.0
+      lfi:
+        enabled: true
+        multiplier: 1.0
+      cmdi:
+        enabled: true
+        multiplier: 1.0
+      xxe:
+        enabled: true
+        multiplier: 1.0
+      ssrf:
+        enabled: true
+        multiplier: 1.0
+
+  bot_detection:
+    enabled: true
+    mode: monitor
+    user_agent:
+      enabled: true
+      block_empty: false
+      block_known_scanners: true
+
+  response:
+    security_headers:
+      enabled: true
+      hsts:
+        enabled: false
+      x_content_type_options: true
+      x_frame_options: DENY
+    error_pages:
+      enabled: true
+      mode: production
+
+dashboard:
+  enabled: false
+
+logging:
+  level: warn
+  format: json
+  output: stdout
+  log_allowed: false
+  log_blocked: true
+
+events:
+  storage: memory
+  max_events: 10000

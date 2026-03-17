@@ -1,0 +1,48 @@
+# Invalid configuration with multiple validation errors
+mode: invalid_mode
+listen: "not-a-valid-address"
+
+waf:
+  ip_acl:
+    enabled: true
+    whitelist:
+      - "not-an-ip"
+      - "999.999.999.999"
+    blacklist:
+      - "also-not-an-ip"
+
+  rate_limit:
+    enabled: true
+    rules:
+      - id: ""
+        scope: invalid_scope
+        limit: -1
+        window: 0s
+        burst: 0
+        action: invalid_action
+
+  sanitizer:
+    enabled: true
+    max_url_length: -1
+    max_header_size: 0
+    max_header_count: -5
+    max_body_size: 0
+    max_cookie_size: -10
+
+  detection:
+    enabled: true
+    threshold:
+      block: -1
+      log: -1
+    detectors:
+      sqli:
+        enabled: true
+        multiplier: -2.0
+
+logging:
+  level: invalid_level
+  format: invalid_format
+
+events:
+  storage: invalid_storage
+  max_events: -100

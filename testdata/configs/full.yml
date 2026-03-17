@@ -1,0 +1,177 @@
+# Full GuardianWAF configuration - every option specified
+mode: enforce
+listen: ":8080"
+
+tls:
+  enabled: true
+  listen: ":8443"
+  cert_file: "/etc/guardianwaf/cert.pem"
+  key_file: "/etc/guardianwaf/key.pem"
+  acme:
+    enabled: false
+    email: "admin@example.com"
+    domains:
+      - "example.com"
+      - "www.example.com"
+    cache_dir: "/var/lib/guardianwaf/acme"
+
+upstreams:
+  - name: backend
+    load_balancer: round_robin
+    targets:
+      - url: "http://127.0.0.1:9000"
+        weight: 1
+      - url: "http://127.0.0.1:9001"
+        weight: 1
+    health_check:
+      enabled: true
+      interval: 10s
+      timeout: 3s
+      path: /healthz
+
+routes:
+  - path: /
+    upstream: backend
+    strip_prefix: false
+    methods: [GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS]
+
+waf:
+  ip_acl:
+    enabled: true
+    whitelist:
+      - "10.0.0.0/8"
+      - "172.16.0.0/12"
+    blacklist:
+      - "203.0.113.0/24"
+    auto_ban:
+      enabled: true
+      default_ttl: 1h
+      max_ttl: 24h
+
+  rate_limit:
+    enabled: true
+    rules:
+      - id: global
+        scope: ip
+        limit: 1000
+        window: 1m
+        burst: 50
+        action: block
+      - id: api
+        scope: ip+path
+        paths:
+          - "/api/**"
+        limit: 100
+        window: 1m
+        burst: 20
+        action: block
+        auto_ban_after: 5
+
+  sanitizer:
+    enabled: true
+    max_url_length: 8192
+    max_header_size: 8192
+    max_header_count: 100
+    max_body_size: 10485760
+    max_cookie_size: 4096
+    block_null_bytes: true
+    normalize_encoding: true
+    strip_hop_by_hop: true
+    allowed_methods: [GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS]
+    path_overrides:
+      - path: /api/upload
+        max_body_size: 52428800
+
+  detection:
+    enabled: true
+    threshold:
+      block: 50
+      log: 25
+    detectors:
+      sqli:
+        enabled: true
+        multiplier: 1.0
+      xss:
+        enabled: true
+        multiplier: 1.0
+      lfi:
+        enabled: true
+        multiplier: 1.0
+      cmdi:
+        enabled: true
+        multiplier: 1.0
+      xxe:
+        enabled: true
+        multiplier: 1.0
+      ssrf:
+        enabled: true
+        multiplier: 1.0
+    exclusions:
+      - path: /api/webhook
+        detectors: [sqli, xss]
+        reason: "Webhook payloads may contain SQL/HTML"
+      - path: /api/admin/query
+        detectors: [sqli]
+        reason: "Admin SQL query interface"
+
+  bot_detection:
+    enabled: true
+    mode: enforce
+    tls_fingerprint:
+      enabled: true
+      known_bots_action: block
+      unknown_action: log
+      mismatch_action: log
+    user_agent:
+      enabled: true
+      block_empty: true
+      block_known_scanners: true
+    behavior:
+      enabled: true
+      window: 5m
+      rps_threshold: 10
+      error_rate_threshold: 30
+
+  response:
+    security_headers:
+      enabled: true
+      hsts:
+        enabled: true
+        max_age: 31536000
+        include_subdomains: true
+      x_content_type_options: true
+      x_frame_options: SAMEORIGIN
+      referrer_policy: strict-origin-when-cross-origin
+      permissions_policy: "camera=(), microphone=(), geolocation=()"
+    data_masking:
+      enabled: true
+      mask_credit_cards: true
+      mask_ssn: true
+      mask_api_keys: true
+      strip_stack_traces: true
+    error_pages:
+      enabled: true
+      mode: production
+
+dashboard:
+  enabled: true
+  listen: ":9443"
+  api_key: "test-api-key-12345"
+  tls: true
+
+mcp:
+  enabled: true
+  transport: stdio
+
+logging:
+  level: info
+  format: json
+  output: stdout
+  log_allowed: false
+  log_blocked: true
+  log_body: false
+
+events:
+  storage: memory
+  max_events: 100000
+  file_path: "/var/log/guardianwaf/events.jsonl"

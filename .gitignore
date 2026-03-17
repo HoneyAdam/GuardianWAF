@@ -1,7 +1,14 @@
+# ========================
+# GuardianWAF .gitignore
+# ========================
+
 # Binaries
 guardianwaf
 guardianwaf.exe
+gwaf
+gwaf.exe
 *.exe
+*.exe~
 *.dll
 *.so
 *.dylib
@@ -9,34 +16,86 @@ guardianwaf.exe
 # Build output
 /dist/
 /bin/
+/out/
 
 # Test output
 *.test
 *.out
 coverage.html
 coverage.txt
+coverage.out
+*.prof
+cpu.prof
+mem.prof
+*.pprof
+testdata/fuzz/
 
-# IDE
+# Go
+vendor/
+go.work
+go.work.sum
+
+# IDE / Editors
 .idea/
 .vscode/
 *.swp
 *.swo
+*.swn
 *~
+*.sublime-project
+*.sublime-workspace
+.project
+.settings/
+.classpath
+*.code-workspace
 
 # OS
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
 Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
 
-# Environment
+# Environment / Secrets
 .env
-.env.local
+.env.*
+!.env.example
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+credentials.json
+secrets.yml
 
 # Logs
 *.log
+*.jsonl
 events.jsonl
+/logs/
 
-# ACME cache
+# ACME / TLS cache
 /acme/
+/.acme/
+/certs/
 
 # Temporary
 tmp/
+temp/
+.tmp/
+
+# Docker
+.docker/
+
+# GoReleaser
+/dist/
+
+# Benchmark results
+*.bench
+
+# Claude Code
+.claude/

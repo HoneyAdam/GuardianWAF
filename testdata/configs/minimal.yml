@@ -1,0 +1,3 @@
+# Minimal valid GuardianWAF configuration
+mode: enforce
+listen: ":8080"

