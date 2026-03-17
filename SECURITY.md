@@ -12,7 +12,7 @@ If you discover a security vulnerability in GuardianWAF, please report it respon
 
 **Do NOT open a public GitHub issue for security vulnerabilities.**
 
-Instead, please email: **security@guardianwaf.dev**
+Instead, please email: **security@guardianwaf.com**
 
 Include:
 - Description of the vulnerability
