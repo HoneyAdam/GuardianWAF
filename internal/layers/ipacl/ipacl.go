@@ -177,6 +177,37 @@ func (l *Layer) RemoveAutoBan(ip string) {
 	delete(l.autoBan, ip)
 }
 
+// BanEntry represents an active temporary ban (exported for API).
+type BanEntry struct {
+	IP        string    `json:"ip"`
+	Reason    string    `json:"reason"`
+	ExpiresAt time.Time `json:"expires_at"`
+	Count     int       `json:"count"`
+}
+
+// ActiveBans returns all non-expired auto-ban entries.
+func (l *Layer) ActiveBans() []BanEntry {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+
+	now := time.Now()
+	var result []BanEntry
+	for ip, entry := range l.autoBan {
+		if now.Before(entry.ExpiresAt) {
+			result = append(result, BanEntry{
+				IP: ip, Reason: entry.Reason,
+				ExpiresAt: entry.ExpiresAt, Count: entry.Count,
+			})
+		}
+	}
+	return result
+}
+
+// ActiveBansAny returns active bans as any (for dashboard API without circular import).
+func (l *Layer) ActiveBansAny() any {
+	return l.ActiveBans()
+}
+
 // CleanupExpired removes expired auto-ban entries.
 func (l *Layer) CleanupExpired() {
 	l.mu.Lock()

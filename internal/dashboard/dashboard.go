@@ -74,6 +74,9 @@ func New(eng *engine.Engine, store events.EventStore, apiKey string) *Dashboard 
 	d.mux.HandleFunc("GET /api/v1/ipacl", d.authWrap(d.handleGetIPACL))
 	d.mux.HandleFunc("POST /api/v1/ipacl", d.authWrap(d.handleAddIPACL))
 	d.mux.HandleFunc("DELETE /api/v1/ipacl", d.authWrap(d.handleRemoveIPACL))
+	d.mux.HandleFunc("GET /api/v1/bans", d.authWrap(d.handleGetBans))
+	d.mux.HandleFunc("POST /api/v1/bans", d.authWrap(d.handleAddBan))
+	d.mux.HandleFunc("DELETE /api/v1/bans", d.authWrap(d.handleRemoveBan))
 	d.mux.HandleFunc("OPTIONS /api/v1/ipacl", handleCORS)
 	d.mux.HandleFunc("GET /api/v1/rules", d.authWrap(d.handleGetRules))
 	d.mux.HandleFunc("POST /api/v1/rules", d.authWrap(d.handleAddRule))
@@ -761,6 +764,87 @@ func (d *Dashboard) handleRemoveIPACL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "ip": body.IP, "list": body.List})
+}
+
+// --- Temporary Bans ---
+
+// banLayer is the interface for temp ban operations (avoids circular import).
+type banLayer interface {
+	AddAutoBan(ip string, reason string, ttl time.Duration)
+	RemoveAutoBan(ip string)
+}
+
+func (d *Dashboard) handleGetBans(w http.ResponseWriter, r *http.Request) {
+	bl := d.getBanLayer()
+	if bl == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"bans": []any{}})
+		return
+	}
+	type banLister interface{ ActiveBansAny() any }
+	if lister, ok := bl.(banLister); ok {
+		writeJSON(w, http.StatusOK, map[string]any{"bans": lister.ActiveBansAny()})
+	} else {
+		writeJSON(w, http.StatusOK, map[string]any{"bans": []any{}})
+	}
+}
+
+func (d *Dashboard) handleAddBan(w http.ResponseWriter, r *http.Request) {
+	bl := d.getBanLayer()
+	if bl == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "IP ACL layer not active"})
+		return
+	}
+	var body struct {
+		IP       string `json:"ip"`
+		Reason   string `json:"reason"`
+		Duration string `json:"duration"` // e.g. "30m", "1h", "24h"
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON"})
+		return
+	}
+	if body.IP == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "ip is required"})
+		return
+	}
+	ttl, err := time.ParseDuration(body.Duration)
+	if err != nil || ttl <= 0 {
+		ttl = 1 * time.Hour // default 1 hour
+	}
+	if body.Reason == "" {
+		body.Reason = "manual ban from dashboard"
+	}
+	bl.AddAutoBan(body.IP, body.Reason, ttl)
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "ip": body.IP, "duration": ttl.String()})
+}
+
+func (d *Dashboard) handleRemoveBan(w http.ResponseWriter, r *http.Request) {
+	bl := d.getBanLayer()
+	if bl == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "IP ACL layer not active"})
+		return
+	}
+	var body struct {
+		IP string `json:"ip"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.IP == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "ip is required"})
+		return
+	}
+	bl.RemoveAutoBan(body.IP)
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "ip": body.IP})
+}
+
+func (d *Dashboard) getBanLayer() banLayer {
+	l := d.engine.FindLayer("ipacl")
+	if l == nil {
+		return nil
+	}
+	bl, ok := l.(banLayer)
+	if !ok {
+		return nil
+	}
+	return bl
 }
 
 // applyWAFPatch applies partial config updates from a JSON patch object.

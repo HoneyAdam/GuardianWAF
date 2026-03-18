@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '@/lib/api'
-import type { WafConfig, IpAclData } from '@/lib/api'
+import type { WafConfig, IpAclData, BanEntry } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { Section } from '@/components/config/section'
 import { Switch } from '@/components/ui/switch'
@@ -60,6 +60,12 @@ export default function ConfigPage() {
   const [whitelistInput, setWhitelistInput] = useState('')
   const [blacklistInput, setBlacklistInput] = useState('')
 
+  // Temp bans
+  const [bans, setBans] = useState<BanEntry[]>([])
+  const [banIP, setBanIP] = useState('')
+  const [banDuration, setBanDuration] = useState('1h')
+  const [banReason, setBanReason] = useState('')
+
   const fetchData = useCallback(() => {
     api.getConfig().then((data) => {
       setConfig(data)
@@ -67,6 +73,7 @@ export default function ConfigPage() {
     }).catch(() => setError('Failed to load configuration'))
 
     api.getIPACL().then(setIpacl).catch(() => {})
+    api.getBans().then(d => setBans(d.bans || [])).catch(() => {})
   }, [])
 
   useEffect(() => { fetchData() }, [fetchData])
@@ -528,6 +535,86 @@ export default function ConfigPage() {
                 <span className="text-xs text-muted-foreground">No entries</span>
               )}
             </div>
+          </div>
+
+          {/* Temporary Bans */}
+          <div className="border-t border-border pt-4 mt-4">
+            <h4 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">
+              Temporary Bans
+            </h4>
+            <div className="flex items-center gap-2 mb-3">
+              <Input
+                placeholder="IP address"
+                value={banIP}
+                onChange={(e) => setBanIP(e.target.value)}
+                className="font-mono w-40"
+              />
+              <Select
+                value={banDuration}
+                onChange={(e) => setBanDuration(e.target.value)}
+                className="w-28"
+              >
+                <SelectOption value="5m">5 min</SelectOption>
+                <SelectOption value="15m">15 min</SelectOption>
+                <SelectOption value="30m">30 min</SelectOption>
+                <SelectOption value="1h">1 hour</SelectOption>
+                <SelectOption value="6h">6 hours</SelectOption>
+                <SelectOption value="24h">24 hours</SelectOption>
+                <SelectOption value="168h">7 days</SelectOption>
+              </Select>
+              <Input
+                placeholder="Reason (optional)"
+                value={banReason}
+                onChange={(e) => setBanReason(e.target.value)}
+                className="flex-1"
+              />
+              <Button
+                size="sm"
+                variant="destructive"
+                onClick={async () => {
+                  if (!banIP.trim()) return
+                  try {
+                    await api.addBan(banIP.trim(), banDuration, banReason || undefined)
+                    setBanIP(''); setBanReason('')
+                    setSuccess('IP banned: ' + banIP.trim())
+                    setTimeout(() => setSuccess(null), 3000)
+                    api.getBans().then(d => setBans(d.bans || []))
+                  } catch (err) { setError(err instanceof Error ? err.message : 'Ban failed') }
+                }}
+              >
+                Ban
+              </Button>
+            </div>
+            {bans.length > 0 ? (
+              <div className="space-y-1">
+                {bans.map((ban) => (
+                  <div key={ban.ip} className="flex items-center justify-between rounded-md bg-destructive/5 border border-destructive/20 px-3 py-2 text-sm">
+                    <div className="flex items-center gap-3">
+                      <span className="font-mono font-medium">{ban.ip}</span>
+                      <span className="text-xs text-muted-foreground">{ban.reason}</span>
+                      <span className="text-xs text-destructive">
+                        expires {new Date(ban.expires_at).toLocaleString()}
+                      </span>
+                      {ban.count > 1 && <span className="text-[10px] text-muted-foreground">({ban.count}x)</span>}
+                    </div>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={async () => {
+                        try {
+                          await api.removeBan(ban.ip)
+                          api.getBans().then(d => setBans(d.bans || []))
+                        } catch (err) { setError(err instanceof Error ? err.message : 'Unban failed') }
+                      }}
+                    >
+                      <X className="h-3 w-3" /> Unban
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <span className="text-xs text-muted-foreground">No active temporary bans</span>
+            )}
           </div>
         </div>
       </Section>

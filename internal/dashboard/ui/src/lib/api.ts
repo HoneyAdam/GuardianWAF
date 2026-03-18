@@ -48,6 +48,13 @@ export const api = {
   removeIP: (list: string, ip: string) =>
     request<ApiResult>('/api/v1/ipacl', { method: 'DELETE', body: JSON.stringify({ list, ip }) }),
 
+  // Temp Bans
+  getBans: () => request<BansResponse>('/api/v1/bans'),
+  addBan: (ip: string, duration: string, reason?: string) =>
+    request<ApiResult>('/api/v1/bans', { method: 'POST', body: JSON.stringify({ ip, duration, reason }) }),
+  removeBan: (ip: string) =>
+    request<ApiResult>('/api/v1/bans', { method: 'DELETE', body: JSON.stringify({ ip }) }),
+
   // Custom Rules
   getRules: () => request<RulesResponse>('/api/v1/rules'),
   addRule: (rule: CustomRule) =>
@@ -185,6 +192,17 @@ export interface ApiResult {
   status: string
   message?: string
   error?: string
+}
+
+export interface BanEntry {
+  ip: string
+  reason: string
+  expires_at: string
+  count: number
+}
+
+export interface BansResponse {
+  bans: BanEntry[]
 }
 
 export interface CustomRule {
