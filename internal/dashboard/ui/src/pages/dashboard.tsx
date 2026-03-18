@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { api } from '@/lib/api'
 import type { Stats, WafEvent, UpstreamStatus } from '@/lib/api'
 import { StatsCards } from '@/components/dashboard/stats-cards'
+import { TrafficChart } from '@/components/dashboard/traffic-chart'
 import { EventsTable } from '@/components/dashboard/events-table'
 import { UpstreamHealth } from '@/components/dashboard/upstream-health'
 import { TopIPs } from '@/components/dashboard/top-ips'
@@ -79,9 +80,10 @@ export default function DashboardPage() {
       </div>
 
       <StatsCards stats={stats} />
-      <UpstreamHealth upstreams={upstreams} />
+      <TrafficChart events={events} minutes={30} />
 
-      <div className="grid grid-cols-1 lg:grid-cols-1 gap-4">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <UpstreamHealth upstreams={upstreams} />
         <TopIPs events={events} />
       </div>
 
