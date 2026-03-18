@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { api } from '@/lib/api'
 import type { CustomRule, GeoIPResult } from '@/lib/api'
 import { cn } from '@/lib/utils'
-import { Plus, Trash2, Save, X, Search, ShieldCheck } from 'lucide-react'
+import { Plus, Trash2, Save, X, Search, ShieldCheck, BookTemplate, Check } from 'lucide-react'
 
 const FIELDS = [
   { value: 'path', label: 'Path' }, { value: 'method', label: 'Method' },
@@ -31,6 +31,79 @@ function newRule(): CustomRule {
     conditions: [{ field: 'path', op: 'starts_with', value: '/' }], action: 'block', score: 50 }
 }
 
+interface RuleTemplate {
+  category: string
+  rules: CustomRule[]
+}
+
+const TEMPLATES: RuleTemplate[] = [
+  {
+    category: 'Geo Blocking',
+    rules: [
+      { id: 'tpl-geo-cn', name: 'Block China', enabled: true, priority: 1, action: 'block', score: 100,
+        conditions: [{ field: 'country', op: 'in', value: ['CN'] }] },
+      { id: 'tpl-geo-ru', name: 'Block Russia', enabled: true, priority: 1, action: 'block', score: 100,
+        conditions: [{ field: 'country', op: 'in', value: ['RU'] }] },
+      { id: 'tpl-geo-kp', name: 'Block North Korea', enabled: true, priority: 1, action: 'block', score: 100,
+        conditions: [{ field: 'country', op: 'in', value: ['KP'] }] },
+      { id: 'tpl-geo-ir', name: 'Block Iran', enabled: true, priority: 1, action: 'block', score: 100,
+        conditions: [{ field: 'country', op: 'in', value: ['IR'] }] },
+    ],
+  },
+  {
+    category: 'Admin Protection',
+    rules: [
+      { id: 'tpl-admin-block', name: 'Block /admin access', enabled: true, priority: 2, action: 'block', score: 100,
+        conditions: [{ field: 'path', op: 'starts_with', value: '/admin' }] },
+      { id: 'tpl-wp-login', name: 'Block /wp-login.php', enabled: true, priority: 2, action: 'block', score: 100,
+        conditions: [{ field: 'path', op: 'contains', value: 'wp-login' }] },
+      { id: 'tpl-wp-admin', name: 'Block /wp-admin', enabled: true, priority: 2, action: 'block', score: 100,
+        conditions: [{ field: 'path', op: 'starts_with', value: '/wp-admin' }] },
+      { id: 'tpl-phpmyadmin', name: 'Block phpMyAdmin probes', enabled: true, priority: 2, action: 'block', score: 100,
+        conditions: [{ field: 'path', op: 'contains', value: 'phpmyadmin' }] },
+    ],
+  },
+  {
+    category: 'Bot & Scanner Protection',
+    rules: [
+      { id: 'tpl-empty-ua', name: 'Block empty User-Agent', enabled: true, priority: 3, action: 'block', score: 80,
+        conditions: [{ field: 'user_agent', op: 'equals', value: '' }] },
+      { id: 'tpl-sqlmap', name: 'Block sqlmap scanner', enabled: true, priority: 3, action: 'block', score: 100,
+        conditions: [{ field: 'user_agent', op: 'contains', value: 'sqlmap' }] },
+      { id: 'tpl-nikto', name: 'Block Nikto scanner', enabled: true, priority: 3, action: 'block', score: 100,
+        conditions: [{ field: 'user_agent', op: 'contains', value: 'Nikto' }] },
+      { id: 'tpl-curl-block', name: 'Challenge curl requests', enabled: true, priority: 5, action: 'challenge', score: 40,
+        conditions: [{ field: 'user_agent', op: 'starts_with', value: 'curl/' }] },
+    ],
+  },
+  {
+    category: 'Path Protection',
+    rules: [
+      { id: 'tpl-dotenv', name: 'Block .env file access', enabled: true, priority: 2, action: 'block', score: 100,
+        conditions: [{ field: 'path', op: 'contains', value: '.env' }] },
+      { id: 'tpl-git', name: 'Block .git access', enabled: true, priority: 2, action: 'block', score: 100,
+        conditions: [{ field: 'path', op: 'contains', value: '.git' }] },
+      { id: 'tpl-backup', name: 'Block backup file access', enabled: true, priority: 3, action: 'block', score: 90,
+        conditions: [{ field: 'path', op: 'matches', value: '\\.(bak|old|backup|sql|dump|tar|gz|zip)$' }] },
+      { id: 'tpl-config', name: 'Block config file probes', enabled: true, priority: 2, action: 'block', score: 100,
+        conditions: [{ field: 'path', op: 'matches', value: '(web\\.config|wp-config|config\\.php|\\.htaccess)' }] },
+    ],
+  },
+  {
+    category: 'HTTP Method Control',
+    rules: [
+      { id: 'tpl-trace', name: 'Block TRACE method', enabled: true, priority: 1, action: 'block', score: 100,
+        conditions: [{ field: 'method', op: 'equals', value: 'TRACE' }] },
+      { id: 'tpl-options', name: 'Log OPTIONS requests', enabled: true, priority: 5, action: 'log', score: 5,
+        conditions: [{ field: 'method', op: 'equals', value: 'OPTIONS' }] },
+      { id: 'tpl-delete-api', name: 'Challenge DELETE on /api', enabled: true, priority: 4, action: 'challenge', score: 30,
+        conditions: [{ field: 'method', op: 'equals', value: 'DELETE' }, { field: 'path', op: 'starts_with', value: '/api' }] },
+      { id: 'tpl-large-post', name: 'Log large POST bodies (>5MB)', enabled: true, priority: 5, action: 'log', score: 15,
+        conditions: [{ field: 'method', op: 'equals', value: 'POST' }, { field: 'body_size', op: 'greater_than', value: '5242880' }] },
+    ],
+  },
+]
+
 export default function RulesPage() {
   const [rules, setRules] = useState<CustomRule[]>([])
   const [editing, setEditing] = useState<CustomRule | null>(null)
@@ -38,6 +111,8 @@ export default function RulesPage() {
   const [toast, setToast] = useState<{msg: string; err: boolean} | null>(null)
   const [sortKey, setSortKey] = useState<'priority' | 'name' | 'action' | 'score'>('priority')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
+  const [showTemplates, setShowTemplates] = useState(false)
+  const [applying, setApplying] = useState<Set<string>>(new Set())
   const [geoIP, setGeoIP] = useState('')
   const [geoResult, setGeoResult] = useState<GeoIPResult | null>(null)
 
@@ -66,6 +141,29 @@ export default function RulesPage() {
     if (!r) return
     try { await api.updateRule(id, {...r, enabled: on}); load() }
     catch (e) { flash((e as Error).message, true) }
+  }
+
+  const applyTemplate = async (tpl: CustomRule) => {
+    // Check if already exists
+    if (rules.some(r => r.id === tpl.id)) {
+      flash('Rule "' + tpl.name + '" already exists', true)
+      return
+    }
+    try {
+      setApplying(prev => new Set(prev).add(tpl.id))
+      await api.addRule(tpl)
+      flash('Applied: ' + tpl.name)
+      load()
+    } catch (e) { flash((e as Error).message, true) }
+    finally { setApplying(prev => { const n = new Set(prev); n.delete(tpl.id); return n }) }
+  }
+
+  const applyCategory = async (cat: RuleTemplate) => {
+    for (const rule of cat.rules) {
+      if (!rules.some(r => r.id === rule.id)) {
+        await applyTemplate(rule)
+      }
+    }
   }
 
   const geo = async () => {
@@ -113,10 +211,66 @@ export default function RulesPage() {
           <h1 className="text-lg font-semibold">Custom Rules</h1>
           <span className="text-xs text-muted">({rules.length})</span>
         </div>
-        <button onClick={() => { setEditing(newRule()); setIsNew(true) }} className="flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white hover:opacity-90">
-          <Plus className="h-4 w-4" /> Add Rule
-        </button>
+        <div className="flex items-center gap-2">
+          <button onClick={() => setShowTemplates(v => !v)} className={cn('flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-sm font-medium transition-colors', showTemplates ? 'border-accent bg-accent/10 text-accent' : 'border-border text-muted hover:text-foreground')}>
+            <BookTemplate className="h-4 w-4" /> Templates
+          </button>
+          <button onClick={() => { setEditing(newRule()); setIsNew(true) }} className="flex items-center gap-1.5 rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-white hover:opacity-90">
+            <Plus className="h-4 w-4" /> Add Rule
+          </button>
+        </div>
       </div>
+
+      {/* Templates Panel */}
+      {showTemplates && (
+        <div className="rounded-lg border border-accent/30 bg-accent/5 p-4 space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold flex items-center gap-2">
+              <BookTemplate className="h-4 w-4 text-accent" /> Rule Templates
+            </h2>
+            <span className="text-xs text-muted">{TEMPLATES.reduce((n, c) => n + c.rules.length, 0)} templates available</span>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+            {TEMPLATES.map(cat => (
+              <div key={cat.category} className="rounded-md border border-border bg-card p-3">
+                <div className="flex items-center justify-between mb-2">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-muted">{cat.category}</h3>
+                  <button onClick={() => applyCategory(cat)}
+                    className="text-[10px] text-accent hover:underline">Apply All</button>
+                </div>
+                <div className="space-y-1.5">
+                  {cat.rules.map(tpl => {
+                    const exists = rules.some(r => r.id === tpl.id)
+                    const loading = applying.has(tpl.id)
+                    return (
+                      <div key={tpl.id} className="flex items-center justify-between py-1">
+                        <div className="flex-1 min-w-0">
+                          <span className="text-xs font-medium truncate block">{tpl.name}</span>
+                          <span className="text-[10px] text-muted truncate block">
+                            {tpl.conditions.map(c => c.field + ' ' + c.op + ' ' + (typeof c.value === 'string' ? c.value : JSON.stringify(c.value))).join(', ')}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5 ml-2 shrink-0">
+                          <span className={cn('px-1.5 py-0.5 rounded text-[9px] font-bold uppercase',
+                            ACTIONS.find(a => a.value === tpl.action)?.color || '')}>{tpl.action}</span>
+                          {exists ? (
+                            <span className="text-success"><Check className="h-3.5 w-3.5" /></span>
+                          ) : (
+                            <button onClick={() => applyTemplate(tpl)} disabled={loading}
+                              className="rounded bg-accent px-2 py-0.5 text-[10px] font-medium text-white hover:opacity-90 disabled:opacity-50">
+                              {loading ? '...' : 'Apply'}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Table */}
       <div className="rounded-lg border border-border bg-card overflow-hidden">
