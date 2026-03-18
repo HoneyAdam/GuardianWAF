@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -188,7 +189,12 @@ func cmdServe(args []string) {
 			fmt.Fprintln(w, "GuardianWAF is running. No upstream configured.")
 		})
 	}
-	serveMux.Handle("/", eng.Middleware(upstream))
+	// Use atomic handler so rebuild can swap it without re-registering on mux
+	var upstreamHandler atomic.Value
+	upstreamHandler.Store(eng.Middleware(upstream))
+	serveMux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		upstreamHandler.Load().(http.Handler).ServeHTTP(w, r)
+	})
 	handler := http.Handler(serveMux)
 
 	// 8. Start TLS server if enabled
@@ -320,14 +326,13 @@ func cmdServe(args []string) {
 				newRouter, ok := newHandler.(*proxy.Router)
 				if ok && newRouter != nil {
 					proxyRouter = newRouter
-					// Re-inject upstream status with new router
 					rr := newRouter
 					dash.SetUpstreamsFn(func() any {
 						return rr.AllUpstreamStatus()
 					})
 				}
-				// Update the serveMux root handler
-				serveMux.Handle("/", eng.Middleware(newHandler))
+				// Atomic swap — no mux re-registration needed
+				upstreamHandler.Store(eng.Middleware(newHandler))
 				return nil
 			})
 		}
