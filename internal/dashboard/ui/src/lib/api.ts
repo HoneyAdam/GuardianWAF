@@ -47,6 +47,19 @@ export const api = {
     request<ApiResult>('/api/v1/ipacl', { method: 'POST', body: JSON.stringify({ list, ip }) }),
   removeIP: (list: string, ip: string) =>
     request<ApiResult>('/api/v1/ipacl', { method: 'DELETE', body: JSON.stringify({ list, ip }) }),
+
+  // Custom Rules
+  getRules: () => request<RulesResponse>('/api/v1/rules'),
+  addRule: (rule: CustomRule) =>
+    request<ApiResult>('/api/v1/rules', { method: 'POST', body: JSON.stringify(rule) }),
+  updateRule: (id: string, rule: CustomRule) =>
+    request<ApiResult>('/api/v1/rules/' + id, { method: 'PUT', body: JSON.stringify(rule) }),
+  deleteRule: (id: string) =>
+    request<ApiResult>('/api/v1/rules/' + id, { method: 'DELETE' }),
+
+  // GeoIP
+  geoipLookup: (ip: string) =>
+    request<GeoIPResult>('/api/v1/geoip/lookup?ip=' + encodeURIComponent(ip)),
 }
 
 // --- Types ---
@@ -172,4 +185,31 @@ export interface ApiResult {
   status: string
   message?: string
   error?: string
+}
+
+export interface CustomRule {
+  id: string
+  name: string
+  enabled: boolean
+  priority: number
+  conditions: RuleCondition[]
+  action: string
+  score: number
+}
+
+export interface RuleCondition {
+  field: string
+  op: string
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  value: any
+}
+
+export interface RulesResponse {
+  rules: CustomRule[]
+}
+
+export interface GeoIPResult {
+  ip: string
+  country: string
+  name: string
 }

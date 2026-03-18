@@ -23,8 +23,10 @@ import (
 	"github.com/guardianwaf/guardianwaf/internal/layers/botdetect"
 	"github.com/guardianwaf/guardianwaf/internal/layers/challenge"
 	"github.com/guardianwaf/guardianwaf/internal/layers/detection"
+	"github.com/guardianwaf/guardianwaf/internal/geoip"
 	"github.com/guardianwaf/guardianwaf/internal/layers/ipacl"
 	"github.com/guardianwaf/guardianwaf/internal/layers/ratelimit"
+	"github.com/guardianwaf/guardianwaf/internal/layers/rules"
 	"github.com/guardianwaf/guardianwaf/internal/layers/response"
 	"github.com/guardianwaf/guardianwaf/internal/layers/sanitizer"
 	"github.com/guardianwaf/guardianwaf/internal/mcp"
@@ -321,6 +323,51 @@ func cmdServe(args []string) {
 				return r.AllUpstreamStatus()
 			})
 		}
+		// Wire rules management
+		if dash != nil {
+			if rl := eng.FindLayer("rules"); rl != nil {
+				if rulesLayer, ok := rl.(*rules.Layer); ok {
+					rLayer := rulesLayer
+					var gDB *geoip.DB
+					if cfg.WAF.GeoIP.Enabled && cfg.WAF.GeoIP.DBPath != "" {
+						gDB, _ = geoip.LoadCSV(cfg.WAF.GeoIP.DBPath)
+					}
+					dash.SetRulesFns(
+						func() any { return rLayer.Rules() },
+						func(raw map[string]any) error {
+							r := mapToRule(raw)
+							if r.ID == "" {
+								return fmt.Errorf("rule id is required")
+							}
+							rLayer.AddRule(r)
+							return nil
+						},
+						func(id string, raw map[string]any) error {
+							r := mapToRule(raw)
+							r.ID = id
+							if !rLayer.UpdateRule(r) {
+								return fmt.Errorf("rule %s not found", id)
+							}
+							return nil
+						},
+						func(id string) bool { return rLayer.RemoveRule(id) },
+						func(id string, enabled bool) bool { return rLayer.ToggleRule(id, enabled) },
+						func(ip string) (string, string) {
+							if gDB == nil {
+								return "", "GeoIP not loaded"
+							}
+							parsed := net.ParseIP(ip)
+							if parsed == nil {
+								return "", "invalid IP"
+							}
+							code := gDB.Lookup(parsed)
+							return code, geoip.CountryName(code)
+						},
+					)
+				}
+			}
+		}
+
 		if dash != nil {
 			dash.SetRebuildFn(func() error {
 				newHandler, _ := buildReverseProxy(cfg)
@@ -748,6 +795,38 @@ func addLayers(eng *engine.Engine, cfg *config.Config) {
 		} else {
 			eng.AddLayer(engine.OrderedLayer{Layer: ipaclLayer, Order: engine.OrderIPACL})
 		}
+	}
+
+	// 1b. Custom Rules layer (Order 150)
+	if cfg.WAF.CustomRules.Enabled {
+		var geodb *geoip.DB
+		if cfg.WAF.GeoIP.Enabled && cfg.WAF.GeoIP.DBPath != "" {
+			var err error
+			geodb, err = geoip.LoadCSV(cfg.WAF.GeoIP.DBPath)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Warning: failed to load GeoIP DB: %v\n", err)
+				eng.Logs.Warnf("GeoIP DB load failed: %v", err)
+			} else {
+				eng.Logs.Infof("GeoIP DB loaded: %d ranges", geodb.Count())
+			}
+		}
+
+		ruleList := make([]rules.Rule, len(cfg.WAF.CustomRules.Rules))
+		for i, r := range cfg.WAF.CustomRules.Rules {
+			conditions := make([]rules.Condition, len(r.Conditions))
+			for j, c := range r.Conditions {
+				conditions[j] = rules.Condition{Field: c.Field, Op: c.Op, Value: c.Value}
+			}
+			ruleList[i] = rules.Rule{
+				ID: r.ID, Name: r.Name, Enabled: r.Enabled,
+				Priority: r.Priority, Conditions: conditions,
+				Action: r.Action, Score: r.Score,
+			}
+		}
+
+		rulesLayer := rules.NewLayer(rules.Config{Enabled: true, Rules: ruleList}, geodb)
+		eng.AddLayer(engine.OrderedLayer{Layer: rulesLayer, Order: engine.OrderRules})
+		eng.Logs.Infof("Custom rules: %d rules loaded", len(ruleList))
 	}
 
 	// 2. Rate Limit layer (Order 200)
@@ -1191,6 +1270,47 @@ func collectACMEDomains(cfg *config.Config) [][]string {
 	}
 
 	return result
+}
+
+// mapToRule converts a JSON map to a rules.Rule.
+func mapToRule(raw map[string]any) rules.Rule {
+	r := rules.Rule{}
+	if v, ok := raw["id"].(string); ok {
+		r.ID = v
+	}
+	if v, ok := raw["name"].(string); ok {
+		r.Name = v
+	}
+	if v, ok := raw["enabled"].(bool); ok {
+		r.Enabled = v
+	}
+	if v, ok := raw["priority"].(float64); ok {
+		r.Priority = int(v)
+	}
+	if v, ok := raw["action"].(string); ok {
+		r.Action = v
+	}
+	if v, ok := raw["score"].(float64); ok {
+		r.Score = int(v)
+	}
+	if conds, ok := raw["conditions"].([]any); ok {
+		for _, c := range conds {
+			cm, ok := c.(map[string]any)
+			if !ok {
+				continue
+			}
+			cond := rules.Condition{}
+			if v, ok := cm["field"].(string); ok {
+				cond.Field = v
+			}
+			if v, ok := cm["op"].(string); ok {
+				cond.Op = v
+			}
+			cond.Value = cm["value"]
+			r.Conditions = append(r.Conditions, cond)
+		}
+	}
+	return r
 }
 
 // isValidIPOrCIDR returns true if s is a valid IP address or CIDR notation.

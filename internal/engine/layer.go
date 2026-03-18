@@ -59,6 +59,7 @@ type Detector interface {
 // LayerOrder constants define execution order in the pipeline
 const (
 	OrderIPACL     = 100
+	OrderRules     = 150
 	OrderRateLimit = 200
 	OrderSanitizer = 300
 	OrderDetection = 400

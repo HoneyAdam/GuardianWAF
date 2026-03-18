@@ -34,6 +34,12 @@ type Dashboard struct {
 	apiKey        string
 	upstreamsFn   func() any // returns upstream status (injected to avoid circular imports)
 	rebuildFn     func() error // rebuilds proxy after config change
+	rulesFn       func() any // returns rules list
+	addRuleFn     func(map[string]any) error
+	updateRuleFn  func(string, map[string]any) error
+	deleteRuleFn  func(string) bool
+	toggleRuleFn  func(string, bool) bool
+	geoLookupFn   func(string) (string, string) // ip -> (country_code, country_name)
 }
 
 // New creates a new Dashboard wired to the given engine and event store.
@@ -69,6 +75,11 @@ func New(eng *engine.Engine, store events.EventStore, apiKey string) *Dashboard 
 	d.mux.HandleFunc("POST /api/v1/ipacl", d.authWrap(d.handleAddIPACL))
 	d.mux.HandleFunc("DELETE /api/v1/ipacl", d.authWrap(d.handleRemoveIPACL))
 	d.mux.HandleFunc("OPTIONS /api/v1/ipacl", handleCORS)
+	d.mux.HandleFunc("GET /api/v1/rules", d.authWrap(d.handleGetRules))
+	d.mux.HandleFunc("POST /api/v1/rules", d.authWrap(d.handleAddRule))
+	d.mux.HandleFunc("PUT /api/v1/rules/{id}", d.authWrap(d.handleUpdateRule))
+	d.mux.HandleFunc("DELETE /api/v1/rules/{id}", d.authWrap(d.handleDeleteRule))
+	d.mux.HandleFunc("GET /api/v1/geoip/lookup", d.authWrap(d.handleGeoIPLookup))
 	d.mux.HandleFunc("GET /api/v1/logs", d.authWrap(d.handleGetLogs))
 	d.mux.HandleFunc("GET /api/v1/sse", d.authWrap(d.handleSSE))
 
@@ -77,6 +88,7 @@ func New(eng *engine.Engine, store events.EventStore, apiKey string) *Dashboard 
 	d.mux.HandleFunc("GET /config", d.authWrap(d.handleSPA))        // SPA routes
 	d.mux.HandleFunc("GET /routing", d.authWrap(d.handleSPA))       // SPA routes
 	d.mux.HandleFunc("GET /logs", d.authWrap(d.handleSPA))          // SPA routes
+	d.mux.HandleFunc("GET /rules", d.authWrap(d.handleSPA))         // SPA routes
 	d.mux.HandleFunc("/", d.authWrap(d.handleSPA))                  // SPA catch-all
 
 	return d
@@ -870,6 +882,91 @@ func applyWAFPatch(cfg *config.Config, waf map[string]any) {
 			}
 		}
 	}
+}
+
+// --- Rules ---
+
+// SetRulesFns injects rule management functions to avoid circular imports.
+func (d *Dashboard) SetRulesFns(
+	getRules func() any,
+	addRule func(map[string]any) error,
+	updateRule func(string, map[string]any) error,
+	deleteRule func(string) bool,
+	toggleRule func(string, bool) bool,
+	geoLookup func(string) (string, string),
+) {
+	d.rulesFn = getRules
+	d.addRuleFn = addRule
+	d.updateRuleFn = updateRule
+	d.deleteRuleFn = deleteRule
+	d.toggleRuleFn = toggleRule
+	d.geoLookupFn = geoLookup
+}
+
+func (d *Dashboard) handleGetRules(w http.ResponseWriter, r *http.Request) {
+	if d.rulesFn == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"rules": []any{}})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"rules": d.rulesFn()})
+}
+
+func (d *Dashboard) handleAddRule(w http.ResponseWriter, r *http.Request) {
+	if d.addRuleFn == nil {
+		writeJSON(w, http.StatusNotImplemented, map[string]any{"error": "rules not configured"})
+		return
+	}
+	var rule map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&rule); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON"})
+		return
+	}
+	if err := d.addRuleFn(rule); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+}
+
+func (d *Dashboard) handleUpdateRule(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if d.updateRuleFn == nil {
+		writeJSON(w, http.StatusNotImplemented, map[string]any{"error": "rules not configured"})
+		return
+	}
+	var rule map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&rule); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON"})
+		return
+	}
+	if err := d.updateRuleFn(id, rule); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": err.Error()})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+}
+
+func (d *Dashboard) handleDeleteRule(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if d.deleteRuleFn == nil || !d.deleteRuleFn(id) {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "rule not found"})
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+}
+
+func (d *Dashboard) handleGeoIPLookup(w http.ResponseWriter, r *http.Request) {
+	ip := r.URL.Query().Get("ip")
+	if ip == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "ip parameter required"})
+		return
+	}
+	if d.geoLookupFn == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"ip": ip, "country": "", "name": "GeoIP not configured"})
+		return
+	}
+	code, name := d.geoLookupFn(ip)
+	writeJSON(w, http.StatusOK, map[string]any{"ip": ip, "country": code, "name": name})
 }
 
 // --- Logs ---

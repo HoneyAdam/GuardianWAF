@@ -83,9 +83,41 @@ type VHostTLSConfig struct {
 	KeyFile  string `yaml:"key_file"`
 }
 
+// CustomRulesConfig controls the custom rule engine.
+type CustomRulesConfig struct {
+	Enabled bool             `yaml:"enabled"`
+	Rules   []CustomRule     `yaml:"rules"`
+}
+
+// CustomRule defines a single custom WAF rule.
+type CustomRule struct {
+	ID         string            `yaml:"id"`
+	Name       string            `yaml:"name"`
+	Enabled    bool              `yaml:"enabled"`
+	Priority   int               `yaml:"priority"`
+	Conditions []RuleCondition   `yaml:"conditions"`
+	Action     string            `yaml:"action"` // "block", "log", "challenge", "pass"
+	Score      int               `yaml:"score"`
+}
+
+// RuleCondition defines a match condition for a custom rule.
+type RuleCondition struct {
+	Field string `yaml:"field"` // "path", "method", "ip", "country", "header:X-Name", "user_agent", etc.
+	Op    string `yaml:"op"`    // "equals", "contains", "starts_with", "matches", "in", "in_cidr", etc.
+	Value any    `yaml:"value"` // string, []string, or number
+}
+
+// GeoIPConfig controls GeoIP database loading.
+type GeoIPConfig struct {
+	Enabled  bool   `yaml:"enabled"`
+	DBPath   string `yaml:"db_path"` // path to CSV database
+}
+
 // WAFConfig is the top-level container for all WAF protection settings.
 type WAFConfig struct {
 	IPACL        IPACLConfig        `yaml:"ip_acl"`
+	CustomRules  CustomRulesConfig  `yaml:"custom_rules"`
+	GeoIP        GeoIPConfig        `yaml:"geoip"`
 	RateLimit    RateLimitConfig    `yaml:"rate_limit"`
 	Sanitizer    SanitizerConfig    `yaml:"sanitizer"`
 	Detection    DetectionConfig    `yaml:"detection"`
