@@ -58,7 +58,7 @@ export default function RoutingPage() {
     fetchData()
   }, [fetchData])
 
-  const upstreamNames = routing?.upstreams.map((u) => u.name).filter(Boolean) ?? []
+  const upstreamNames = (routing?.upstreams || []).map((u) => u.name).filter(Boolean)
 
   /* ---- Upstream mutations ---- */
   const updateUpstream = (idx: number, patch: Partial<UpstreamConfig>) => {
@@ -260,7 +260,7 @@ export default function RoutingPage() {
       {/* ==================== Upstreams ==================== */}
       <Section title="Upstreams" defaultOpen>
         <div className="space-y-4">
-          {routing.upstreams.map((upstream, upIdx) => (
+          {(routing.upstreams || []).map((upstream, upIdx) => (
             <div
               key={upIdx}
               className="rounded-md border border-border bg-background p-4 space-y-4"
@@ -300,7 +300,7 @@ export default function RoutingPage() {
                 <h5 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                   Targets
                 </h5>
-                {upstream.targets.map((target, tIdx) => (
+                {(upstream.targets || []).map((target, tIdx) => (
                   <div key={tIdx} className="flex items-center gap-2">
                     <Input
                       placeholder="http://host:port"
@@ -378,7 +378,7 @@ export default function RoutingPage() {
       {/* ==================== Virtual Hosts ==================== */}
       <Section title="Virtual Hosts" defaultOpen>
         <div className="space-y-4">
-          {routing.virtual_hosts.map((vhost, vhIdx) => (
+          {(routing.virtual_hosts || []).map((vhost, vhIdx) => (
             <div
               key={vhIdx}
               className="rounded-md border border-border bg-background p-4 space-y-4"
@@ -405,7 +405,7 @@ export default function RoutingPage() {
                   Domains
                 </h5>
                 <div className="flex flex-wrap gap-2 mb-3">
-                  {vhost.domains.map((domain) => (
+                  {(vhost.domains || []).map((domain) => (
                     <span
                       key={domain}
                       className="inline-flex items-center gap-1.5 rounded-full border border-accent/30 bg-accent/10 px-2.5 py-1 text-xs font-mono text-accent"
@@ -421,7 +421,7 @@ export default function RoutingPage() {
                       </button>
                     </span>
                   ))}
-                  {vhost.domains.length === 0 && (
+                  {(vhost.domains || []).length === 0 && (
                     <span className="text-xs text-muted-foreground">No domains</span>
                   )}
                 </div>
@@ -450,7 +450,7 @@ export default function RoutingPage() {
                   Routes
                 </h5>
                 <div className="space-y-2">
-                  {vhost.routes.map((route, rIdx) => (
+                  {(vhost.routes || []).map((route, rIdx) => (
                     <RouteRow
                       key={rIdx}
                       route={route}
@@ -483,7 +483,7 @@ export default function RoutingPage() {
       {/* ==================== Default Routes ==================== */}
       <Section title="Default Routes" defaultOpen>
         <div className="space-y-2">
-          {routing.routes.map((route, idx) => (
+          {(routing.routes || []).map((route, idx) => (
             <RouteRow
               key={idx}
               route={route}
