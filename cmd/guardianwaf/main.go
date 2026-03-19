@@ -620,6 +620,87 @@ func (h *headerSlice) Set(value string) error {
 	return nil
 }
 
+// CheckOptions holds options for the check command.
+type CheckOptions struct {
+	ConfigPath string
+	URL        string
+	Method     string
+	Headers    []string
+	Body       string
+	Verbose    bool
+}
+
+// CheckResult holds the result of a check request.
+type CheckResult struct {
+	Action   string
+	Score    int
+	Duration time.Duration
+	Findings []engine.Finding
+}
+
+// runCheck executes a request check against the WAF engine.
+// This is the testable version of cmdCheck.
+func runCheck(opts CheckOptions) (*CheckResult, error) {
+	if opts.URL == "" {
+		return nil, fmt.Errorf("--url is required")
+	}
+
+	// Load config
+	cfg := loadConfig(opts.ConfigPath)
+	config.LoadEnv(cfg)
+
+	// Create engine
+	eventStore := events.NewMemoryStore(1000)
+	eventBus := events.NewEventBus()
+	eng, err := engine.NewEngine(cfg, eventStore, eventBus)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create engine: %w", err)
+	}
+	defer eng.Close()
+
+	// Wire layers
+	addLayers(eng, cfg)
+
+	// Build HTTP request
+	fullURL := opts.URL
+	if !strings.HasPrefix(fullURL, "http://") && !strings.HasPrefix(fullURL, "https://") {
+		fullURL = "http://localhost" + fullURL
+	}
+
+	var bodyReader *strings.Reader
+	if opts.Body != "" {
+		bodyReader = strings.NewReader(opts.Body)
+	} else {
+		bodyReader = strings.NewReader("")
+	}
+
+	req, err := http.NewRequest(opts.Method, fullURL, bodyReader)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Apply custom headers
+	for _, h := range opts.Headers {
+		parts := strings.SplitN(h, ":", 2)
+		if len(parts) == 2 {
+			req.Header.Set(strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]))
+		}
+	}
+
+	// Set default remote addr for IP extraction
+	req.RemoteAddr = "127.0.0.1:0"
+
+	// Run check
+	event := eng.Check(req)
+
+	return &CheckResult{
+		Action:   event.Action.String(),
+		Score:    event.Score,
+		Duration: event.Duration,
+		Findings: event.Findings,
+	}, nil
+}
+
 func cmdCheck(args []string) {
 	fs := flag.NewFlagSet("check", flag.ExitOnError)
 	configPath := fs.String("config", "guardianwaf.yaml", "Path to config file")
@@ -633,80 +714,38 @@ func cmdCheck(args []string) {
 	body := fs.String("body", "", "Request body content")
 	fs.Parse(args)
 
-	if *urlStr == "" {
-		fmt.Fprintf(os.Stderr, "Error: --url is required\n")
+	result, err := runCheck(CheckOptions{
+		ConfigPath: *configPath,
+		URL:        *urlStr,
+		Method:     *method,
+		Headers:    headers,
+		Body:       *body,
+		Verbose:    *verbose,
+	})
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		fs.Usage()
 		os.Exit(1)
 	}
 
-	// Load config
-	cfg := loadConfig(*configPath)
-	config.LoadEnv(cfg)
-
-	// Create engine
-	eventStore := events.NewMemoryStore(1000)
-	eventBus := events.NewEventBus()
-	eng, err := engine.NewEngine(cfg, eventStore, eventBus)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to create engine: %v\n", err)
-		os.Exit(1)
-	}
-	defer eng.Close()
-
-	// Wire layers
-	addLayers(eng, cfg)
-
-	// Build HTTP request from flags
-	fullURL := *urlStr
-	if !strings.HasPrefix(fullURL, "http://") && !strings.HasPrefix(fullURL, "https://") {
-		fullURL = "http://localhost" + fullURL
-	}
-
-	var bodyReader *strings.Reader
-	if *body != "" {
-		bodyReader = strings.NewReader(*body)
-	} else {
-		bodyReader = strings.NewReader("")
-	}
-
-	req, err := http.NewRequest(*method, fullURL, bodyReader)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to create request: %v\n", err)
-		os.Exit(1)
-	}
-
-	// Apply custom headers
-	for _, h := range headers {
-		parts := strings.SplitN(h, ":", 2)
-		if len(parts) == 2 {
-			req.Header.Set(strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]))
-		}
-	}
-
-	// Set default remote addr for IP extraction
-	req.RemoteAddr = "127.0.0.1:0"
-
-	// Run check
-	event := eng.Check(req)
-
 	// Print results
-	fmt.Printf("Action:   %s\n", event.Action)
-	fmt.Printf("Score:    %d\n", event.Score)
-	fmt.Printf("Duration: %s\n", event.Duration)
+	fmt.Printf("Action:   %s\n", result.Action)
+	fmt.Printf("Score:    %d\n", result.Score)
+	fmt.Printf("Duration: %s\n", result.Duration)
 
-	if event.Action == engine.ActionBlock {
+	if result.Action == "block" {
 		fmt.Println("Result:   BLOCKED")
-	} else if event.Action == engine.ActionLog {
+	} else if result.Action == "log" {
 		fmt.Println("Result:   LOGGED (suspicious)")
 	} else {
 		fmt.Println("Result:   PASSED")
 	}
 
-	if len(event.Findings) > 0 {
-		fmt.Printf("Findings: %d\n", len(event.Findings))
+	if len(result.Findings) > 0 {
+		fmt.Printf("Findings: %d\n", len(result.Findings))
 		if *verbose {
 			fmt.Println()
-			for i, f := range event.Findings {
+			for i, f := range result.Findings {
 				fmt.Printf("  [%d] %s (%s)\n", i+1, f.Description, f.DetectorName)
 				fmt.Printf("      Severity: %s | Score: %d | Confidence: %.2f\n", f.Severity, f.Score, f.Confidence)
 				if f.MatchedValue != "" {
@@ -720,7 +759,7 @@ func cmdCheck(args []string) {
 	}
 
 	// Exit code based on action
-	if event.Action == engine.ActionBlock {
+	if result.Action == "block" {
 		os.Exit(2)
 	}
 }
@@ -729,17 +768,36 @@ func cmdCheck(args []string) {
 // validate
 // --------------------------------------------------------------------------
 
+// ValidateResult holds the result of config validation for testing.
+type ValidateResult struct {
+	Config  *config.Config
+	Summary *ConfigSummary
+}
+
+// runValidate validates a config file and returns the result or error.
+// This is the testable version of cmdValidate.
+func runValidate(configPath string) (*ValidateResult, error) {
+	cfg, summary, err := validateConfigFile(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("validation failed:\n%w", err)
+	}
+	return &ValidateResult{Config: cfg, Summary: summary}, nil
+}
+
 func cmdValidate(args []string) {
 	fs := flag.NewFlagSet("validate", flag.ExitOnError)
 	configPath := fs.String("config", "guardianwaf.yaml", "Path to config file")
 	fs.StringVar(configPath, "c", "guardianwaf.yaml", "Path to config file (short)")
 	fs.Parse(args)
 
-	cfg, summary, err := validateConfigFile(*configPath)
+	result, err := runValidate(*configPath)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Validation failed:\n%v\n", err)
+		fmt.Fprintf(os.Stderr, "%v\n", err)
 		os.Exit(1)
 	}
+
+	cfg := result.Config
+	summary := result.Summary
 
 	fmt.Printf("Configuration %s is valid.\n", *configPath)
 	fmt.Printf("  Mode:       %s\n", cfg.Mode)

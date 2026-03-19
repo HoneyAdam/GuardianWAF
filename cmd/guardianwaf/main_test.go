@@ -2114,3 +2114,182 @@ waf:
 		t.Errorf("expected validation error, got: %v", err)
 	}
 }
+
+// --- runValidate tests ---
+
+func TestRunValidate_ValidConfig(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "valid.yaml")
+	content := "mode: enforce\nlisten: \":8080\"\n"
+	os.WriteFile(cfgPath, []byte(content), 0644)
+
+	result, err := runValidate(cfgPath)
+	if err != nil {
+		t.Fatalf("runValidate error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if result.Config == nil {
+		t.Fatal("expected non-nil config")
+	}
+	if result.Summary == nil {
+		t.Fatal("expected non-nil summary")
+	}
+	if result.Config.Mode != "enforce" {
+		t.Errorf("expected mode 'enforce', got %q", result.Config.Mode)
+	}
+}
+
+func TestRunValidate_NonExistent(t *testing.T) {
+	_, err := runValidate("/nonexistent/config.yaml")
+	if err == nil {
+		t.Fatal("expected error for non-existent config")
+	}
+	if !strings.Contains(err.Error(), "validation failed") {
+		t.Errorf("expected 'validation failed' error, got: %v", err)
+	}
+}
+
+func TestRunValidate_InvalidYAML(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "invalid.yaml")
+	content := "mode: [invalid\n  unclosed"
+	os.WriteFile(cfgPath, []byte(content), 0644)
+
+	_, err := runValidate(cfgPath)
+	if err == nil {
+		t.Fatal("expected error for invalid YAML")
+	}
+}
+
+// --- runCheck tests ---
+
+func TestRunCheck_MissingURL(t *testing.T) {
+	_, err := runCheck(CheckOptions{
+		ConfigPath: "guardianwaf.yaml",
+		URL:        "", // Missing URL
+		Method:     "GET",
+	})
+	if err == nil {
+		t.Fatal("expected error for missing URL")
+	}
+	if !strings.Contains(err.Error(), "--url is required") {
+		t.Errorf("expected '--url is required' error, got: %v", err)
+	}
+}
+
+func TestRunCheck_ValidRequest(t *testing.T) {
+	// Create a valid config
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "test.yaml")
+	content := `
+mode: enforce
+listen: ":8080"
+waf:
+  detection:
+    enabled: true
+`
+	os.WriteFile(cfgPath, []byte(content), 0644)
+
+	result, err := runCheck(CheckOptions{
+		ConfigPath: cfgPath,
+		URL:        "/test",
+		Method:     "GET",
+	})
+	if err != nil {
+		t.Fatalf("runCheck error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	if result.Action == "" {
+		t.Error("expected non-empty action")
+	}
+}
+
+func TestRunCheck_WithHeaders(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "test.yaml")
+	content := "mode: monitor\nlisten: \":8080\"\n"
+	os.WriteFile(cfgPath, []byte(content), 0644)
+
+	result, err := runCheck(CheckOptions{
+		ConfigPath: cfgPath,
+		URL:        "/api/test",
+		Method:     "POST",
+		Headers:    []string{"X-Custom: value", "Authorization: Bearer token"},
+		Body:       `{"test": "data"}`,
+	})
+	if err != nil {
+		t.Fatalf("runCheck error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+}
+
+func TestRunCheck_FullURL(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "test.yaml")
+	content := "mode: monitor\nlisten: \":8080\"\n"
+	os.WriteFile(cfgPath, []byte(content), 0644)
+
+	result, err := runCheck(CheckOptions{
+		ConfigPath: cfgPath,
+		URL:        "https://example.com/api/test",
+		Method:     "GET",
+	})
+	if err != nil {
+		t.Fatalf("runCheck error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+}
+
+func TestRunCheck_InvalidMethod(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "test.yaml")
+	content := "mode: monitor\nlisten: \":8080\"\n"
+	os.WriteFile(cfgPath, []byte(content), 0644)
+
+	_, err := runCheck(CheckOptions{
+		ConfigPath: cfgPath,
+		URL:        "/test",
+		Method:     "BAD METHOD", // Invalid method
+	})
+	if err == nil {
+		t.Fatal("expected error for invalid method")
+	}
+}
+
+func TestRunCheck_SQLInjection(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "test.yaml")
+	content := `
+mode: enforce
+listen: ":8080"
+waf:
+  detection:
+    enabled: true
+    detectors:
+      sqli:
+        enabled: true
+        multiplier: 1.0
+`
+	os.WriteFile(cfgPath, []byte(content), 0644)
+
+	result, err := runCheck(CheckOptions{
+		ConfigPath: cfgPath,
+		URL:        "/search?q=' OR '1'='1",
+		Method:     "GET",
+	})
+	if err != nil {
+		t.Fatalf("runCheck error: %v", err)
+	}
+	// Should detect SQL injection
+	if result.Score == 0 {
+		t.Error("expected non-zero score for SQL injection attempt")
+	}
+}
