@@ -120,6 +120,18 @@ func DefaultConfig() *Config {
 					Mode:    "production",
 				},
 			},
+			AIAnalysis: AIAnalysisConfig{
+				Enabled:          false,
+				StorePath:        "data/ai",
+				BatchSize:        20,
+				BatchInterval:    60 * time.Second,
+				MinScore:         25,
+				MaxTokensPerHour: 50000,
+				MaxTokensPerDay:  500000,
+				MaxRequestsHour:  30,
+				AutoBlock:        false,
+				AutoBlockTTL:     time.Hour,
+			},
 		},
 		Dashboard: DashboardConfig{
 			Enabled: true,

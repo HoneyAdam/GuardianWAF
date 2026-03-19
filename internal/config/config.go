@@ -130,6 +130,22 @@ type WAFConfig struct {
 	BotDetection  BotDetectionConfig  `yaml:"bot_detection"`
 	Challenge     ChallengeConfig     `yaml:"challenge"`
 	Response      ResponseConfig      `yaml:"response"`
+	AIAnalysis    AIAnalysisConfig    `yaml:"ai_analysis"`
+}
+
+// AIAnalysisConfig controls AI-powered threat analysis.
+type AIAnalysisConfig struct {
+	Enabled          bool          `yaml:"enabled"`
+	StorePath        string        `yaml:"store_path"`
+	CatalogURL       string        `yaml:"catalog_url"`
+	BatchSize        int           `yaml:"batch_size"`
+	BatchInterval    time.Duration `yaml:"batch_interval"`
+	MinScore         int           `yaml:"min_score"`
+	MaxTokensPerHour int64         `yaml:"max_tokens_per_hour"`
+	MaxTokensPerDay  int64         `yaml:"max_tokens_per_day"`
+	MaxRequestsHour  int           `yaml:"max_requests_per_hour"`
+	AutoBlock        bool          `yaml:"auto_block"`
+	AutoBlockTTL     time.Duration `yaml:"auto_block_ttl"`
 }
 
 // IPACLConfig controls IP-based allow/deny lists and automatic banning.

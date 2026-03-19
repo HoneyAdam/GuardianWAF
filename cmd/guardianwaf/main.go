@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/guardianwaf/guardianwaf/internal/acme"
+	"github.com/guardianwaf/guardianwaf/internal/ai"
 	"github.com/guardianwaf/guardianwaf/internal/config"
 	"github.com/guardianwaf/guardianwaf/internal/dashboard"
 	"github.com/guardianwaf/guardianwaf/internal/engine"
@@ -380,12 +381,13 @@ func cmdServe(args []string) {
 	// 10. Start dashboard if enabled
 	var dashSrv *http.Server
 	var sseBroadcaster *dashboard.SSEBroadcaster
+	var dash *dashboard.Dashboard
+	var aiAnalyzer *ai.Analyzer
 	if cfg.Dashboard.Enabled && cfg.Dashboard.Listen != "" {
 		// Use API key as persistent session secret so sessions survive restarts
 		if cfg.Dashboard.APIKey != "" {
 			dashboard.SetSessionSecret(cfg.Dashboard.APIKey)
 		}
-		var dash *dashboard.Dashboard
 		dashSrv, sseBroadcaster, dash = startDashboard(cfg, eng)
 		// Inject upstream status provider and rebuild function
 		if proxyRouter != nil && dash != nil {
@@ -489,7 +491,45 @@ func cmdServe(args []string) {
 		}
 	}
 
-	// 10b. Wire SSE broadcaster to event bus for real-time dashboard updates
+	// 10b. Start AI analyzer if enabled
+	if cfg.WAF.AIAnalysis.Enabled {
+		aiStore := ai.NewStore(cfg.WAF.AIAnalysis.StorePath)
+		aiAnalyzer = ai.NewAnalyzer(ai.AnalyzerConfig{
+			Enabled:          true,
+			BatchSize:        cfg.WAF.AIAnalysis.BatchSize,
+			BatchInterval:    cfg.WAF.AIAnalysis.BatchInterval,
+			MaxTokensHour:    cfg.WAF.AIAnalysis.MaxTokensPerHour,
+			MaxTokensDay:     cfg.WAF.AIAnalysis.MaxTokensPerDay,
+			MaxRequestsHour:  cfg.WAF.AIAnalysis.MaxRequestsHour,
+			AutoBlockEnabled: cfg.WAF.AIAnalysis.AutoBlock,
+			AutoBlockTTL:     cfg.WAF.AIAnalysis.AutoBlockTTL,
+			MinScoreForAI:    cfg.WAF.AIAnalysis.MinScore,
+		}, aiStore, cfg.WAF.AIAnalysis.CatalogURL)
+		aiAnalyzer.SetLogger(eng.Logs.Add)
+
+		// Wire auto-block to IP ACL layer
+		if ipaclL := eng.FindLayer("ipacl"); ipaclL != nil {
+			type autoBanner interface {
+				AddAutoBan(ip string, reason string, ttl time.Duration)
+			}
+			if ab, ok := ipaclL.(autoBanner); ok {
+				aiAnalyzer.SetBlocker(ab)
+			}
+		}
+
+		// Subscribe to event bus and start
+		aiCh := make(chan engine.Event, 512)
+		eventBus.Subscribe(aiCh)
+		aiAnalyzer.Start(aiCh)
+		eng.Logs.Info("AI threat analysis enabled")
+
+		// Wire to dashboard
+		if dash != nil {
+			dash.SetAIAnalyzer(aiAnalyzer)
+		}
+	}
+
+	// 10c. Wire SSE broadcaster to event bus for real-time dashboard updates
 	if sseBroadcaster != nil {
 		eventCh := make(chan engine.Event, 256)
 		eventBus.Subscribe(eventCh)
@@ -571,7 +611,12 @@ func cmdServe(args []string) {
 		}
 	}
 
-	// 4. Close engine (flushes pending events, closes event bus and store)
+	// 4. Stop AI analyzer
+	if aiAnalyzer != nil {
+		aiAnalyzer.Stop()
+	}
+
+	// 5. Close engine (flushes pending events, closes event bus and store)
 	eng.Close()
 	fmt.Println("GuardianWAF stopped.")
 }

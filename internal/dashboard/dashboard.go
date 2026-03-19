@@ -42,6 +42,7 @@ type Dashboard struct {
 	deleteRuleFn  func(string) bool
 	toggleRuleFn  func(string, bool) bool
 	geoLookupFn   func(string) (string, string) // ip -> (country_code, country_name)
+	aiAnalyzer    aiAnalyzerInterface          // AI threat analyzer (optional)
 }
 
 // New creates a new Dashboard wired to the given engine and event store.
@@ -87,6 +88,15 @@ func New(eng *engine.Engine, store events.EventStore, apiKey string) *Dashboard 
 	d.mux.HandleFunc("GET /api/v1/geoip/lookup", d.authWrap(d.handleGeoIPLookup))
 	d.mux.HandleFunc("GET /api/v1/logs", d.authWrap(d.handleGetLogs))
 	d.mux.HandleFunc("GET /api/v1/sse", d.authWrap(d.handleSSE))
+
+	// AI Analysis endpoints
+	d.mux.HandleFunc("GET /api/v1/ai/providers", d.authWrap(d.handleAIProviders))
+	d.mux.HandleFunc("GET /api/v1/ai/config", d.authWrap(d.handleAIGetConfig))
+	d.mux.HandleFunc("PUT /api/v1/ai/config", d.authWrap(d.handleAISetConfig))
+	d.mux.HandleFunc("GET /api/v1/ai/history", d.authWrap(d.handleAIHistory))
+	d.mux.HandleFunc("GET /api/v1/ai/stats", d.authWrap(d.handleAIStats))
+	d.mux.HandleFunc("POST /api/v1/ai/analyze", d.authWrap(d.handleAIAnalyze))
+	d.mux.HandleFunc("POST /api/v1/ai/test", d.authWrap(d.handleAITest))
 
 	// SPA serving — React build output from dist/ with fallback to legacy static/
 	d.mux.HandleFunc("GET /assets/", d.authWrap(d.handleDistAssets)) // Vite hashed assets
