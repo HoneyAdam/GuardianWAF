@@ -387,6 +387,6 @@ func toString(v any) string {
 
 func toFloat(s string) float64 {
 	var f float64
-	fmt.Sscanf(s, "%f", &f)
+	_, _ = fmt.Sscanf(s, "%f", &f)
 	return f
 }

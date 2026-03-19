@@ -60,5 +60,5 @@ func (h *HTTP01Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/octet-stream")
-	w.Write([]byte(keyAuth))
+	_, _ = w.Write([]byte(keyAuth))
 }

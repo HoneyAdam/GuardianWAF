@@ -147,8 +147,12 @@ func (fs *FileStore) writeEvent(ev engine.Event) {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
 
-	fs.writer.WriteString(line)
-	fs.writer.WriteByte('\n')
+	if _, err := fs.writer.WriteString(line); err != nil {
+		return
+	}
+	if err := fs.writer.WriteByte('\n'); err != nil {
+		return
+	}
 
 	// Check if rotation is needed
 	fs.checkRotation()
@@ -186,7 +190,15 @@ func (fs *FileStore) checkRotation() {
 		base = fs.filePath[:idx]
 	}
 	rotatedName := base + "-" + ts + ext
-	os.Rename(fs.filePath, rotatedName)
+	if err := os.Rename(fs.filePath, rotatedName); err != nil {
+		// If rename fails, continue with the current file
+		f, _ := os.OpenFile(fs.filePath, os.O_WRONLY|os.O_APPEND, 0644)
+		if f != nil {
+			fs.file = f
+			fs.writer = bufio.NewWriterSize(f, 32*1024)
+		}
+		return
+	}
 
 	// Create new file
 	f, err := os.OpenFile(fs.filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)

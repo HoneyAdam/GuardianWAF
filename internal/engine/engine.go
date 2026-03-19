@@ -280,7 +280,7 @@ func (e *Engine) Middleware(next http.Handler) http.Handler {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.Header().Set("Cache-Control", "no-store")
 			w.WriteHeader(http.StatusForbidden)
-			w.Write([]byte(blockPage(event.RequestID, event.Score)))
+			_, _ = w.Write([]byte(blockPage(event.RequestID, event.Score)))
 			return
 		case ActionChallenge:
 			if e.challengeSvc != nil {
@@ -291,7 +291,7 @@ func (e *Engine) Middleware(next http.Handler) http.Handler {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
 			w.Header().Set("Cache-Control", "no-store")
 			w.WriteHeader(http.StatusForbidden)
-			w.Write([]byte(blockPage(event.RequestID, event.Score)))
+			_, _ = w.Write([]byte(blockPage(event.RequestID, event.Score)))
 			return
 		}
 

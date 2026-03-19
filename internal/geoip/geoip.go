@@ -208,7 +208,9 @@ func downloadDB(url, path string) error {
 
 	// Ensure parent directory exists
 	if dir := filepath.Dir(path); dir != "" && dir != "." {
-		os.MkdirAll(dir, 0700)
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			return fmt.Errorf("failed to create directory: %w", err)
+		}
 	}
 
 	f, err := os.Create(path)

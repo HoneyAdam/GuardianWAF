@@ -290,7 +290,10 @@ func (c *Client) completeAuthorization(authzURL string, handler *HTTP01Handler) 
 		}
 
 		var pollAuthz authorization
-		json.NewDecoder(pollResp.Body).Decode(&pollAuthz)
+		if err := json.NewDecoder(pollResp.Body).Decode(&pollAuthz); err != nil {
+			pollResp.Body.Close()
+			return fmt.Errorf("failed to decode authorization response: %w", err)
+		}
 		pollResp.Body.Close()
 
 		if pollAuthz.Status == "valid" {
@@ -331,7 +334,10 @@ func (c *Client) pollCertificate(orderURL string) ([]byte, error) {
 		}
 
 		var o order
-		json.NewDecoder(resp.Body).Decode(&o)
+		if err := json.NewDecoder(resp.Body).Decode(&o); err != nil {
+			resp.Body.Close()
+			return nil, fmt.Errorf("failed to decode order response: %w", err)
+		}
 		resp.Body.Close()
 
 		if o.Status == "valid" && o.Certificate != "" {

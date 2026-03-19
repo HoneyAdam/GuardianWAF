@@ -87,7 +87,7 @@ func (s *Service) ServeChallengePage(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusForbidden)
 
 	page := buildChallengePage(challenge, s.config.Difficulty, r.URL.RequestURI())
-	w.Write([]byte(page))
+	_, _ = w.Write([]byte(page))
 }
 
 // VerifyHandler returns an http.Handler for the challenge verification endpoint.
