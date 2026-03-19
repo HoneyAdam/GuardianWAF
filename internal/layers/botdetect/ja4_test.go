@@ -380,3 +380,108 @@ func splitJA4(fp string) []string {
 	}
 	return parts
 }
+
+// Benchmarks
+
+func BenchmarkComputeJA4(b *testing.B) {
+	params := JA4Params{
+		Protocol:     "t",
+		TLSVersion:   0x0303,
+		SNI:          true,
+		CipherSuites: []uint16{0x1301, 0x1302, 0x1303, 0xc02b, 0xc02f, 0xc02c, 0xc030, 0xcca9, 0xcca8, 0xc013, 0xc014, 0x009c, 0x009d, 0x002f, 0x0035},
+		Extensions:   []uint16{0x001b, 0x0000, 0x0033, 0x0010, 0x4469, 0x0017, 0x002d, 0x000d, 0x0005, 0x0023, 0x0012, 0x002b, 0xff01, 0x000b, 0x000a, 0x0015},
+		ALPN:         "h2",
+		SignatureAlgs: []uint16{0x0403, 0x0804, 0x0401, 0x0503, 0x0805, 0x0501, 0x0806, 0x0601},
+		SupportedVersion: 0x0304,
+	}
+
+	b.ResetTimer()
+	for range b.N {
+		ComputeJA4(params)
+	}
+}
+
+func BenchmarkComputeJA4_Minimal(b *testing.B) {
+	params := JA4Params{
+		Protocol:         "t",
+		TLSVersion:       0x0304,
+		SNI:              false,
+		CipherSuites:     []uint16{0x1301},
+		Extensions:       []uint16{0x001b},
+		ALPN:             "",
+		SupportedVersion: 0x0304,
+	}
+
+	b.ResetTimer()
+	for range b.N {
+		ComputeJA4(params)
+	}
+}
+
+func BenchmarkComputeJA4_Large(b *testing.B) {
+	// Simulate a client with many cipher suites and extensions
+	ciphers := make([]uint16, 50)
+	for i := range 50 {
+		ciphers[i] = uint16(0x1300 + i)
+	}
+	exts := make([]uint16, 30)
+	for i := range 30 {
+		exts[i] = uint16(0x0001 + i)
+	}
+	sigAlgs := make([]uint16, 20)
+	for i := range 20 {
+		sigAlgs[i] = uint16(0x0400 + i)
+	}
+
+	params := JA4Params{
+		Protocol:         "t",
+		TLSVersion:       0x0304,
+		SNI:              true,
+		CipherSuites:     ciphers,
+		Extensions:       exts,
+		ALPN:             "h2",
+		SignatureAlgs:    sigAlgs,
+		SupportedVersion: 0x0304,
+	}
+
+	b.ResetTimer()
+	for range b.N {
+		ComputeJA4(params)
+	}
+}
+
+func BenchmarkComputeJA4_WithGREASE(b *testing.B) {
+	params := JA4Params{
+		Protocol:     "t",
+		TLSVersion:   0x0303,
+		SNI:          true,
+		CipherSuites: []uint16{0x0a0a, 0x1301, 0x1302, 0x2a2a, 0x1303, 0x3a3a, 0xc02b, 0x4a4a},
+		Extensions:   []uint16{0x5a5a, 0x001b, 0x6a6a, 0x0000, 0x7a7a, 0x0010},
+		ALPN:         "h2",
+		SignatureAlgs: []uint16{0x8a8a, 0x0403, 0x9a9a, 0x0804},
+		SupportedVersion: 0x0304,
+	}
+
+	b.ResetTimer()
+	for range b.N {
+		ComputeJA4(params)
+	}
+}
+
+func BenchmarkLookupJA4Fingerprint(b *testing.B) {
+	fp := "t13d1516h2_8daaf6152771_e5627efa2ab1"
+
+	b.ResetTimer()
+	for range b.N {
+		LookupJA4Fingerprint(fp)
+	}
+}
+
+func BenchmarkLookupJA4Fingerprint_Unknown(b *testing.B) {
+	fp := "t13d010100_000000000000_000000000000"
+
+	b.ResetTimer()
+	for range b.N {
+		LookupJA4Fingerprint(fp)
+	}
+}

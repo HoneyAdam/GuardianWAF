@@ -102,6 +102,12 @@ export interface WafEvent {
   content_type?: string
   referer?: string
   host?: string
+  // TLS information
+  tls_version?: string
+  tls_cipher?: string
+  ja3_hash?: string
+  ja4_fingerprint?: string
+  sni?: string
 }
 
 export interface Finding {

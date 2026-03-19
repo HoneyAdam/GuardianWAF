@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"fmt"
 	"sync"
 	"time"
 )
@@ -55,6 +56,13 @@ type Event struct {
 	ContentType string `json:"content_type,omitempty"`
 	Referer     string `json:"referer,omitempty"`
 	Host        string `json:"host,omitempty"`
+
+	// TLS information
+	TLSVersion     string `json:"tls_version,omitempty"`
+	TLSCipherSuite string `json:"tls_cipher,omitempty"`
+	JA3Hash        string `json:"ja3_hash,omitempty"`
+	JA4Fingerprint string `json:"ja4_fingerprint,omitempty"`
+	ServerName     string `json:"sni,omitempty"`
 }
 
 // NewEvent creates an Event from a RequestContext after pipeline processing.
@@ -115,5 +123,143 @@ func NewEvent(ctx *RequestContext, statusCode int) Event {
 		ev.Host = ctx.Request.Host
 	}
 
+	// Extract TLS information
+	if ctx.TLSVersion > 0 {
+		ev.TLSVersion = tlsVersionString(ctx.TLSVersion)
+		ev.TLSCipherSuite = tlsCipherString(ctx.TLSCipherSuite)
+		ev.ServerName = ctx.ServerName
+
+		// Compute JA3 from available data
+		if ctx.TLSCipherSuite > 0 {
+			// Note: Full JA3 requires complete ClientHello data
+			// This is a partial fingerprint using available info
+			ev.JA3Hash = computePartialJA3(ctx.TLSVersion, ctx.TLSCipherSuite)
+		}
+
+		// Compute JA4 if we have full ClientHello data
+		if len(ctx.JA4Ciphers) > 0 {
+			ev.JA4Fingerprint = computeJA4FromContext(ctx)
+		}
+	}
+
 	return ev
+}
+
+// tlsVersionString converts a TLS version uint16 to a human-readable string.
+func tlsVersionString(v uint16) string {
+	switch v {
+	case 0x0304:
+		return "TLS 1.3"
+	case 0x0303:
+		return "TLS 1.2"
+	case 0x0302:
+		return "TLS 1.1"
+	case 0x0301:
+		return "TLS 1.0"
+	case 0xfeff:
+		return "DTLS 1.0"
+	case 0xfefd:
+		return "DTLS 1.2"
+	default:
+		return "Unknown"
+	}
+}
+
+// tlsCipherString converts a TLS cipher suite uint16 to a human-readable string.
+func tlsCipherString(c uint16) string {
+	// Common cipher suites
+	ciphers := map[uint16]string{
+		0x1301: "TLS_AES_128_GCM_SHA256",
+		0x1302: "TLS_AES_256_GCM_SHA384",
+		0x1303: "TLS_CHACHA20_POLY1305_SHA256",
+		0xc02b: "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256",
+		0xc02f: "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256",
+		0xc02c: "TLS_ECDHE_ECDSA_WITH_AES_256_GCM_SHA384",
+		0xc030: "TLS_ECDHE_RSA_WITH_AES_256_GCM_SHA384",
+		0xcca9: "TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256",
+		0xcca8: "TLS_ECDHE_RSA_WITH_CHACHA20_POLY1305_SHA256",
+		0x009c: "TLS_RSA_WITH_AES_128_GCM_SHA256",
+		0x009d: "TLS_RSA_WITH_AES_256_GCM_SHA384",
+		0x002f: "TLS_RSA_WITH_AES_128_CBC_SHA",
+		0x0035: "TLS_RSA_WITH_AES_256_CBC_SHA",
+	}
+	if name, ok := ciphers[c]; ok {
+		return name
+	}
+	return "Unknown"
+}
+
+// computePartialJA3 computes a partial JA3 hash from limited TLS info.
+// This is not a full JA3 - just a fingerprint of what we have.
+func computePartialJA3(version uint16, cipher uint16) string {
+	// Simple hash of version + cipher for basic fingerprinting
+	// Full JA3 would require complete ClientHello data
+	h := uint32(version)<<16 | uint32(cipher)
+	return fmt.Sprintf("%08x", h)
+}
+
+// computeJA4FromContext computes JA4 fingerprint from RequestContext.
+func computeJA4FromContext(ctx *RequestContext) string {
+	// Import cycle prevention - this is a simplified version
+	// The actual JA4 computation happens in the botdetect layer
+	// Here we just return the pre-computed value if available
+	// The full implementation would need to call the botdetect package
+
+	// For now, construct a basic JA4 string from available data
+	protocol := ctx.JA4Protocol
+	if protocol == "" {
+		protocol = "t"
+	}
+
+	version := "13"
+	if ctx.JA4Ver > 0 {
+		switch ctx.JA4Ver {
+		case 0x0304:
+			version = "13"
+		case 0x0303:
+			version = "12"
+		case 0x0302:
+			version = "11"
+		case 0x0301:
+			version = "10"
+		}
+	} else {
+		switch ctx.TLSVersion {
+		case 0x0304:
+			version = "13"
+		case 0x0303:
+			version = "12"
+		case 0x0302:
+			version = "11"
+		case 0x0301:
+			version = "10"
+		}
+	}
+
+	sni := "i"
+	if ctx.JA4SNI || ctx.ServerName != "" {
+		sni = "d"
+	}
+
+	cipherCount := len(ctx.JA4Ciphers)
+	if cipherCount > 99 {
+		cipherCount = 99
+	}
+	extCount := len(ctx.JA4Exts)
+	if extCount > 99 {
+		extCount = 99
+	}
+
+	alpn := ctx.JA4ALPN
+	alpnCode := "00"
+	if len(alpn) >= 1 {
+		if len(alpn) == 1 {
+			alpnCode = alpn + alpn
+		} else {
+			alpnCode = string(alpn[0]) + string(alpn[len(alpn)-1])
+		}
+	}
+
+	// Return partial JA4 (without hashes since we need crypto package)
+	return fmt.Sprintf("%s%s%s%02d%02d%s", protocol, version, sni, cipherCount, extCount, alpnCode)
 }

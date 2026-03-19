@@ -75,6 +75,26 @@ export function EventDetail({ event, onClose }: EventDetailProps) {
             </p>
           </Section>
 
+          {/* TLS Info */}
+          {(event.tls_version || event.ja4_fingerprint) && (
+            <Section title="TLS">
+              <Grid>
+                <Field label="Version" value={event.tls_version || '-'} />
+                <Field label="Cipher" value={event.tls_cipher || '-'} mono />
+                <Field label="SNI" value={event.sni || '-'} />
+                <Field label="JA3" value={event.ja3_hash || '-'} mono />
+              </Grid>
+              {event.ja4_fingerprint && (
+                <div className="mt-3">
+                  <div className="text-[10px] text-muted uppercase tracking-wider mb-1">JA4 Fingerprint</div>
+                  <code className="text-xs font-mono text-primary bg-primary/10 px-2 py-1 rounded block break-all">
+                    {event.ja4_fingerprint}
+                  </code>
+                </div>
+              )}
+            </Section>
+          )}
+
           {/* Findings */}
           <Section title={`Findings (${event.findings?.length || 0})`}>
             {(!event.findings || event.findings.length === 0) ? (
