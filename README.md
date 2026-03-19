@@ -28,6 +28,10 @@ GuardianWAF is a production-grade Web Application Firewall written in pure Go wi
 - Bot detection via JA3/JA4 TLS fingerprinting, User-Agent analysis, and behavioral tracking
 - Response protection: security headers (HSTS, X-Frame-Options, CSP), credit card/SSN/API key masking, stack trace stripping
 - Branded HTML block page with request ID and threat score
+- **Threat Intelligence**: IP and domain reputation checking with JSONL/CSV/JSON feeds, LRU cache, CIDR matching
+- **CORS Security**: Origin validation with wildcard patterns, preflight handling, strict mode blocking
+- **API Security**: JWT validation (RS256/ES256/HS256/etc), JWKS support, API key authentication with path authorization
+- **Account Takeover Protection**: Brute force detection, credential stuffing detection, password spray detection, impossible travel detection
 
 **Reverse Proxy & Routing**
 - Multi-domain routing via virtual hosts (Host header + SNI)
@@ -259,23 +263,31 @@ GuardianWAF was built to eliminate the trade-offs other WAF solutions force: com
   HTTP Request
        |
        v
-  +-----------+    +------------+    +------------+    +------------+
-  |  IP ACL   |--->| Rate Limit |--->| Sanitizer  |--->| Detection  |--+
-  |   (100)   |    |   (200)    |    |   (300)    |    |   (400)    |  |
-  +-----------+    +------------+    +------------+    +------------+  |
-                                                                       |
-       +---------------------------------------------------------------+
+  +-----------+   +-------------+   +-----------+   +------------+   +-----------+
+  |  IP ACL   |-->| Threat Intel|-->|   CORS    |-->| Rate Limit |-->|    ATO    |
+  |   (100)   |   |    (125)    |   |   (150)   |   |    (200)   |   |   (250)   |
+  +-----------+   +-------------+   +-----------+   +------------+   +-----------+
+                                                                            |
+       +--------------------------------------------------------------------+
        |
        v
-  +------------+    +-----------+    +-----------+    +----------------+
-  | Bot Detect |--->|    JS     |--->|  Response  |--->|   Upstream     |
-  |   (500)    |    | Challenge |    |   (600)    |    | Load Balancer  |
-  +------------+    +-----------+    +-----------+    +----------------+
-                    (score 40-79)         |             |  |  |  |
-                                          |             v  v  v  v
-                                          +-- Headers  Backend Targets
-                                          +-- Masking  (health checked,
-                                          +-- Errors   circuit breaker)
+  +-------------+   +------------+   +------------+   +------------+   +-----------+
+  | API Security|-->| Sanitizer  |-->| Detection  |-->| Bot Detect |-->|  Response |
+  |    (275)    |   |    (300)   |   |    (400)   |   |    (500)   |   |   (600)   |
+  +-------------+   +------------+   +------------+   +------------+   +-----------+
+                                                                              |
+       +----------------------------------------------------------------------+
+       |
+       v
+  +-----------+    +----------------+
+  |    JS     |--->|   Upstream     |
+  | Challenge |    | Load Balancer  |
+  +-----------+    +----------------+
+  (score 40-79)    |  |  |  |  |
+                   v  v  v  v  v
+                  Backend Targets
+                  (health checked,
+                   circuit breaker)
 ```
 
 Each layer runs in order and can pass, log, challenge, or block the request. The detection layer runs 6 independent detectors (SQLi, XSS, LFI, CMDi, XXE, SSRF) and produces a cumulative threat score. Bot detection scores between 40-79 trigger a JavaScript proof-of-work challenge instead of blocking outright.
@@ -567,10 +579,14 @@ guardianwaf/
 │   ├── config/            # YAML parser, config structs, env loading, validation
 │   ├── layers/
 │   │   ├── ipacl/         # IP whitelist/blacklist (radix tree, runtime add/remove)
+│   │   ├── threatintel/   # Threat intelligence feeds (IP/domain reputation, LRU cache)
+│   │   ├── cors/          # CORS validation (origin allowlist, preflight handling)
 │   │   ├── ratelimit/     # Token bucket rate limiter
+│   │   ├── ato/           # Account takeover protection (brute force, credential stuffing)
+│   │   ├── apisecurity/   # API authentication (JWT validation, API keys)
 │   │   ├── sanitizer/     # Request normalization and validation
 │   │   ├── detection/     # Attack detectors (sqli/xss/lfi/cmdi/xxe/ssrf)
-│   │   ├── botdetect/     # Bot detection (JA3, UA, behavior)
+│   │   ├── botdetect/     # Bot detection (JA3/JA4, UA, behavior)
 │   │   ├── challenge/     # JS proof-of-work challenge (SHA-256 PoW)
 │   │   └── response/      # Response protection (headers, masking, error pages)
 │   ├── proxy/             # Reverse proxy, load balancer, circuit breaker, router

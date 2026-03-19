@@ -11,6 +11,10 @@ import {
   Globe,
   Server,
   Puzzle,
+  Database,
+  Key,
+  AlertTriangle,
+  Route,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 
@@ -46,9 +50,29 @@ const features = [
     description: 'Built-in TLS termination with SNI, certificate hot-reload, ACME/Let\'s Encrypt client, and HTTP-to-HTTPS redirect.',
   },
   {
+    icon: Database,
+    title: 'Threat Intelligence',
+    description: 'IP and domain reputation checking with JSONL/CSV/JSON feeds. LRU cache for fast lookups. CIDR range matching.',
+  },
+  {
+    icon: Route,
+    title: 'CORS Security',
+    description: 'Origin validation with wildcard patterns, preflight handling, strict mode blocking. Full CORS policy enforcement.',
+  },
+  {
+    icon: Key,
+    title: 'API Security',
+    description: 'JWT validation (RS256/ES256/HS256), JWKS endpoint support, API key authentication with path-based authorization.',
+  },
+  {
+    icon: AlertTriangle,
+    title: 'ATO Protection',
+    description: 'Account takeover prevention: brute force detection, credential stuffing detection, password spray, impossible travel.',
+  },
+  {
     icon: Gauge,
     title: 'Real-Time Dashboard',
-    description: 'Live monitoring, event details, upstream health, configuration editor, routing manager, and light/dark theme. No external tools.',
+    description: 'Live monitoring, event details, upstream health, configuration editor, routing manager, and light/dark theme.',
   },
   {
     icon: Zap,

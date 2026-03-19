@@ -16,22 +16,26 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/guardianwaf/guardianwaf/internal/acme"
 	"github.com/guardianwaf/guardianwaf/internal/config"
 	"github.com/guardianwaf/guardianwaf/internal/dashboard"
 	"github.com/guardianwaf/guardianwaf/internal/engine"
 	"github.com/guardianwaf/guardianwaf/internal/events"
+	"github.com/guardianwaf/guardianwaf/internal/geoip"
+	"github.com/guardianwaf/guardianwaf/internal/layers/apisecurity"
+	"github.com/guardianwaf/guardianwaf/internal/layers/ato"
 	"github.com/guardianwaf/guardianwaf/internal/layers/botdetect"
 	"github.com/guardianwaf/guardianwaf/internal/layers/challenge"
+	"github.com/guardianwaf/guardianwaf/internal/layers/cors"
 	"github.com/guardianwaf/guardianwaf/internal/layers/detection"
-	"github.com/guardianwaf/guardianwaf/internal/geoip"
 	"github.com/guardianwaf/guardianwaf/internal/layers/ipacl"
 	"github.com/guardianwaf/guardianwaf/internal/layers/ratelimit"
-	"github.com/guardianwaf/guardianwaf/internal/layers/rules"
 	"github.com/guardianwaf/guardianwaf/internal/layers/response"
+	"github.com/guardianwaf/guardianwaf/internal/layers/rules"
 	"github.com/guardianwaf/guardianwaf/internal/layers/sanitizer"
+	"github.com/guardianwaf/guardianwaf/internal/layers/threatintel"
 	"github.com/guardianwaf/guardianwaf/internal/mcp"
 	"github.com/guardianwaf/guardianwaf/internal/proxy"
-	"github.com/guardianwaf/guardianwaf/internal/acme"
 	gwaftls "github.com/guardianwaf/guardianwaf/internal/tls"
 )
 
@@ -884,7 +888,64 @@ func addLayers(eng *engine.Engine, cfg *config.Config) {
 		}
 	}
 
-	// 1b. Custom Rules layer (Order 150)
+	// 1b. Threat Intelligence layer (Order 125)
+	if cfg.WAF.ThreatIntel.Enabled {
+		feeds := make([]threatintel.FeedConfig, len(cfg.WAF.ThreatIntel.Feeds))
+		for i, f := range cfg.WAF.ThreatIntel.Feeds {
+			feeds[i] = threatintel.FeedConfig{
+				Type:     f.Type,
+				Path:     f.Path,
+				URL:      f.URL,
+				Refresh:  f.Refresh,
+				Format:   f.Format,
+			}
+		}
+		tiLayer, err := threatintel.NewLayer(threatintel.Config{
+			Enabled: cfg.WAF.ThreatIntel.Enabled,
+			IPReputation: threatintel.IPRepConfig{
+				Enabled:        cfg.WAF.ThreatIntel.IPReputation.Enabled,
+				BlockMalicious: cfg.WAF.ThreatIntel.IPReputation.BlockMalicious,
+				ScoreThreshold: cfg.WAF.ThreatIntel.IPReputation.ScoreThreshold,
+			},
+			DomainRep: threatintel.DomainRepConfig{
+				Enabled:        cfg.WAF.ThreatIntel.DomainRep.Enabled,
+				BlockMalicious: cfg.WAF.ThreatIntel.DomainRep.BlockMalicious,
+				CheckRedirects: cfg.WAF.ThreatIntel.DomainRep.CheckRedirects,
+			},
+			CacheSize: cfg.WAF.ThreatIntel.CacheSize,
+			CacheTTL:  cfg.WAF.ThreatIntel.CacheTTL,
+			Feeds:     feeds,
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to create threat intel layer: %v\n", err)
+		} else {
+			eng.AddLayer(engine.OrderedLayer{Layer: tiLayer, Order: engine.OrderThreatIntel})
+			eng.Logs.Info("Threat intelligence layer enabled")
+		}
+	}
+
+	// 1c. CORS Security layer (Order 150)
+	if cfg.WAF.CORS.Enabled {
+		corsLayer, err := cors.NewLayer(cors.Config{
+			Enabled:               cfg.WAF.CORS.Enabled,
+			AllowOrigins:          cfg.WAF.CORS.AllowOrigins,
+			AllowMethods:          cfg.WAF.CORS.AllowMethods,
+			AllowHeaders:          cfg.WAF.CORS.AllowHeaders,
+			ExposeHeaders:         cfg.WAF.CORS.ExposeHeaders,
+			AllowCredentials:      cfg.WAF.CORS.AllowCredentials,
+			MaxAgeSeconds:         cfg.WAF.CORS.MaxAgeSeconds,
+			StrictMode:            cfg.WAF.CORS.StrictMode,
+			PreflightCacheSeconds: cfg.WAF.CORS.PreflightCacheSeconds,
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to create CORS layer: %v\n", err)
+		} else {
+			eng.AddLayer(engine.OrderedLayer{Layer: corsLayer, Order: engine.OrderCORS})
+			eng.Logs.Infof("CORS security enabled (%d allowed origins)", len(cfg.WAF.CORS.AllowOrigins))
+		}
+	}
+
+	// 1d. Custom Rules layer (Order 150)
 	if cfg.WAF.CustomRules.Enabled {
 		var geodb *geoip.DB
 		if cfg.WAF.GeoIP.Enabled {
@@ -929,6 +990,89 @@ func addLayers(eng *engine.Engine, cfg *config.Config) {
 			Rules:   rules,
 		})
 		eng.AddLayer(engine.OrderedLayer{Layer: rlLayer, Order: engine.OrderRateLimit})
+	}
+
+	// 2b. ATO Protection layer (Order 250)
+	if cfg.WAF.ATOProtection.Enabled {
+		atoLayer, err := ato.NewLayer(ato.Config{
+			Enabled:    cfg.WAF.ATOProtection.Enabled,
+			LoginPaths: cfg.WAF.ATOProtection.LoginPaths,
+			BruteForce: ato.BruteForceConfig{
+				Enabled:             cfg.WAF.ATOProtection.BruteForce.Enabled,
+				Window:              cfg.WAF.ATOProtection.BruteForce.Window,
+				MaxAttemptsPerIP:    cfg.WAF.ATOProtection.BruteForce.MaxAttemptsPerIP,
+				MaxAttemptsPerEmail: cfg.WAF.ATOProtection.BruteForce.MaxAttemptsPerEmail,
+				BlockDuration:       cfg.WAF.ATOProtection.BruteForce.BlockDuration,
+			},
+			CredStuffing: ato.CredentialStuffingConfig{
+				Enabled:              cfg.WAF.ATOProtection.CredStuffing.Enabled,
+				DistributedThreshold: cfg.WAF.ATOProtection.CredStuffing.DistributedThreshold,
+				Window:               cfg.WAF.ATOProtection.CredStuffing.Window,
+				BlockDuration:        cfg.WAF.ATOProtection.CredStuffing.BlockDuration,
+			},
+			PasswordSpray: ato.PasswordSprayConfig{
+				Enabled:       cfg.WAF.ATOProtection.PasswordSpray.Enabled,
+				Threshold:     cfg.WAF.ATOProtection.PasswordSpray.Threshold,
+				Window:        cfg.WAF.ATOProtection.PasswordSpray.Window,
+				BlockDuration: cfg.WAF.ATOProtection.PasswordSpray.BlockDuration,
+			},
+			Travel: ato.ImpossibleTravelConfig{
+				Enabled:       cfg.WAF.ATOProtection.Travel.Enabled,
+				MaxDistanceKm: cfg.WAF.ATOProtection.Travel.MaxDistanceKm,
+				MaxTimeHours:  cfg.WAF.ATOProtection.Travel.MaxTimeHours,
+				BlockDuration: cfg.WAF.ATOProtection.Travel.BlockDuration,
+			},
+			GeoDBPath: cfg.WAF.ATOProtection.GeoDBPath,
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to create ATO protection layer: %v\n", err)
+		} else {
+			eng.AddLayer(engine.OrderedLayer{Layer: atoLayer, Order: engine.OrderATO})
+			eng.Logs.Infof("ATO protection enabled (%d login paths)", len(cfg.WAF.ATOProtection.LoginPaths))
+		}
+	}
+
+	// 2c. API Security layer (Order 275)
+	if cfg.WAF.APISecurity.Enabled {
+		apiKeys := make([]apisecurity.APIKeyConfig, len(cfg.WAF.APISecurity.APIKeys.Keys))
+		for i, k := range cfg.WAF.APISecurity.APIKeys.Keys {
+			apiKeys[i] = apisecurity.APIKeyConfig{
+				Name:         k.Name,
+				KeyHash:      k.KeyHash,
+				KeyPrefix:    k.KeyPrefix,
+				RateLimit:    k.RateLimit,
+				AllowedPaths: k.AllowedPaths,
+				Enabled:      k.Enabled,
+			}
+		}
+		apiLayer, err := apisecurity.NewLayer(apisecurity.Config{
+			Enabled:    cfg.WAF.APISecurity.Enabled,
+			SkipPaths:  cfg.WAF.APISecurity.SkipPaths,
+			HeaderName: cfg.WAF.APISecurity.HeaderName,
+			QueryParam: cfg.WAF.APISecurity.QueryParam,
+			JWT: apisecurity.JWTConfig{
+				Enabled:          cfg.WAF.APISecurity.JWT.Enabled,
+				Issuer:           cfg.WAF.APISecurity.JWT.Issuer,
+				Audience:         cfg.WAF.APISecurity.JWT.Audience,
+				Algorithms:       cfg.WAF.APISecurity.JWT.Algorithms,
+				PublicKeyFile:    cfg.WAF.APISecurity.JWT.PublicKeyFile,
+				JWKSURL:          cfg.WAF.APISecurity.JWT.JWKSURL,
+				ClockSkewSeconds: cfg.WAF.APISecurity.JWT.ClockSkewSeconds,
+				PublicKeyPEM:     cfg.WAF.APISecurity.JWT.PublicKeyPEM,
+			},
+			APIKeys: apisecurity.APIKeysConfig{
+				Enabled:    cfg.WAF.APISecurity.APIKeys.Enabled,
+				HeaderName: cfg.WAF.APISecurity.APIKeys.HeaderName,
+				QueryParam: cfg.WAF.APISecurity.APIKeys.QueryParam,
+				Keys:       apiKeys,
+			},
+		})
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to create API security layer: %v\n", err)
+		} else {
+			eng.AddLayer(engine.OrderedLayer{Layer: apiLayer, Order: engine.OrderAPISecurity})
+			eng.Logs.Info("API security layer enabled")
+		}
 	}
 
 	// 3. Sanitizer layer (Order 300)
