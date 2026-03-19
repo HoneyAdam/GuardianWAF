@@ -112,7 +112,8 @@ waf:
 dashboard:
   enabled: true
   listen: ":9443"
-  api_key: test-api-key-2024
+  api_key: "test-api-key-2024"
+  tls: false
 
 mcp:
   enabled: false

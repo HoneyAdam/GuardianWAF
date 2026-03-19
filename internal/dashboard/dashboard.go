@@ -104,6 +104,7 @@ func New(eng *engine.Engine, store events.EventStore, apiKey string) *Dashboard 
 	d.mux.HandleFunc("GET /routing", d.authWrap(d.handleSPA))       // SPA routes
 	d.mux.HandleFunc("GET /logs", d.authWrap(d.handleSPA))          // SPA routes
 	d.mux.HandleFunc("GET /rules", d.authWrap(d.handleSPA))         // SPA routes
+	d.mux.HandleFunc("GET /ai", d.authWrap(d.handleSPA))            // SPA routes
 	d.mux.HandleFunc("/", d.authWrap(d.handleSPA))                  // SPA catch-all
 
 	return d
