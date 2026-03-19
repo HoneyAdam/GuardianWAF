@@ -2300,3 +2300,217 @@ waf:
 		t.Error("expected non-zero score for SQL injection attempt")
 	}
 }
+
+// --- runCheck additional tests ---
+
+// Note: ConfigNotFound test skipped because loadConfig calls os.Exit(1)
+// for missing non-default config paths, which cannot be tested easily.
+
+// Note: TestRunCheck_InvalidYAML skipped - loadConfig calls os.Exit(1)
+
+func TestRunCheck_InvalidHeader(t *testing.T) {
+	// Invalid headers are silently ignored, not an error
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "test.yaml")
+	os.WriteFile(cfgPath, []byte("mode: monitor\n"), 0644)
+
+	result, err := runCheck(CheckOptions{
+		ConfigPath: cfgPath,
+		URL:        "/test",
+		Method:     "GET",
+		Headers:    []string{"InvalidHeader"},
+	})
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if result == nil {
+		t.Error("expected result")
+	}
+}
+
+func TestRunCheck_XSSDetection(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "test.yaml")
+	content := `
+mode: enforce
+listen: ":8080"
+waf:
+  detection:
+    enabled: true
+    detectors:
+      xss:
+        enabled: true
+        multiplier: 1.0
+`
+	os.WriteFile(cfgPath, []byte(content), 0644)
+
+	result, err := runCheck(CheckOptions{
+		ConfigPath: cfgPath,
+		URL:        "/search?q=<script>alert(1)</script>",
+		Method:     "GET",
+	})
+	if err != nil {
+		t.Fatalf("runCheck error: %v", err)
+	}
+	if result.Score == 0 {
+		t.Error("expected non-zero score for XSS attempt")
+	}
+}
+
+func TestRunCheck_LFIDetection(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "test.yaml")
+	content := `
+mode: enforce
+listen: ":8080"
+waf:
+  detection:
+    enabled: true
+    detectors:
+      lfi:
+        enabled: true
+        multiplier: 1.0
+`
+	os.WriteFile(cfgPath, []byte(content), 0644)
+
+	result, err := runCheck(CheckOptions{
+		ConfigPath: cfgPath,
+		URL:        "/file?path=../../../etc/passwd",
+		Method:     "GET",
+	})
+	if err != nil {
+		t.Fatalf("runCheck error: %v", err)
+	}
+	if result.Score == 0 {
+		t.Error("expected non-zero score for LFI attempt")
+	}
+}
+
+// --- mcpEngineAdapter additional tests ---
+
+func TestMCPEngineAdapter_GetConfig(t *testing.T) {
+	cfg := config.DefaultConfig()
+	store := events.NewMemoryStore(1000)
+	bus := events.NewEventBus()
+	eng, err := engine.NewEngine(cfg, store, bus)
+	if err != nil {
+		t.Fatalf("NewEngine error: %v", err)
+	}
+	defer eng.Close()
+
+	adapter := &mcpEngineAdapter{engine: eng, cfg: cfg}
+	result := adapter.GetConfig()
+
+	m, ok := result.(map[string]any)
+	if !ok {
+		t.Fatal("expected map result")
+	}
+	if m["mode"] != cfg.Mode {
+		t.Errorf("expected mode %q, got %q", cfg.Mode, m["mode"])
+	}
+}
+
+func TestMCPEngineAdapter_AddRateLimit(t *testing.T) {
+	cfg := config.DefaultConfig()
+	store := events.NewMemoryStore(1000)
+	bus := events.NewEventBus()
+	eng, err := engine.NewEngine(cfg, store, bus)
+	if err != nil {
+		t.Fatalf("NewEngine error: %v", err)
+	}
+	defer eng.Close()
+
+	adapter := &mcpEngineAdapter{engine: eng, cfg: cfg}
+	err = adapter.AddRateLimit(map[string]any{"limit": 10})
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestMCPEngineAdapter_RemoveRateLimit(t *testing.T) {
+	cfg := config.DefaultConfig()
+	store := events.NewMemoryStore(1000)
+	bus := events.NewEventBus()
+	eng, err := engine.NewEngine(cfg, store, bus)
+	if err != nil {
+		t.Fatalf("NewEngine error: %v", err)
+	}
+	defer eng.Close()
+
+	adapter := &mcpEngineAdapter{engine: eng, cfg: cfg}
+	err = adapter.RemoveRateLimit("test-id")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestMCPEngineAdapter_AddExclusion(t *testing.T) {
+	cfg := config.DefaultConfig()
+	store := events.NewMemoryStore(1000)
+	bus := events.NewEventBus()
+	eng, err := engine.NewEngine(cfg, store, bus)
+	if err != nil {
+		t.Fatalf("NewEngine error: %v", err)
+	}
+	defer eng.Close()
+
+	adapter := &mcpEngineAdapter{engine: eng, cfg: cfg}
+	err = adapter.AddExclusion("/api", []string{"sqli"}, "test reason")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestMCPEngineAdapter_RemoveExclusion(t *testing.T) {
+	cfg := config.DefaultConfig()
+	store := events.NewMemoryStore(1000)
+	bus := events.NewEventBus()
+	eng, err := engine.NewEngine(cfg, store, bus)
+	if err != nil {
+		t.Fatalf("NewEngine error: %v", err)
+	}
+	defer eng.Close()
+
+	adapter := &mcpEngineAdapter{engine: eng, cfg: cfg}
+	err = adapter.RemoveExclusion("/api")
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestMCPEngineAdapter_GetEvents(t *testing.T) {
+	cfg := config.DefaultConfig()
+	store := events.NewMemoryStore(1000)
+	bus := events.NewEventBus()
+	eng, err := engine.NewEngine(cfg, store, bus)
+	if err != nil {
+		t.Fatalf("NewEngine error: %v", err)
+	}
+	defer eng.Close()
+
+	adapter := &mcpEngineAdapter{engine: eng, cfg: cfg}
+	result, err := adapter.GetEvents(json.RawMessage("{}"))
+	if err != nil {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+}
+
+func TestMCPEngineAdapter_GetTopIPs(t *testing.T) {
+	cfg := config.DefaultConfig()
+	store := events.NewMemoryStore(1000)
+	bus := events.NewEventBus()
+	eng, err := engine.NewEngine(cfg, store, bus)
+	if err != nil {
+		t.Fatalf("NewEngine error: %v", err)
+	}
+	defer eng.Close()
+
+	adapter := &mcpEngineAdapter{engine: eng, cfg: cfg}
+	result := adapter.GetTopIPs(10)
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+}
