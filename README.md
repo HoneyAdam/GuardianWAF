@@ -247,6 +247,10 @@ GuardianWAF was built to eliminate the trade-offs other WAF solutions force: com
 | **Web dashboard** | Built-in (config + monitoring) | Built-in | No (third-party) | No (third-party) | No |
 | **Single binary** | Yes | No | No | No | No |
 | **MCP / AI integration** | Built-in MCP server | No | No | No | No |
+| **Threat Intelligence** | IP/domain reputation feeds | No | No | Partial (external) | No |
+| **CORS Security** | Built-in layer | No | No | No | No |
+| **ATO Protection** | Brute force + credential stuffing | No | No | No | No |
+| **API Security** | JWT validation + API keys | No | No | No | No |
 | **Configuration** | YAML + env + dashboard UI | Web UI | SecRule directives | SecRule directives | NGINX directives |
 | **False positive mgmt** | Score tuning per-route | Auto learning | Rule exclusions | Rule exclusions | Allowlists |
 | **Performance overhead** | < 1ms p99 | Low | Low | Moderate | Low |

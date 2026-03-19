@@ -38,6 +38,23 @@ export const docSections: DocSection[] = [
     ],
   },
   {
+    id: 'security-layers',
+    title: 'Security Layers',
+    subsections: [
+      { id: 'layer-pipeline', title: 'Pipeline Overview' },
+      { id: 'ip-acl', title: 'IP ACL (100)' },
+      { id: 'threat-intel', title: 'Threat Intel (125)' },
+      { id: 'cors-layer', title: 'CORS (150)' },
+      { id: 'rate-limit', title: 'Rate Limit (200)' },
+      { id: 'ato-protection', title: 'ATO Protection (250)' },
+      { id: 'api-security', title: 'API Security (275)' },
+      { id: 'sanitizer', title: 'Sanitizer (300)' },
+      { id: 'detection', title: 'Detection (400)' },
+      { id: 'bot-detection', title: 'Bot Detection (500)' },
+      { id: 'response-layer', title: 'Response (600)' },
+    ],
+  },
+  {
     id: 'detection-engine',
     title: 'Detection Engine',
     subsections: [
@@ -289,6 +306,119 @@ spec:
       image: my-app:latest
       ports:
         - containerPort: 3000` },
+    ],
+  },
+  {
+    id: 'security-layers',
+    title: 'Security Layers',
+    content: [
+      { type: 'paragraph', text: 'GuardianWAF processes requests through a 10-layer security pipeline. Each layer runs in order and can pass, log, challenge, or block the request.' },
+      { type: 'heading', level: 2, text: 'Pipeline Overview', id: 'layer-pipeline' },
+      { type: 'code', language: 'text', filename: 'Pipeline Order', code: `Order 100: IP ACL          → Allow/deny by IP or CIDR
+Order 125: Threat Intel    → IP/domain reputation checking
+Order 150: CORS            → Cross-origin request validation
+Order 200: Rate Limit      → Token bucket per IP/path
+Order 250: ATO Protection  → Brute force & credential stuffing
+Order 275: API Security    → JWT validation & API keys
+Order 300: Sanitizer       → Request normalization
+Order 400: Detection       → 6 detectors (SQLi, XSS, LFI, CMDi, XXE, SSRF)
+Order 500: Bot Detection   → JA3/JA4 TLS fingerprinting, behavioral analysis
+Order 600: Response        → Security headers, data masking` },
+      { type: 'heading', level: 2, text: 'IP ACL (100)', id: 'ip-acl' },
+      { type: 'paragraph', text: 'First line of defense. Allow or deny requests based on IP addresses or CIDR ranges using a radix tree for O(k) lookups.' },
+      { type: 'code', language: 'yaml', filename: 'guardianwaf.yaml', code: `ip_acl:
+  enabled: true
+  allowlist:
+    - "10.0.0.0/8"       # Internal network
+    - "192.168.1.100"    # Admin IP
+  blocklist:
+    - "192.0.2.0/24"     # Known bad range
+  default_action: "allow"` },
+      { type: 'heading', level: 2, text: 'Threat Intelligence (125)', id: 'threat-intel' },
+      { type: 'paragraph', text: 'Check IPs and domains against reputation feeds. Supports JSONL, CSV, and JSON formats with automatic refresh.' },
+      { type: 'code', language: 'yaml', filename: 'guardianwaf.yaml', code: `threat_intel:
+  enabled: true
+  ip_reputation:
+    enabled: true
+    block_malicious: true
+    score_threshold: 70
+    sources:
+      - type: "file"
+        path: "/etc/guardian/threat_ips.jsonl"
+        refresh_minutes: 60
+  domain_reputation:
+    enabled: true
+    check_redirects: true` },
+      { type: 'heading', level: 2, text: 'CORS Security (150)', id: 'cors-layer' },
+      { type: 'paragraph', text: 'Validate cross-origin requests against an allowlist. Supports wildcard patterns and strict mode blocking.' },
+      { type: 'code', language: 'yaml', filename: 'guardianwaf.yaml', code: `cors:
+  enabled: true
+  allow_origins:
+    - "https://example.com"
+    - "https://*.example.com"
+  allow_methods:
+    - GET
+    - POST
+    - PUT
+    - DELETE
+  allow_credentials: true
+  max_age_seconds: 86400
+  strict_mode: true` },
+      { type: 'heading', level: 2, text: 'Rate Limit (200)', id: 'rate-limit' },
+      { type: 'paragraph', text: 'Token bucket rate limiting per IP address or path. Protects against DDoS and abuse.' },
+      { type: 'code', language: 'yaml', filename: 'guardianwaf.yaml', code: `rate_limit:
+  enabled: true
+  requests_per_second: 100
+  burst: 200
+  window: "1m"
+  per_path:
+    "/api/*":
+      requests_per_second: 50
+      burst: 100` },
+      { type: 'heading', level: 2, text: 'ATO Protection (250)', id: 'ato-protection' },
+      { type: 'paragraph', text: 'Account Takeover Protection detects brute force attacks, credential stuffing, password spray, and impossible travel patterns.' },
+      { type: 'code', language: 'yaml', filename: 'guardianwaf.yaml', code: `ato_protection:
+  enabled: true
+  login_paths:
+    - "/login"
+    - "/api/auth"
+  brute_force:
+    enabled: true
+    window_minutes: 15
+    max_attempts_per_ip: 10
+    block_duration_minutes: 30
+  credential_stuffing:
+    enabled: true
+    distributed_threshold: 5
+    window_minutes: 60
+  impossible_travel:
+    enabled: true
+    max_distance_km: 500` },
+      { type: 'heading', level: 2, text: 'API Security (275)', id: 'api-security' },
+      { type: 'paragraph', text: 'JWT validation with JWKS support and API key authentication with path-based authorization.' },
+      { type: 'code', language: 'yaml', filename: 'guardianwaf.yaml', code: `api_security:
+  enabled: true
+  jwt:
+    enabled: true
+    issuer: "https://auth.example.com"
+    audience: "api.example.com"
+    jwks_url: "https://auth.example.com/.well-known/jwks.json"
+  api_keys:
+    enabled: true
+    header_name: "X-API-Key"
+    keys:
+      - name: "service-a"
+        key_hash: "sha256:..."
+        allowed_paths: ["/api/*"]` },
+      { type: 'heading', level: 2, text: 'Sanitizer (300)', id: 'sanitizer' },
+      { type: 'paragraph', text: 'Normalizes requests before detection. Handles URL encoding, unicode normalization, and removes null bytes.' },
+      { type: 'heading', level: 2, text: 'Detection (400)', id: 'detection' },
+      { type: 'paragraph', text: 'Core threat detection with 6 specialized detectors. See Detection Engine section for details.' },
+      { type: 'heading', level: 2, text: 'Bot Detection (500)', id: 'bot-detection' },
+      { type: 'paragraph', text: 'Identifies automated threats using JA3/JA4 TLS fingerprinting, User-Agent analysis, and behavioral patterns. Scores between 40-79 trigger JavaScript proof-of-work challenge.' },
+      { type: 'heading', level: 2, text: 'Response (600)', id: 'response-layer' },
+      { type: 'paragraph', text: 'Adds security headers to responses and masks sensitive data like credit cards and API keys.' },
+      { type: 'callout', variant: 'info', text: 'Layers run in strict order. Early layers (IP ACL, Threat Intel) can block before expensive detection runs.' },
     ],
   },
   {
