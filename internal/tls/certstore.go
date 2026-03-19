@@ -34,7 +34,7 @@ type CertStore struct {
 }
 
 type wildcardCert struct {
-	suffix string           // ".example.com" for *.example.com
+	suffix string // ".example.com" for *.example.com
 	cert   *tls.Certificate
 }
 

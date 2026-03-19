@@ -157,9 +157,9 @@ func TestGetCertificatePriority(t *testing.T) {
 		serverName string
 		expectNil  bool
 	}{
-		{"api.example.com", false},   // exact match
-		{"www.example.com", false},   // wildcard match
-		{"other.com", false},         // default fallback
+		{"api.example.com", false}, // exact match
+		{"www.example.com", false}, // wildcard match
+		{"other.com", false},       // default fallback
 	}
 
 	for _, tt := range tests {

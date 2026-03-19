@@ -2926,3 +2926,222 @@ events:
 		t.Fatalf("expected my-secret, got %q", cfg.Dashboard.APIKey)
 	}
 }
+
+// --- VirtualHosts tests ---
+
+func TestPopulateFromNode_VirtualHosts(t *testing.T) {
+	yaml := `virtual_hosts:
+  - domains:
+      - api.example.com
+      - www.api.example.com
+    tls:
+      cert_file: /etc/ssl/api.crt
+      key_file: /etc/ssl/api.key
+    routes:
+      - path: /v1
+        upstream: apiv1
+        strip_prefix: true
+        methods: [GET, POST]
+  - domains:
+      - static.example.com
+    tls:
+      cert_file: /etc/ssl/static.crt
+      key_file: /etc/ssl/static.key
+  - domains:
+      - "*.wildcard.com"`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	if err := PopulateFromNode(cfg, node); err != nil {
+		t.Fatalf("populate error: %v", err)
+	}
+
+	if len(cfg.VirtualHosts) != 3 {
+		t.Fatalf("expected 3 virtual hosts, got %d", len(cfg.VirtualHosts))
+	}
+
+	vh1 := cfg.VirtualHosts[0]
+	if len(vh1.Domains) != 2 {
+		t.Fatalf("expected 2 domains, got %d", len(vh1.Domains))
+	}
+	if vh1.Domains[0] != "api.example.com" {
+		t.Fatalf("expected domain 'api.example.com', got %q", vh1.Domains[0])
+	}
+	if vh1.TLS.CertFile != "/etc/ssl/api.crt" {
+		t.Fatalf("expected cert_file, got %q", vh1.TLS.CertFile)
+	}
+	if vh1.TLS.KeyFile != "/etc/ssl/api.key" {
+		t.Fatalf("expected key_file, got %q", vh1.TLS.KeyFile)
+	}
+	if len(vh1.Routes) != 1 {
+		t.Fatalf("expected 1 route, got %d", len(vh1.Routes))
+	}
+	if vh1.Routes[0].Path != "/v1" {
+		t.Fatalf("expected route path '/v1', got %q", vh1.Routes[0].Path)
+	}
+	if !vh1.Routes[0].StripPrefix {
+		t.Fatal("expected strip_prefix true")
+	}
+
+	vh2 := cfg.VirtualHosts[1]
+	if len(vh2.Domains) != 1 {
+		t.Fatalf("expected 1 domain, got %d", len(vh2.Domains))
+	}
+	if vh2.Domains[0] != "static.example.com" {
+		t.Fatalf("expected domain 'static.example.com', got %q", vh2.Domains[0])
+	}
+
+	vh3 := cfg.VirtualHosts[2]
+	if vh3.Domains[0] != "*.wildcard.com" {
+		t.Fatalf("expected wildcard domain, got %q", vh3.Domains[0])
+	}
+}
+
+func TestPopulateFromNode_VirtualHostsNonMap(t *testing.T) {
+	yaml := `virtual_hosts: disabled`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	if err := PopulateFromNode(cfg, node); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestPopulateFromNode_VirtualHostsRoutesError(t *testing.T) {
+	yaml := `virtual_hosts:
+  - domains:
+      - test.com
+    routes:
+      - path: /api
+        strip_prefix: notabool`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid route strip_prefix in virtual host")
+	}
+}
+
+func TestValidateVirtualHostsExported(t *testing.T) {
+	// VirtualHostConfig validation - check the structure
+	vhosts := []VirtualHostConfig{
+		{Domains: []string{"example.com"}},
+		{Domains: []string{}}, // Empty domains
+	}
+	ve := &ValidationError{}
+	ValidateVirtualHostsExported(vhosts, []UpstreamConfig{}, ve)
+	// Check if validation runs without panic
+	_ = ve.HasErrors()
+}
+
+func TestValidateUpstreamsExported(t *testing.T) {
+	upstreams := []UpstreamConfig{
+		{Name: "api", Targets: []TargetConfig{{URL: "http://localhost:8080"}}, LoadBalancer: "round_robin"},
+		{Name: "", Targets: []TargetConfig{{URL: "http://localhost:8081"}}}, // Invalid: empty name
+	}
+	ve := &ValidationError{}
+	ValidateUpstreamsExported(upstreams, ve)
+	if !ve.HasErrors() {
+		t.Error("expected validation error for empty upstream name")
+	}
+}
+
+func TestValidateRoutesExported(t *testing.T) {
+	routes := []RouteConfig{
+		{Path: "/api", Upstream: "backend"},
+		{Path: "", Upstream: "backend"}, // Invalid: empty path
+	}
+	ve := &ValidationError{}
+	ValidateRoutesExported(routes, []UpstreamConfig{}, ve)
+	if !ve.HasErrors() {
+		t.Error("expected validation error for empty route path")
+	}
+}
+
+// --- Challenge tests ---
+
+func TestPopulateFromNode_Challenge(t *testing.T) {
+	yaml := `waf:
+  challenge:
+    enabled: true
+    difficulty: 18
+    cookie_ttl: 30m
+    cookie_name: __custom_challenge
+    secret_key: "my-secret-key-base64"`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	if err := PopulateFromNode(cfg, node); err != nil {
+		t.Fatalf("populate error: %v", err)
+	}
+
+	if !cfg.WAF.Challenge.Enabled {
+		t.Fatal("expected challenge enabled")
+	}
+	if cfg.WAF.Challenge.Difficulty != 18 {
+		t.Fatalf("expected difficulty 18, got %d", cfg.WAF.Challenge.Difficulty)
+	}
+	if cfg.WAF.Challenge.CookieTTL != 30*time.Minute {
+		t.Fatalf("expected cookie_ttl 30m, got %v", cfg.WAF.Challenge.CookieTTL)
+	}
+	if cfg.WAF.Challenge.CookieName != "__custom_challenge" {
+		t.Fatalf("expected cookie_name '__custom_challenge', got %q", cfg.WAF.Challenge.CookieName)
+	}
+	if cfg.WAF.Challenge.SecretKey != "my-secret-key-base64" {
+		t.Fatalf("expected secret_key, got %q", cfg.WAF.Challenge.SecretKey)
+	}
+}
+
+func TestPopulateFromNode_ChallengeError(t *testing.T) {
+	yaml := `waf:
+  challenge:
+    enabled: notabool`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid challenge enabled")
+	}
+}
+
+func TestPopulateFromNode_ChallengeDifficultyError(t *testing.T) {
+	yaml := `waf:
+  challenge:
+    difficulty: notanint`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid challenge difficulty")
+	}
+}
+
+func TestPopulateFromNode_ChallengeCookieTTLError(t *testing.T) {
+	yaml := `waf:
+  challenge:
+    cookie_ttl: badduration`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("parse error: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid challenge cookie_ttl")
+	}
+}

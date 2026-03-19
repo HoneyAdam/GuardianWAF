@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"crypto/tls"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -1067,4 +1068,140 @@ func (l *mockResponseLayer) Process(ctx *RequestContext) LayerResult {
 		}
 	}
 	return LayerResult{Action: ActionPass}
+}
+
+// --- TLS Helper Functions ---
+
+func TestTLSVersionString(t *testing.T) {
+	tests := []struct {
+		version  uint16
+		expected string
+	}{
+		{0x0304, "TLS 1.3"},
+		{0x0303, "TLS 1.2"},
+		{0x0302, "TLS 1.1"},
+		{0x0301, "TLS 1.0"},
+		{0xfeff, "DTLS 1.0"},
+		{0xfefd, "DTLS 1.2"},
+		{0x0000, "Unknown"},
+	}
+
+	for _, tt := range tests {
+		result := tlsVersionString(tt.version)
+		if result != tt.expected {
+			t.Errorf("tlsVersionString(0x%04x) = %q, expected %q", tt.version, result, tt.expected)
+		}
+	}
+}
+
+func TestTLSCipherString(t *testing.T) {
+	tests := []struct {
+		cipher   uint16
+		expected string
+	}{
+		{0x1301, "TLS_AES_128_GCM_SHA256"},
+		{0x1302, "TLS_AES_256_GCM_SHA384"},
+		{0x1303, "TLS_CHACHA20_POLY1305_SHA256"},
+		{0xc02b, "TLS_ECDHE_ECDSA_WITH_AES_128_GCM_SHA256"},
+		{0xc02f, "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256"},
+		{0x0000, "Unknown"},
+	}
+
+	for _, tt := range tests {
+		result := tlsCipherString(tt.cipher)
+		if result != tt.expected {
+			t.Errorf("tlsCipherString(0x%04x) = %q, expected %q", tt.cipher, result, tt.expected)
+		}
+	}
+}
+
+func TestComputePartialJA3(t *testing.T) {
+	result := computePartialJA3(0x0303, 0xc02f)
+	// Should be a hex string of combined version and cipher
+	if len(result) != 8 {
+		t.Errorf("expected 8 char hex string, got %q (len=%d)", result, len(result))
+	}
+}
+
+func TestComputeJA4FromContext(t *testing.T) {
+	tests := []struct {
+		name     string
+		ctx      *RequestContext
+		contains string
+	}{
+		{
+			name: "minimal context",
+			ctx: &RequestContext{
+				TLSVersion: 0x0304,
+			},
+			contains: "t13",
+		},
+		{
+			name: "with JA4 fields",
+			ctx: &RequestContext{
+				TLSVersion:   0x0303,
+				JA4Protocol:  "t",
+				JA4SNI:       true,
+				JA4Ciphers:   []uint16{0x1301, 0x1302},
+				JA4Exts:      []uint16{0x001b},
+				JA4ALPN:      "h2",
+				JA4Ver:       0x0304,
+			},
+			contains: "t13d02",
+		},
+		{
+			name: "QUIC protocol",
+			ctx: &RequestContext{
+				TLSVersion:   0x0304,
+				JA4Protocol:  "q",
+				JA4Ciphers:   []uint16{0x1301},
+				JA4ALPN:      "h3",
+			},
+			contains: "q13",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := computeJA4FromContext(tt.ctx)
+			if !strings.Contains(result, tt.contains) {
+				t.Errorf("computeJA4FromContext() = %q, expected to contain %q", result, tt.contains)
+			}
+		})
+	}
+}
+
+func TestNewEvent_WithTLS(t *testing.T) {
+	// Create a request with TLS info
+	req := httptest.NewRequest("GET", "https://example.com/test", nil)
+	req.TLS = &tls.ConnectionState{
+		Version:           0x0303,
+		CipherSuite:       0xc02f,
+		ServerName:        "example.com",
+		NegotiatedProtocol: "h2",
+	}
+
+	ctx := AcquireContext(req, 1, 1024*1024)
+	ctx.JA4Ciphers = []uint16{0x1301, 0x1302}
+	ctx.JA4Exts = []uint16{0x001b}
+	ctx.JA4ALPN = "h2"
+	ctx.JA4Protocol = "t"
+	ctx.JA4SNI = true
+	ctx.JA4Ver = 0x0304
+	defer ReleaseContext(ctx)
+
+	event := NewEvent(ctx, 200)
+
+	if event.TLSVersion != "TLS 1.2" {
+		t.Errorf("expected TLS 1.2, got %q", event.TLSVersion)
+	}
+	if event.TLSCipherSuite != "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256" {
+		t.Errorf("expected TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256, got %q", event.TLSCipherSuite)
+	}
+	if event.ServerName != "example.com" {
+		t.Errorf("expected ServerName example.com, got %q", event.ServerName)
+	}
+	if event.JA4Fingerprint == "" {
+		t.Error("expected JA4 fingerprint to be set")
+	}
 }

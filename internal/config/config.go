@@ -117,15 +117,19 @@ type GeoIPConfig struct {
 
 // WAFConfig is the top-level container for all WAF protection settings.
 type WAFConfig struct {
-	IPACL        IPACLConfig        `yaml:"ip_acl"`
-	CustomRules  CustomRulesConfig  `yaml:"custom_rules"`
-	GeoIP        GeoIPConfig        `yaml:"geoip"`
-	RateLimit    RateLimitConfig    `yaml:"rate_limit"`
-	Sanitizer    SanitizerConfig    `yaml:"sanitizer"`
-	Detection    DetectionConfig    `yaml:"detection"`
-	BotDetection BotDetectionConfig `yaml:"bot_detection"`
-	Challenge    ChallengeConfig    `yaml:"challenge"`
-	Response     ResponseConfig     `yaml:"response"`
+	IPACL         IPACLConfig         `yaml:"ip_acl"`
+	CustomRules   CustomRulesConfig   `yaml:"custom_rules"`
+	GeoIP         GeoIPConfig         `yaml:"geoip"`
+	ThreatIntel   ThreatIntelConfig   `yaml:"threat_intel"`
+	CORS          CORSConfig          `yaml:"cors"`
+	RateLimit     RateLimitConfig     `yaml:"rate_limit"`
+	ATOProtection ATOProtectionConfig `yaml:"ato_protection"`
+	APISecurity   APISecurityConfig   `yaml:"api_security"`
+	Sanitizer     SanitizerConfig     `yaml:"sanitizer"`
+	Detection     DetectionConfig     `yaml:"detection"`
+	BotDetection  BotDetectionConfig  `yaml:"bot_detection"`
+	Challenge     ChallengeConfig     `yaml:"challenge"`
+	Response      ResponseConfig      `yaml:"response"`
 }
 
 // IPACLConfig controls IP-based allow/deny lists and automatic banning.
@@ -318,4 +322,134 @@ type EventsConfig struct {
 	Storage   string `yaml:"storage"` // "memory", "file"
 	MaxEvents int    `yaml:"max_events"`
 	FilePath  string `yaml:"file_path"`
+}
+
+// ThreatIntelConfig controls threat intelligence feed checking.
+type ThreatIntelConfig struct {
+	Enabled        bool              `yaml:"enabled"`
+	IPReputation   IPReputationConfig   `yaml:"ip_reputation"`
+	DomainRep      DomainReputationConfig `yaml:"domain_reputation"`
+	CacheSize      int               `yaml:"cache_size"`
+	CacheTTL       time.Duration     `yaml:"cache_ttl"`
+	Feeds          []ThreatFeedConfig `yaml:"feeds"`
+}
+
+// IPReputationConfig controls IP reputation checking.
+type IPReputationConfig struct {
+	Enabled        bool `yaml:"enabled"`
+	BlockMalicious bool `yaml:"block_malicious"`
+	ScoreThreshold int  `yaml:"score_threshold"`
+}
+
+// DomainReputationConfig controls domain reputation checking.
+type DomainReputationConfig struct {
+	Enabled        bool `yaml:"enabled"`
+	BlockMalicious bool `yaml:"block_malicious"`
+	CheckRedirects bool `yaml:"check_redirects"`
+}
+
+// ThreatFeedConfig configures a threat intelligence feed source.
+type ThreatFeedConfig struct {
+	Type     string        `yaml:"type"`     // "file" or "url"
+	Path     string        `yaml:"path"`     // File path for type="file"
+	URL      string        `yaml:"url"`      // URL for type="url"
+	Refresh  time.Duration `yaml:"refresh"`  // Refresh interval
+	Format   string        `yaml:"format"`   // "json", "jsonl", "csv"
+}
+
+// CORSConfig controls Cross-Origin Resource Sharing validation.
+type CORSConfig struct {
+	Enabled               bool     `yaml:"enabled"`
+	AllowOrigins          []string `yaml:"allow_origins"`
+	AllowMethods          []string `yaml:"allow_methods"`
+	AllowHeaders          []string `yaml:"allow_headers"`
+	ExposeHeaders         []string `yaml:"expose_headers"`
+	AllowCredentials      bool     `yaml:"allow_credentials"`
+	MaxAgeSeconds         int      `yaml:"max_age_seconds"`
+	StrictMode            bool     `yaml:"strict_mode"`
+	PreflightCacheSeconds int      `yaml:"preflight_cache_seconds"`
+}
+
+// ATOProtectionConfig controls Account Takeover Protection.
+type ATOProtectionConfig struct {
+	Enabled        bool                    `yaml:"enabled"`
+	LoginPaths     []string                `yaml:"login_paths"`
+	BruteForce     BruteForceConfig        `yaml:"brute_force"`
+	CredStuffing   CredentialStuffingConfig `yaml:"credential_stuffing"`
+	PasswordSpray  PasswordSprayConfig     `yaml:"password_spray"`
+	Travel         ImpossibleTravelConfig  `yaml:"impossible_travel"`
+	GeoDBPath      string                  `yaml:"geodb_path"`
+}
+
+// BruteForceConfig controls brute force detection.
+type BruteForceConfig struct {
+	Enabled             bool          `yaml:"enabled"`
+	Window              time.Duration `yaml:"window"`
+	MaxAttemptsPerIP    int           `yaml:"max_attempts_per_ip"`
+	MaxAttemptsPerEmail int           `yaml:"max_attempts_per_email"`
+	BlockDuration       time.Duration `yaml:"block_duration"`
+}
+
+// CredentialStuffingConfig controls credential stuffing detection.
+type CredentialStuffingConfig struct {
+	Enabled              bool          `yaml:"enabled"`
+	DistributedThreshold int           `yaml:"distributed_threshold"`
+	Window               time.Duration `yaml:"window"`
+	BlockDuration        time.Duration `yaml:"block_duration"`
+}
+
+// PasswordSprayConfig controls password spray detection.
+type PasswordSprayConfig struct {
+	Enabled       bool          `yaml:"enabled"`
+	Threshold     int           `yaml:"threshold"`
+	Window        time.Duration `yaml:"window"`
+	BlockDuration time.Duration `yaml:"block_duration"`
+}
+
+// ImpossibleTravelConfig controls impossible travel detection.
+type ImpossibleTravelConfig struct {
+	Enabled       bool          `yaml:"enabled"`
+	MaxDistanceKm float64       `yaml:"max_distance_km"`
+	MaxTimeHours  float64       `yaml:"max_time_hours"`
+	BlockDuration time.Duration `yaml:"block_duration"`
+}
+
+// APISecurityConfig controls API authentication and authorization.
+type APISecurityConfig struct {
+	Enabled     bool            `yaml:"enabled"`
+	JWT         JWTConfig       `yaml:"jwt"`
+	APIKeys     APIKeysConfig   `yaml:"api_keys"`
+	SkipPaths   []string        `yaml:"skip_paths"`
+	HeaderName  string          `yaml:"header_name"`
+	QueryParam  string          `yaml:"query_param"`
+}
+
+// JWTConfig controls JWT validation.
+type JWTConfig struct {
+	Enabled          bool     `yaml:"enabled"`
+	Issuer           string   `yaml:"issuer"`
+	Audience         string   `yaml:"audience"`
+	Algorithms       []string `yaml:"algorithms"`
+	PublicKeyFile    string   `yaml:"public_key_file"`
+	JWKSURL          string   `yaml:"jwks_url"`
+	ClockSkewSeconds int      `yaml:"clock_skew_seconds"`
+	PublicKeyPEM     string   `yaml:"public_key_pem"`
+}
+
+// APIKeysConfig controls API key authentication.
+type APIKeysConfig struct {
+	Enabled    bool           `yaml:"enabled"`
+	HeaderName string         `yaml:"header_name"`
+	QueryParam string         `yaml:"query_param"`
+	Keys       []APIKeyConfig `yaml:"keys"`
+}
+
+// APIKeyConfig represents a single API key configuration.
+type APIKeyConfig struct {
+	Name         string   `yaml:"name"`
+	KeyHash      string   `yaml:"key_hash"`
+	KeyPrefix    string   `yaml:"key_prefix"`
+	RateLimit    int      `yaml:"rate_limit"`
+	AllowedPaths []string `yaml:"allowed_paths"`
+	Enabled      bool     `yaml:"enabled"`
 }
