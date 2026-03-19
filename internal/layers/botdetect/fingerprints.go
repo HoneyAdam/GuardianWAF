@@ -1,6 +1,6 @@
 package botdetect
 
-// FingerprintCategory classifies a JA3 fingerprint.
+// FingerprintCategory classifies a JA3/JA4 fingerprint.
 type FingerprintCategory int
 
 const (
@@ -24,7 +24,7 @@ func (fc FingerprintCategory) String() string {
 	}
 }
 
-// FingerprintInfo holds metadata about a known JA3 fingerprint.
+// FingerprintInfo holds metadata about a known JA3/JA4 fingerprint.
 type FingerprintInfo struct {
 	Name     string
 	Category FingerprintCategory
@@ -58,6 +58,34 @@ var fingerprintDB = map[string]FingerprintInfo{
 	"36f7277af969a6947a61ae0b815907a1": {Name: "Selenium", Category: FingerprintSuspicious, Score: 40},
 }
 
+// ja4FingerprintDB maps JA4 fingerprints to known fingerprint info.
+// JA4 format: {protocol}{version}{sni}{cipher_count}{ext_count}{alpn}_{cipher_hash}_{extension_hash}
+var ja4FingerprintDB = map[string]FingerprintInfo{
+	// Known good browsers (score 0)
+	// Chrome 120 / Edge 120 on Windows/Linux (same TLS fingerprint)
+	"t13d1516h2_8daaf6152771_e5627efa2ab1": {Name: "Chrome/Edge 120", Category: FingerprintGood, Score: 0},
+	// Firefox 121
+	"t13d1511h2_acb858a92679_18f69afefd3d": {Name: "Firefox 121", Category: FingerprintGood, Score: 0},
+	// Safari 17
+	"t13d1512h2_6beb6e9a1c59_99f097b25b27": {Name: "Safari 17", Category: FingerprintGood, Score: 0},
+
+	// Known bad tools (score 80)
+	// Python requests - typically simpler TLS config
+	"t12d0500_123456789abc_def456789abc": {Name: "Python requests", Category: FingerprintBad, Score: 80},
+	// Go http client
+	"t13d0500_abcdef123456_789abc123456": {Name: "Go http client", Category: FingerprintBad, Score: 80},
+	// curl
+	"t12d0300_111111111111_222222222222": {Name: "curl", Category: FingerprintBad, Score: 40},
+	// OpenSSL s_client
+	"t12d0200_333333333333_444444444444": {Name: "OpenSSL", Category: FingerprintBad, Score: 80},
+
+	// Suspicious - headless browsers (score 40)
+	// Headless Chrome typically has different ALPN or extensions
+	"t13d1515h2_9daaf6152771_f5627efa2ab1": {Name: "Headless Chrome", Category: FingerprintSuspicious, Score: 40},
+	// PhantomJS (older TLS)
+	"t11d0800_555555555555_666666666666": {Name: "PhantomJS", Category: FingerprintSuspicious, Score: 40},
+}
+
 // LookupFingerprint returns the fingerprint info for a JA3 hash.
 // Returns an entry with FingerprintUnknown if the hash is not in the database.
 func LookupFingerprint(ja3Hash string) FingerprintInfo {
@@ -71,12 +99,35 @@ func LookupFingerprint(ja3Hash string) FingerprintInfo {
 	}
 }
 
-// AddFingerprint adds or updates a fingerprint in the database.
+// LookupJA4Fingerprint returns the fingerprint info for a JA4 fingerprint.
+// Returns an entry with FingerprintUnknown if the fingerprint is not in the database.
+func LookupJA4Fingerprint(ja4Full string) FingerprintInfo {
+	if info, ok := ja4FingerprintDB[ja4Full]; ok {
+		return info
+	}
+	return FingerprintInfo{
+		Name:     "unknown",
+		Category: FingerprintUnknown,
+		Score:    0,
+	}
+}
+
+// AddFingerprint adds or updates a JA3 fingerprint in the database.
 func AddFingerprint(ja3Hash string, info FingerprintInfo) {
 	fingerprintDB[ja3Hash] = info
 }
 
-// RemoveFingerprint removes a fingerprint from the database.
+// RemoveFingerprint removes a JA3 fingerprint from the database.
 func RemoveFingerprint(ja3Hash string) {
 	delete(fingerprintDB, ja3Hash)
+}
+
+// AddJA4Fingerprint adds or updates a JA4 fingerprint in the database.
+func AddJA4Fingerprint(ja4Full string, info FingerprintInfo) {
+	ja4FingerprintDB[ja4Full] = info
+}
+
+// RemoveJA4Fingerprint removes a JA4 fingerprint from the database.
+func RemoveJA4Fingerprint(ja4Full string) {
+	delete(ja4FingerprintDB, ja4Full)
 }

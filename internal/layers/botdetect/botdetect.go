@@ -180,8 +180,42 @@ func (l *Layer) Process(ctx *engine.RequestContext) engine.LayerResult {
 }
 
 // analyzeTLSFingerprint checks the TLS fingerprint against the database.
+// It uses JA4 when full ClientHello data is available, otherwise falls back to JA3.
 func (l *Layer) analyzeTLSFingerprint(ctx *engine.RequestContext) (int, []engine.Finding) {
-	// Build a JA3 fingerprint from what we have in context.
+	// Try JA4 first if we have full ClientHello data
+	if len(ctx.JA4Ciphers) > 0 {
+		ja4fp := ComputeJA4(JA4Params{
+			Protocol:         ctx.JA4Protocol,
+			TLSVersion:       ctx.TLSVersion,
+			SNI:              ctx.JA4SNI || ctx.ServerName != "",
+			CipherSuites:     ctx.JA4Ciphers,
+			Extensions:       ctx.JA4Exts,
+			ALPN:             ctx.JA4ALPN,
+			SignatureAlgs:    ctx.JA4SigAlgs,
+			SupportedVersion: ctx.JA4Ver,
+		})
+		info := LookupJA4Fingerprint(ja4fp.Full)
+
+		if info.Category != FingerprintUnknown && info.Score > 0 {
+			severity := engine.SeverityMedium
+			if info.Category == FingerprintBad {
+				severity = engine.SeverityHigh
+			}
+			return info.Score, []engine.Finding{{
+				DetectorName: "botdetect-ja4",
+				Category:     "bot",
+				Severity:     severity,
+				Score:        info.Score,
+				Description:  "TLS JA4 fingerprint matched: " + info.Name + " (" + info.Category.String() + ")",
+				MatchedValue: ja4fp.Full,
+				Location:     "tls",
+				Confidence:   0.9, // Higher confidence for JA4
+			}}
+		}
+		// If JA4 unknown, continue to try JA3
+	}
+
+	// Fall back to JA3 fingerprint from limited TLS data
 	// In a real scenario, full ClientHello parameters would be available.
 	// Here we use the TLS version and cipher suite as partial fingerprint data.
 	fp := ComputeJA3(ctx.TLSVersion, []uint16{ctx.TLSCipherSuite}, nil, nil, nil)
@@ -201,7 +235,7 @@ func (l *Layer) analyzeTLSFingerprint(ctx *engine.RequestContext) (int, []engine
 			Category:     "bot",
 			Severity:     severity,
 			Score:        info.Score,
-			Description:  "TLS fingerprint matched: " + info.Name + " (" + info.Category.String() + ")",
+			Description:  "TLS JA3 fingerprint matched: " + info.Name + " (" + info.Category.String() + ")",
 			MatchedValue: fp.Hash,
 			Location:     "tls",
 			Confidence:   0.8,

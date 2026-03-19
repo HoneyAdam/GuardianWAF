@@ -52,6 +52,16 @@ type RequestContext struct {
 	TLSCipherSuite uint16
 	ServerName     string
 
+	// JA4 TLS fingerprinting data (populated by custom TLS handler if available)
+	// These fields enable full JA4 fingerprint computation
+	JA4Ciphers  []uint16 // TLS cipher suites from ClientHello
+	JA4Exts     []uint16 // TLS extensions from ClientHello
+	JA4ALPN     string   // First ALPN value
+	JA4SigAlgs  []uint16 // Signature algorithms in original order
+	JA4Protocol string   // "t" (TLS), "q" (QUIC), or "d" (DTLS)
+	JA4SNI      bool     // Whether SNI extension exists
+	JA4Ver      uint16   // Highest TLS version from supported_versions extension
+
 	// Internal
 	bodyRead bool
 }

@@ -20,6 +20,7 @@ import (
 	"github.com/guardianwaf/guardianwaf/internal/config"
 	"github.com/guardianwaf/guardianwaf/internal/engine"
 	"github.com/guardianwaf/guardianwaf/internal/events"
+	"github.com/guardianwaf/guardianwaf/internal/layers/ipacl"
 )
 
 // --- isValidIPOrCIDR ---
@@ -281,6 +282,12 @@ func newTestAdapter(t *testing.T) *mcpEngineAdapter {
 	if err != nil {
 		t.Fatalf("NewEngine error: %v", err)
 	}
+	// Add IP ACL layer for testing
+	ipaclLayer, err := ipacl.NewLayer(ipacl.Config{Enabled: true})
+	if err != nil {
+		t.Fatalf("NewLayer ipacl error: %v", err)
+	}
+	eng.AddLayer(engine.OrderedLayer{Layer: ipaclLayer, Order: 100})
 	t.Cleanup(func() { eng.Close() })
 	return &mcpEngineAdapter{engine: eng, cfg: cfg}
 }

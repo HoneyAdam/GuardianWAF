@@ -1224,26 +1224,45 @@ func (a *mcpEngineAdapter) SetMode(mode string) error {
 }
 
 func (a *mcpEngineAdapter) AddWhitelist(ip string) error {
-	// Validate IP/CIDR
 	if !isValidIPOrCIDR(ip) {
 		return fmt.Errorf("invalid IP or CIDR: %s", ip)
 	}
-	return nil
+	layer := a.engine.FindLayer("ipacl")
+	if layer == nil {
+		return fmt.Errorf("IP ACL layer not available")
+	}
+	ipaclLayer := layer.(*ipacl.Layer)
+	return ipaclLayer.AddWhitelist(ip)
 }
 
 func (a *mcpEngineAdapter) RemoveWhitelist(ip string) error {
-	return nil
+	layer := a.engine.FindLayer("ipacl")
+	if layer == nil {
+		return fmt.Errorf("IP ACL layer not available")
+	}
+	ipaclLayer := layer.(*ipacl.Layer)
+	return ipaclLayer.RemoveWhitelist(ip)
 }
 
 func (a *mcpEngineAdapter) AddBlacklist(ip string) error {
 	if !isValidIPOrCIDR(ip) {
 		return fmt.Errorf("invalid IP or CIDR: %s", ip)
 	}
-	return nil
+	layer := a.engine.FindLayer("ipacl")
+	if layer == nil {
+		return fmt.Errorf("IP ACL layer not available")
+	}
+	ipaclLayer := layer.(*ipacl.Layer)
+	return ipaclLayer.AddBlacklist(ip)
 }
 
 func (a *mcpEngineAdapter) RemoveBlacklist(ip string) error {
-	return nil
+	layer := a.engine.FindLayer("ipacl")
+	if layer == nil {
+		return fmt.Errorf("IP ACL layer not available")
+	}
+	ipaclLayer := layer.(*ipacl.Layer)
+	return ipaclLayer.RemoveBlacklist(ip)
 }
 
 func (a *mcpEngineAdapter) AddRateLimit(rule interface{}) error {
