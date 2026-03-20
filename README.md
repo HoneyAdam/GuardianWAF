@@ -2,6 +2,10 @@
 
 > Zero-dependency WAF. One binary. Total protection.
 
+<p align="center">
+  <img src="guardian_waf_.jpeg" alt="GuardianWAF" width="100%">
+</p>
+
 [![Go Version](https://img.shields.io/github/go-mod/go-version/guardianwaf/guardianwaf?style=flat-square)](https://go.dev/)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
 [![Go Report Card](https://goreportcard.com/badge/github.com/guardianwaf/guardianwaf?style=flat-square)](https://goreportcard.com/report/github.com/guardianwaf/guardianwaf)
