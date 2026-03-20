@@ -103,7 +103,7 @@ func New(eng *engine.Engine, store events.EventStore, apiKey string) *Dashboard 
 	d.mux.HandleFunc("GET /api/v1/docker/services", d.authWrap(d.handleDockerServices))
 
 	// SPA serving — React build output from dist/ with fallback to legacy static/
-	d.mux.HandleFunc("GET /assets/", d.authWrap(d.handleDistAssets)) // Vite hashed assets
+	d.mux.HandleFunc("GET /assets/", d.handleDistAssets) // Vite hashed assets — public (content-hashed, no secrets)
 	d.mux.HandleFunc("GET /config", d.authWrap(d.handleSPA))        // SPA routes
 	d.mux.HandleFunc("GET /routing", d.authWrap(d.handleSPA))       // SPA routes
 	d.mux.HandleFunc("GET /logs", d.authWrap(d.handleSPA))          // SPA routes
