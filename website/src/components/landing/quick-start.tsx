@@ -67,11 +67,44 @@ const dryRunCode = `# Enable dry-run mode to monitor without blocking
 #
 # Perfect for tuning before going live.`
 
+const dockerDiscoveryCode = `# docker-compose.yml — zero-config auto-discovery
+services:
+  guardianwaf:
+    image: guardianwaf/guardianwaf:latest
+    ports:
+      - "80:8088"
+      - "9443:9443"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  # Just add labels — GuardianWAF discovers automatically
+  api:
+    image: my-api:latest
+    labels:
+      gwaf.enable: "true"
+      gwaf.host: "api.example.com"
+      gwaf.upstream: "api-pool"
+      gwaf.health.path: "/healthz"
+
+  web:
+    image: nginx:alpine
+    labels:
+      gwaf.enable: "true"
+      gwaf.host: "www.example.com"
+
+# Scale instantly:
+# docker compose up -d --scale api=5`
+
 const tabs = [
   {
     id: 'standalone',
     label: 'Standalone',
     content: <CodeBlock code={standaloneCode} language="bash" filename="Terminal" />,
+  },
+  {
+    id: 'docker',
+    label: 'Docker Discovery',
+    content: <CodeBlock code={dockerDiscoveryCode} language="yaml" filename="docker-compose.yml" />,
   },
   {
     id: 'library',

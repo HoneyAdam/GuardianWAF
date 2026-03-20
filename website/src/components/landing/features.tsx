@@ -15,6 +15,11 @@ import {
   Key,
   AlertTriangle,
   Route,
+  Brain,
+  Container,
+  Bell,
+  Activity,
+  GitBranch,
 } from 'lucide-react'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 
@@ -97,7 +102,32 @@ const features = [
   {
     icon: Search,
     title: 'Deep Inspection',
-    description: 'Custom tokenizer decomposes payloads into semantic tokens. State-machine analysis beyond regex for fewer false positives.',
+    description: 'Custom tokenizer decomposes payloads into semantic tokens. State-machine analysis with gzip/deflate body decompression.',
+  },
+  {
+    icon: Brain,
+    title: 'AI Threat Analysis',
+    description: 'Background LLM analysis of suspicious events. 400+ AI providers from models.dev. Auto-block IPs with cost control limits.',
+  },
+  {
+    icon: Container,
+    title: 'Docker Auto-Discovery',
+    description: 'Automatic backend discovery via container labels (gwaf.*). Zero-config service mesh with event-driven hot-reload.',
+  },
+  {
+    icon: Bell,
+    title: 'Webhook Alerting',
+    description: 'Real-time notifications to Slack, Discord, or custom HTTP endpoints. Per-IP cooldown, event filtering, and min-score thresholds.',
+  },
+  {
+    icon: Activity,
+    title: 'Prometheus Metrics',
+    description: 'Built-in /metrics endpoint for Grafana integration. Request counters, block rates, latency, and /healthz for K8s probes.',
+  },
+  {
+    icon: GitBranch,
+    title: 'Routing Topology',
+    description: 'Interactive React Flow graph visualizing the full request path: clients → WAF → vhosts → routes → upstreams → targets.',
   },
 ]
 

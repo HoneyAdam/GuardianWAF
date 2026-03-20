@@ -4,8 +4,8 @@ import { Button } from '@/components/ui/button'
 const stats = [
   { value: '0', label: 'Dependencies' },
   { value: '<1ms', label: 'p99 Latency' },
-  { value: '6', label: 'Detectors' },
-  { value: '4', label: 'LB Strategies' },
+  { value: '13', label: 'Security Layers' },
+  { value: '400+', label: 'AI Providers' },
   { value: '15', label: 'MCP Tools' },
 ]
 
@@ -37,9 +37,9 @@ export function Hero() {
 
           {/* Description */}
           <p className="mx-auto mt-6 max-w-2xl text-lg sm:text-xl text-muted leading-relaxed">
-            Production-grade WAF and reverse proxy in pure Go. Multi-domain routing,
-            TLS termination, load balancing, JS challenge, and real-time dashboard.
-            Zero dependencies. Single binary. Three deployment modes.
+            Production-grade WAF, reverse proxy, and service gateway in pure Go.
+            AI threat analysis, Docker auto-discovery, webhook alerting, Prometheus metrics,
+            and interactive dashboard. Zero dependencies. Single binary.
           </p>
 
           {/* CTA Buttons */}

@@ -102,6 +102,36 @@ const steps = [
     borderColor: 'border-green-400/30',
     activeColor: 'bg-green-400/20 border-green-400/60',
   },
+  {
+    id: 'rules',
+    label: 'Custom Rules',
+    shortLabel: 'RU',
+    description: 'User-defined rules with geo-aware conditions. Field matching (path, IP, country, header), multiple operators, dashboard CRUD.',
+    color: 'text-lime-400',
+    bgColor: 'bg-lime-400/10',
+    borderColor: 'border-lime-400/30',
+    activeColor: 'bg-lime-400/20 border-lime-400/60',
+  },
+  {
+    id: 'challenge',
+    label: 'JS Challenge',
+    shortLabel: 'CH',
+    description: 'SHA-256 proof-of-work challenge for suspicious requests (score 40-79). Stops bots, passes browsers. Configurable difficulty.',
+    color: 'text-yellow-400',
+    bgColor: 'bg-yellow-400/10',
+    borderColor: 'border-yellow-400/30',
+    activeColor: 'bg-yellow-400/20 border-yellow-400/60',
+  },
+  {
+    id: 'ai',
+    label: 'AI Analysis',
+    shortLabel: 'AI',
+    description: 'Background LLM-powered threat analysis. Batch processing of suspicious events. Auto-block IPs. 400+ providers via models.dev.',
+    color: 'text-violet-400',
+    bgColor: 'bg-violet-400/10',
+    borderColor: 'border-violet-400/30',
+    activeColor: 'bg-violet-400/20 border-violet-400/60',
+  },
 ]
 
 export function Architecture() {
@@ -112,10 +142,10 @@ export function Architecture() {
       <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
         <div className="text-center mb-12 sm:mb-16">
           <h2 id="architecture-heading" className="text-3xl sm:text-4xl font-bold text-foreground">
-            10-Layer Security Pipeline
+            13-Layer Security Pipeline
           </h2>
           <p className="mt-4 text-lg text-muted max-w-2xl mx-auto">
-            Every request flows through ten modular layers, each designed for sub-millisecond processing. Zero external dependencies.
+            Every request flows through thirteen modular layers with AI-powered background analysis. Zero external dependencies.
           </p>
         </div>
 
