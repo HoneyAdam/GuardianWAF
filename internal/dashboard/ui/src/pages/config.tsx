@@ -959,6 +959,115 @@ export default function ConfigPage() {
         </div>
       </Section>
 
+      {/* Docker Auto-Discovery */}
+      <Section title="Docker Auto-Discovery">
+        <div className="space-y-3">
+          <FieldRow label="Enable Docker Discovery">
+            <Switch
+              checked={val('docker.enabled', false) as boolean}
+              onCheckedChange={(v) => update('docker.enabled', v)}
+            />
+          </FieldRow>
+          <FieldRow label="Socket Path">
+            <Input
+              value={val('docker.socket_path', '/var/run/docker.sock') as string}
+              onChange={(e) => update('docker.socket_path', e.target.value)}
+              className="w-64"
+              placeholder="/var/run/docker.sock"
+            />
+          </FieldRow>
+          <FieldRow label="Label Prefix">
+            <Input
+              value={val('docker.label_prefix', 'gwaf') as string}
+              onChange={(e) => update('docker.label_prefix', e.target.value)}
+              className="w-32"
+              placeholder="gwaf"
+            />
+          </FieldRow>
+          <FieldRow label="Poll Interval">
+            <Input
+              value={val('docker.poll_interval', '5s') as string}
+              onChange={(e) => update('docker.poll_interval', e.target.value)}
+              className="w-24"
+              placeholder="5s"
+            />
+          </FieldRow>
+          <FieldRow label="Docker Network">
+            <Input
+              value={val('docker.network', 'bridge') as string}
+              onChange={(e) => update('docker.network', e.target.value)}
+              className="w-32"
+              placeholder="bridge"
+            />
+          </FieldRow>
+          <div className="text-xs text-muted-foreground">
+            Add <code className="px-1 bg-muted rounded">gwaf.enable=true</code> label to Docker containers for automatic backend discovery.
+            See <a href="https://guardianwaf.com/docs/docker-discovery" className="underline">Docker Discovery docs</a>.
+          </div>
+        </div>
+      </Section>
+
+      {/* AI Threat Analysis */}
+      <Section title="AI Threat Analysis">
+        <div className="space-y-3">
+          <FieldRow label="Enable AI Analysis">
+            <Switch
+              checked={val('ai_analysis.enabled', false) as boolean}
+              onCheckedChange={(v) => update('ai_analysis.enabled', v)}
+            />
+          </FieldRow>
+          <FieldRow label="Batch Size">
+            <Input
+              type="number"
+              value={val('ai_analysis.batch_size', 20) as number}
+              onChange={(e) => update('ai_analysis.batch_size', parseInt(e.target.value) || 20)}
+              className="w-24"
+            />
+          </FieldRow>
+          <FieldRow label="Batch Interval">
+            <Input
+              value={val('ai_analysis.batch_interval', '60s') as string}
+              onChange={(e) => update('ai_analysis.batch_interval', e.target.value)}
+              className="w-24"
+              placeholder="60s"
+            />
+          </FieldRow>
+          <FieldRow label="Min Score for AI">
+            <Input
+              type="number"
+              value={val('ai_analysis.min_score', 25) as number}
+              onChange={(e) => update('ai_analysis.min_score', parseInt(e.target.value) || 25)}
+              className="w-24"
+            />
+          </FieldRow>
+          <FieldRow label="Auto-Block by AI">
+            <Switch
+              checked={val('ai_analysis.auto_block', false) as boolean}
+              onCheckedChange={(v) => update('ai_analysis.auto_block', v)}
+            />
+          </FieldRow>
+          <div className="text-xs text-muted-foreground">
+            Configure AI provider and API key in the <a href="/ai" className="underline">AI Analysis page</a>.
+          </div>
+        </div>
+      </Section>
+
+      {/* Alerting / Webhooks */}
+      <Section title="Alerting / Webhooks">
+        <div className="space-y-3">
+          <FieldRow label="Enable Alerting">
+            <Switch
+              checked={val('alerting.enabled', false) as boolean}
+              onCheckedChange={(v) => update('alerting.enabled', v)}
+            />
+          </FieldRow>
+          <div className="text-xs text-muted-foreground">
+            Configure webhooks (Slack, Discord, custom HTTP) in the YAML config file.
+            Alerts fire on block/challenge events with configurable cooldown per IP.
+          </div>
+        </div>
+      </Section>
+
       {/* Sticky Save Bar */}
       {dirty && (
         <div className="fixed bottom-0 left-0 right-0 z-50 border-t border-border bg-card/95 backdrop-blur-sm">

@@ -659,6 +659,23 @@ func (d *Dashboard) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 				},
 			},
 		},
+		"docker": map[string]any{
+			"enabled":       cfg.Docker.Enabled,
+			"socket_path":   cfg.Docker.SocketPath,
+			"label_prefix":  cfg.Docker.LabelPrefix,
+			"poll_interval": cfg.Docker.PollInterval.String(),
+			"network":       cfg.Docker.Network,
+		},
+		"ai_analysis": map[string]any{
+			"enabled":    cfg.WAF.AIAnalysis.Enabled,
+			"batch_size": cfg.WAF.AIAnalysis.BatchSize,
+			"min_score":  cfg.WAF.AIAnalysis.MinScore,
+			"auto_block": cfg.WAF.AIAnalysis.AutoBlock,
+		},
+		"alerting": map[string]any{
+			"enabled":       cfg.Alerting.Enabled,
+			"webhook_count": len(cfg.Alerting.Webhooks),
+		},
 	})
 }
 
@@ -709,6 +726,45 @@ func (d *Dashboard) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 	// Apply WAF section patches
 	if waf, ok := patch["waf"].(map[string]any); ok {
 		applyWAFPatch(cfg, waf)
+	}
+
+	// Apply Docker section patches
+	if docker, ok := patch["docker"].(map[string]any); ok {
+		if v, ok := docker["enabled"].(bool); ok {
+			cfg.Docker.Enabled = v
+		}
+		if v, ok := docker["socket_path"].(string); ok {
+			cfg.Docker.SocketPath = v
+		}
+		if v, ok := docker["label_prefix"].(string); ok {
+			cfg.Docker.LabelPrefix = v
+		}
+		if v, ok := docker["network"].(string); ok {
+			cfg.Docker.Network = v
+		}
+	}
+
+	// Apply AI Analysis section patches
+	if ai, ok := patch["ai_analysis"].(map[string]any); ok {
+		if v, ok := ai["enabled"].(bool); ok {
+			cfg.WAF.AIAnalysis.Enabled = v
+		}
+		if v, ok := ai["batch_size"].(float64); ok {
+			cfg.WAF.AIAnalysis.BatchSize = int(v)
+		}
+		if v, ok := ai["min_score"].(float64); ok {
+			cfg.WAF.AIAnalysis.MinScore = int(v)
+		}
+		if v, ok := ai["auto_block"].(bool); ok {
+			cfg.WAF.AIAnalysis.AutoBlock = v
+		}
+	}
+
+	// Apply Alerting section patches
+	if alerting, ok := patch["alerting"].(map[string]any); ok {
+		if v, ok := alerting["enabled"].(bool); ok {
+			cfg.Alerting.Enabled = v
+		}
 	}
 
 	if err := d.engine.Reload(cfg); err != nil {
