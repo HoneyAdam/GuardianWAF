@@ -119,6 +119,11 @@ func (d *Dashboard) Handler() http.Handler {
 	return d.mux
 }
 
+// Mux returns the underlying ServeMux for registering additional routes.
+func (d *Dashboard) Mux() *http.ServeMux {
+	return d.mux
+}
+
 // SSE returns the SSE broadcaster for publishing events from outside.
 func (d *Dashboard) SSE() *SSEBroadcaster {
 	return d.sse

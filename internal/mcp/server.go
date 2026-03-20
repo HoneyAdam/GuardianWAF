@@ -4,6 +4,7 @@ package mcp
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -78,15 +79,18 @@ type Server struct {
 	serverVersion string
 }
 
-// NewServer creates a new MCP server reading from reader and writing to writer.
+// NewServer creates a new MCP server. Pass nil reader/writer for SSE-only mode.
 func NewServer(reader io.Reader, writer io.Writer) *Server {
-	return &Server{
-		reader:        bufio.NewReader(reader),
+	s := &Server{
 		writer:        writer,
 		tools:         make(map[string]ToolHandler),
 		serverName:    "guardianwaf",
 		serverVersion: "1.0.0",
 	}
+	if reader != nil {
+		s.reader = bufio.NewReader(reader)
+	}
+	return s
 }
 
 // SetEngine sets the engine interface for tool handlers.
@@ -275,10 +279,42 @@ func (s *Server) writeResponse(resp JSONRPCResponse) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	if s.writer == nil {
+		return
+	}
 	data, err := json.Marshal(resp)
 	if err != nil {
 		return
 	}
 	data = append(data, '\n')
 	_, _ = s.writer.Write(data)
+}
+
+// HandleRequestJSON processes a JSON-RPC request and returns the response.
+// Thread-safe, does not use the server's writer.
+func (s *Server) HandleRequestJSON(reqData []byte) ([]byte, error) {
+	var req JSONRPCRequest
+	if err := json.Unmarshal(reqData, &req); err != nil {
+		resp := JSONRPCResponse{JSONRPC: "2.0", Error: &RPCError{Code: ErrCodeParseError, Message: "Parse error"}}
+		return json.Marshal(resp)
+	}
+	if req.JSONRPC != "2.0" {
+		resp := JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Error: &RPCError{Code: ErrCodeInvalidRequest, Message: "Invalid JSON-RPC version"}}
+		return json.Marshal(resp)
+	}
+
+	// Capture response via buffer
+	var buf bytes.Buffer
+	s.mu.Lock()
+	origWriter := s.writer
+	s.writer = &buf
+	s.mu.Unlock()
+
+	s.handleRequest(req)
+
+	s.mu.Lock()
+	s.writer = origWriter
+	s.mu.Unlock()
+
+	return bytes.TrimSpace(buf.Bytes()), nil
 }

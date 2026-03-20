@@ -376,11 +376,21 @@ func cmdServe(args []string) {
 	}
 
 	// 10. Start MCP server if enabled
-	if cfg.MCP.Enabled && cfg.MCP.Transport == "stdio" {
-		go startMCPServer(eng, cfg, eventStore)
+	var mcpSSE *mcp.SSEHandler
+	if cfg.MCP.Enabled {
+		if cfg.MCP.Transport == "stdio" {
+			go startMCPServer(eng, cfg, eventStore)
+		}
+		// SSE transport — served via dashboard port, auth-protected
+		mcpSrv := mcp.NewServer(nil, nil)
+		mcpSrv.SetServerInfo("guardianwaf", version)
+		mcpSrv.SetEngine(&mcpEngineAdapter{engine: eng, cfg: cfg, eventStore: eventStore})
+		mcpSrv.RegisterAllTools()
+		mcpSSE = mcp.NewSSEHandler(mcpSrv, cfg.Dashboard.APIKey)
+		eng.Logs.Info("MCP SSE transport enabled")
 	}
 
-	// 10. Start dashboard if enabled
+	// 10b. Start dashboard if enabled
 	var dashSrv *http.Server
 	var sseBroadcaster *dashboard.SSEBroadcaster
 	var dash *dashboard.Dashboard
@@ -491,6 +501,12 @@ func cmdServe(args []string) {
 				return config.SaveFile(cfgPath, c)
 			})
 		}
+	}
+
+	// Register MCP SSE routes on dashboard mux
+	if mcpSSE != nil && dash != nil {
+		mcpSSE.RegisterRoutes(dash.Mux())
+		eng.Logs.Info("MCP SSE endpoints registered: GET /mcp/sse, POST /mcp/message")
 	}
 
 	// 10b. Start AI analyzer if enabled
