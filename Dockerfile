@@ -37,10 +37,13 @@ LABEL org.opencontainers.image.title="GuardianWAF" \
       org.opencontainers.image.licenses="MIT"
 
 RUN apk --no-cache add ca-certificates tzdata && \
-    adduser -D -H -s /sbin/nologin guardianwaf
+    adduser -D -H -s /sbin/nologin guardianwaf && \
+    mkdir -p /var/lib/guardianwaf/ai && \
+    chown -R guardianwaf:guardianwaf /var/lib/guardianwaf
 
 COPY --from=builder /app/guardianwaf /usr/local/bin/guardianwaf
 
+WORKDIR /var/lib/guardianwaf
 USER guardianwaf
 EXPOSE 8080 8443 9443
 

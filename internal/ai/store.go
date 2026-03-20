@@ -75,20 +75,25 @@ type Store struct {
 
 // NewStore creates or loads an AI store from the given directory.
 // Always succeeds — creates the directory and empty config if needed.
-// Converts relative paths to absolute to avoid working directory issues.
+// Falls back to OS temp dir if the requested path is not writable.
 func NewStore(dirPath string) *Store {
 	if dirPath == "" {
 		dirPath = "data/ai"
 	}
-	// Convert to absolute path to avoid CWD issues
+
+	// Resolve to absolute
 	if !filepath.IsAbs(dirPath) {
 		if abs, err := filepath.Abs(dirPath); err == nil {
 			dirPath = abs
 		}
 	}
 
-	// Ensure directory exists
-	os.MkdirAll(dirPath, 0700)
+	// Try creating the directory; fallback to temp if permission denied
+	if err := os.MkdirAll(dirPath, 0700); err != nil {
+		fallback := filepath.Join(os.TempDir(), "guardianwaf", "ai")
+		os.MkdirAll(fallback, 0700)
+		dirPath = fallback
+	}
 
 	s := &Store{path: dirPath}
 

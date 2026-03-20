@@ -122,7 +122,7 @@ func DefaultConfig() *Config {
 			},
 			AIAnalysis: AIAnalysisConfig{
 				Enabled:          false,
-				StorePath:        "data/ai",
+				StorePath:        "data/ai",  // relative to CWD; Dockerfile sets CWD to /var/lib/guardianwaf
 				BatchSize:        20,
 				BatchInterval:    60 * time.Second,
 				MinScore:         25,
