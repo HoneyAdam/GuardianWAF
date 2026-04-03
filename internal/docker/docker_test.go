@@ -316,3 +316,198 @@ func TestAutoDetectPort(t *testing.T) {
 		t.Errorf("expected 80, got %d", autoDetectPort(c2))
 	}
 }
+
+func TestDiscoverFromContainers_NetworkFallback(t *testing.T) {
+	containers := []Container{
+		{
+			ID:     "net1",
+			Names:  []string{"/svc"},
+			State:  "running",
+			Labels: map[string]string{"gwaf.enable": "true", "gwaf.host": "test.com"},
+			NetworkSettings: struct {
+				Networks map[string]NetworkInfo `json:"Networks"`
+			}{
+				Networks: map[string]NetworkInfo{
+					"custom": {IPAddress: "10.0.0.5"},
+				},
+			},
+			Ports: []ContainerPort{{PrivatePort: 8088, Type: "tcp"}},
+		},
+	}
+
+	// Container is on "custom" network but we ask for "bridge" — should fallback
+	services := DiscoverFromContainers(containers, "gwaf", "bridge")
+	if len(services) != 1 {
+		t.Fatalf("expected 1 service via fallback, got %d", len(services))
+	}
+	if services[0].IPAddress != "10.0.0.5" {
+		t.Errorf("expected fallback IP 10.0.0.5, got %q", services[0].IPAddress)
+	}
+}
+
+func TestDiscoverFromContainers_NoIP(t *testing.T) {
+	containers := []Container{
+		{
+			ID:     "noip",
+			Names:  []string{"/svc"},
+			State:  "running",
+			Labels: map[string]string{"gwaf.enable": "true", "gwaf.host": "test.com"},
+			Ports:  []ContainerPort{{PrivatePort: 8088, Type: "tcp"}},
+		},
+	}
+	// No IP address → service should be skipped
+	services := DiscoverFromContainers(containers, "gwaf", "bridge")
+	if len(services) != 0 {
+		t.Errorf("expected 0 services without IP, got %d", len(services))
+	}
+}
+
+func TestDiscoverFromContainers_NoPort(t *testing.T) {
+	containers := []Container{
+		{
+			ID:     "noport",
+			Names:  []string{"/svc"},
+			State:  "running",
+			Labels: map[string]string{"gwaf.enable": "true", "gwaf.host": "test.com"},
+			NetworkSettings: struct {
+				Networks map[string]NetworkInfo `json:"Networks"`
+			}{
+				Networks: map[string]NetworkInfo{
+					"bridge": {IPAddress: "172.17.0.2"},
+				},
+			},
+		},
+	}
+	// No port specified and no exposed ports → autoDetectPort returns 80
+	services := DiscoverFromContainers(containers, "gwaf", "bridge")
+	if len(services) != 1 {
+		t.Fatalf("expected 1 service, got %d", len(services))
+	}
+	if services[0].Port != 80 {
+		t.Errorf("expected auto-detected port 80, got %d", services[0].Port)
+	}
+}
+
+func TestBuildConfig_NoHostDefaultRoute(t *testing.T) {
+	services := []DiscoveredService{
+		{
+			ContainerID: "abc", ContainerName: "web",
+			Path: "/app", Port: 8088, Weight: 1,
+			IPAddress: "172.17.0.2", UpstreamName: "web-pool",
+		},
+	}
+	staticCfg := config.DefaultConfig()
+	merged := BuildConfig(services, staticCfg)
+
+	// Should have a default route (not virtual host)
+	found := false
+	for _, r := range merged.Routes {
+		if r.Path == "/app" && r.Upstream == "web-pool" {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected default route /app -> web-pool")
+	}
+
+	// Should NOT have virtual hosts
+	if len(merged.VirtualHosts) != 0 {
+		t.Errorf("expected no vhosts for hostless service, got %d", len(merged.VirtualHosts))
+	}
+}
+
+func TestBuildConfig_VHostMerge(t *testing.T) {
+	services := []DiscoveredService{
+		{
+			ContainerID: "a1", ContainerName: "api1",
+			Host: "api.example.com", Path: "/v1", Port: 8088,
+			Weight: 1, IPAddress: "172.17.0.2", UpstreamName: "api-v1",
+		},
+		{
+			ContainerID: "a2", ContainerName: "api2",
+			Host: "api.example.com", Path: "/v2", Port: 8088,
+			Weight: 1, IPAddress: "172.17.0.3", UpstreamName: "api-v2",
+		},
+	}
+	staticCfg := config.DefaultConfig()
+	merged := BuildConfig(services, staticCfg)
+
+	// Should create vhost with 2 routes
+	if len(merged.VirtualHosts) != 1 {
+		t.Fatalf("expected 1 vhost, got %d", len(merged.VirtualHosts))
+	}
+	if len(merged.VirtualHosts[0].Routes) != 2 {
+		t.Errorf("expected 2 routes in vhost, got %d", len(merged.VirtualHosts[0].Routes))
+	}
+}
+
+func TestBuildConfig_StaticConflict(t *testing.T) {
+	services := []DiscoveredService{
+		{
+			ContainerID: "abc", ContainerName: "existing",
+			Host: "test.com", Path: "/", Port: 8088,
+			Weight: 1, IPAddress: "172.17.0.2", UpstreamName: "static-backend",
+		},
+	}
+	staticCfg := config.DefaultConfig()
+	staticCfg.Upstreams = []config.UpstreamConfig{
+		{Name: "static-backend", Targets: []config.TargetConfig{{URL: "http://localhost:3000"}}},
+	}
+
+	merged := BuildConfig(services, staticCfg)
+
+	// Should keep static upstream unchanged
+	for _, u := range merged.Upstreams {
+		if u.Name == "static-backend" {
+			if len(u.Targets) != 1 || u.Targets[0].URL != "http://localhost:3000" {
+				t.Error("static upstream should not be modified")
+			}
+			return
+		}
+	}
+	t.Error("static upstream not found")
+}
+
+func TestContainerName_ShortID(t *testing.T) {
+	c := Container{ID: "abc", Names: []string{}}
+	if ContainerName(c) != "abc" {
+		t.Errorf("expected 'abc', got %q", ContainerName(c))
+	}
+}
+
+func TestDiscoverFromContainers_EmptyPrefix(t *testing.T) {
+	containers := []Container{
+		{
+			ID:     "abc",
+			Names:  []string{"/svc"},
+			Labels: map[string]string{"gwaf.enable": "true", "gwaf.host": "test.com"},
+			NetworkSettings: struct {
+				Networks map[string]NetworkInfo `json:"Networks"`
+			}{
+				Networks: map[string]NetworkInfo{"bridge": {IPAddress: "172.17.0.2"}},
+			},
+			Ports: []ContainerPort{{PrivatePort: 8088, Type: "tcp"}},
+		},
+	}
+	// Empty prefix should default to "gwaf"
+	services := DiscoverFromContainers(containers, "", "")
+	if len(services) != 1 {
+		t.Fatalf("expected 1 with default prefix, got %d", len(services))
+	}
+}
+
+func TestAddDefaultRoute_Duplicate(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.Routes = []config.RouteConfig{
+		{Path: "/", Upstream: "existing"},
+	}
+	addDefaultRoute(cfg, "/", "new-backend", false)
+
+	// Should not add duplicate route
+	if len(cfg.Routes) != 1 {
+		t.Errorf("expected 1 route (no duplicate), got %d", len(cfg.Routes))
+	}
+	if cfg.Routes[0].Upstream != "existing" {
+		t.Errorf("original route should be kept, got %q", cfg.Routes[0].Upstream)
+	}
+}
