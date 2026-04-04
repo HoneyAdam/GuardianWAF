@@ -263,6 +263,18 @@ func DefaultConfig() *Config {
 					Headers:         make(map[string]string),
 				},
 			},
+			Canary: CanaryConfig{
+				Enabled:          false,
+				Strategy:         "percentage",
+				Percentage:       10,
+				HeaderName:       "X-Canary",
+				CookieName:       "canary",
+				AutoRollback:     true,
+				ErrorThreshold:   5.0,
+				LatencyThreshold: 500 * time.Millisecond,
+				HealthCheckPath:  "/healthz",
+				Metadata:         make(map[string]string),
+			},
 		},
 		Dashboard: DashboardConfig{
 			Enabled: true,

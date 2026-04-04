@@ -187,6 +187,7 @@ type WAFConfig struct {
 	SIEM             SIEMConfig             `yaml:"siem"`
 	Cache            CacheConfig            `yaml:"cache"`
 	Replay           ReplayConfig           `yaml:"replay"`
+	Canary           CanaryConfig           `yaml:"canary"`
 }
 
 // AIAnalysisConfig controls AI-powered threat analysis.
@@ -261,18 +262,38 @@ type ReplayConfig struct {
 	Replay          ReplayEngineConfig `yaml:"replay"`
 }
 
-// ReplayEngineConfig controls replay behavior.
+// ReplayEngineConfig controls replay engine behavior.
 type ReplayEngineConfig struct {
+	Enabled         bool              `yaml:"enabled"`
+	TargetBaseURL   string            `yaml:"target_base_url"`
+	RateLimit       int               `yaml:"rate_limit"`
+	Concurrency     int               `yaml:"concurrency"`
+	Timeout         time.Duration     `yaml:"timeout"`
+	FollowRedirects bool              `yaml:"follow_redirects"`
+	ModifyHost      bool              `yaml:"modify_host"`
+	PreserveIDs     bool              `yaml:"preserve_ids"`
+	DryRun          bool              `yaml:"dry_run"`
+	Headers         map[string]string `yaml:"headers"`
+}
+
+// CanaryConfig controls canary release settings.
+type CanaryConfig struct {
 	Enabled          bool              `yaml:"enabled"`
-	TargetBaseURL    string            `yaml:"target_base_url"`
-	RateLimit        int               `yaml:"rate_limit"`
-	Concurrency      int               `yaml:"concurrency"`
-	Timeout          time.Duration     `yaml:"timeout"`
-	FollowRedirects  bool              `yaml:"follow_redirects"`
-	ModifyHost       bool              `yaml:"modify_host"`
-	PreserveIDs      bool              `yaml:"preserve_ids"`
-	DryRun           bool              `yaml:"dry_run"`
-	Headers          map[string]string `yaml:"headers"`
+	CanaryVersion    string            `yaml:"canary_version"`
+	StableUpstream   string            `yaml:"stable_upstream"`
+	CanaryUpstream   string            `yaml:"canary_upstream"`
+	Strategy         string            `yaml:"strategy"`
+	Percentage       int               `yaml:"percentage"`
+	HeaderName       string            `yaml:"header_name"`
+	HeaderValue      string            `yaml:"header_value"`
+	CookieName       string            `yaml:"cookie_name"`
+	CookieValue      string            `yaml:"cookie_value"`
+	Regions          []string          `yaml:"regions"`
+	AutoRollback     bool              `yaml:"auto_rollback"`
+	ErrorThreshold   float64           `yaml:"error_threshold"`
+	LatencyThreshold time.Duration     `yaml:"latency_threshold"`
+	HealthCheckPath  string            `yaml:"health_check_path"`
+	Metadata         map[string]string `yaml:"metadata"`
 }
 
 // SIEMConfig controls SIEM integration settings.

@@ -14,6 +14,7 @@ import (
 	"github.com/guardianwaf/guardianwaf/internal/engine"
 	"github.com/guardianwaf/guardianwaf/internal/layers/botdetect"
 	"github.com/guardianwaf/guardianwaf/internal/layers/cache"
+	"github.com/guardianwaf/guardianwaf/internal/layers/canary"
 	"github.com/guardianwaf/guardianwaf/internal/layers/dlp"
 	"github.com/guardianwaf/guardianwaf/internal/layers/graphql"
 	"github.com/guardianwaf/guardianwaf/internal/layers/replay"
@@ -42,6 +43,7 @@ type Integrator struct {
 	siemExporter      *siem.Exporter
 	cacheLayer        *cache.Layer
 	replayManager     *replay.Manager
+	canaryLayer       *canary.Layer
 
 	// HTTP handlers
 	biometricHandler http.HandlerFunc
@@ -129,6 +131,13 @@ func NewIntegrator(cfg *config.Config) (*Integrator, error) {
 	if cfg.WAF.Replay.Enabled || cfg.WAF.Replay.Replay.Enabled {
 		if err := i.initReplay(); err != nil {
 			return nil, fmt.Errorf("replay: %w", err)
+		}
+	}
+
+	// Initialize Canary Releases (Phase 3)
+	if cfg.WAF.Canary.Enabled {
+		if err := i.initCanary(); err != nil {
+			return nil, fmt.Errorf("canary: %w", err)
 		}
 	}
 
@@ -666,6 +675,8 @@ type Stats struct {
 	CacheEnabled            bool   `json:"cache_enabled"`
 	ReplayEnabled           bool   `json:"replay_enabled"`
 	ReplayRecordingEnabled  bool   `json:"replay_recording_enabled"`
+	CanaryEnabled           bool   `json:"canary_enabled"`
+	CanaryStrategy          string `json:"canary_strategy"`
 }
 
 // GetStats returns the current integration statistics.
@@ -688,6 +699,8 @@ func (i *Integrator) GetStats() Stats {
 		CacheEnabled:           i.cacheLayer != nil,
 		ReplayEnabled:          i.replayManager != nil,
 		ReplayRecordingEnabled: i.cfg.WAF.Replay.Enabled,
+		CanaryEnabled:          i.canaryLayer != nil,
+		CanaryStrategy:         i.cfg.WAF.Canary.Strategy,
 	}
 
 	if i.tenantIntegrator != nil {
@@ -753,4 +766,54 @@ func (i *Integrator) RecordRequestForReplay(req *http.Request, resp *http.Respon
 		return nil
 	}
 	return i.replayManager.Record(req, resp, duration)
+}
+
+// initCanary initializes the Canary Releases layer.
+func (i *Integrator) initCanary() error {
+	canaryCfg := i.cfg.WAF.Canary
+
+	cfg := &canary.Config{
+		Enabled:          canaryCfg.Enabled,
+		CanaryVersion:    canaryCfg.CanaryVersion,
+		StableUpstream:   canaryCfg.StableUpstream,
+		CanaryUpstream:   canaryCfg.CanaryUpstream,
+		Strategy:         canary.Strategy(canaryCfg.Strategy),
+		Percentage:       canaryCfg.Percentage,
+		HeaderName:       canaryCfg.HeaderName,
+		HeaderValue:      canaryCfg.HeaderValue,
+		CookieName:       canaryCfg.CookieName,
+		CookieValue:      canaryCfg.CookieValue,
+		Regions:          canaryCfg.Regions,
+		AutoRollback:     canaryCfg.AutoRollback,
+		ErrorThreshold:   canaryCfg.ErrorThreshold,
+		LatencyThreshold: canaryCfg.LatencyThreshold,
+		Metadata:         canaryCfg.Metadata,
+	}
+
+	layer, err := canary.NewLayer(&canary.LayerConfig{
+		Enabled: cfg.Enabled,
+		Config:  cfg,
+	})
+	if err != nil {
+		return err
+	}
+
+	i.canaryLayer = layer
+	log.Printf("[v0.4.0+] Canary Releases enabled (strategy=%s, percentage=%d%%)",
+		canaryCfg.Strategy, canaryCfg.Percentage)
+	return nil
+}
+
+// GetCanaryLayer returns the canary layer.
+func (i *Integrator) GetCanaryLayer() *canary.Layer {
+	return i.canaryLayer
+}
+
+// CanaryMiddleware returns the canary middleware for HTTP handlers.
+func (i *Integrator) CanaryMiddleware(next http.Handler) http.Handler {
+	if i.canaryLayer == nil || i.canaryLayer.GetCanary() == nil {
+		return next
+	}
+	middleware := canary.NewMiddleware(i.canaryLayer.GetCanary())
+	return middleware.Handler(next)
 }
