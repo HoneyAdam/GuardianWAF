@@ -14,6 +14,7 @@ import (
 	"github.com/guardianwaf/guardianwaf/internal/layers/botdetect"
 	"github.com/guardianwaf/guardianwaf/internal/layers/dlp"
 	"github.com/guardianwaf/guardianwaf/internal/layers/graphql"
+	"github.com/guardianwaf/guardianwaf/internal/layers/siem"
 	"github.com/guardianwaf/guardianwaf/internal/layers/zerotrust"
 	"github.com/guardianwaf/guardianwaf/internal/ml/anomaly"
 	"github.com/guardianwaf/guardianwaf/internal/proxy/grpc"
@@ -35,6 +36,7 @@ type Integrator struct {
 	tenantIntegrator  *TenantIntegrator
 	dlpLayer          *dlp.EngineLayer
 	zeroTrustService  *zerotrust.Service
+	siemExporter      *siem.Exporter
 
 	// HTTP handlers
 	biometricHandler http.HandlerFunc
@@ -101,6 +103,13 @@ func NewIntegrator(cfg *config.Config) (*Integrator, error) {
 	if cfg.WAF.ZeroTrust.Enabled {
 		if err := i.initZeroTrust(); err != nil {
 			return nil, fmt.Errorf("zero_trust: %w", err)
+		}
+	}
+
+	// Initialize SIEM (Phase 3)
+	if cfg.WAF.SIEM.Enabled {
+		if err := i.initSIEM(); err != nil {
+			return nil, fmt.Errorf("siem: %w", err)
 		}
 	}
 
@@ -343,6 +352,33 @@ func (i *Integrator) initZeroTrust() error {
 		ztCfg.RequireMTLS, ztCfg.RequireAttestation)
 	return nil
 }
+
+// initSIEM initializes the SIEM exporter.
+func (i *Integrator) initSIEM() error {
+	siemCfg := i.cfg.WAF.SIEM
+
+	cfg := &siem.Config{
+		Enabled:       siemCfg.Enabled,
+		Endpoint:      siemCfg.Endpoint,
+		Format:        siem.Format(siemCfg.Format),
+		APIKey:        siemCfg.APIKey,
+		Index:         siemCfg.Index,
+		BatchSize:     siemCfg.BatchSize,
+		FlushInterval: siemCfg.FlushInterval,
+		Timeout:       siemCfg.Timeout,
+		SkipVerify:    siemCfg.SkipVerify,
+		Fields:        siemCfg.Fields,
+	}
+
+	exporter := siem.NewExporter(cfg)
+	exporter.Start()
+
+	i.siemExporter = exporter
+	log.Printf("[v0.4.0+] SIEM enabled (format=%s, endpoint=%s)",
+		siemCfg.Format, siemCfg.Endpoint)
+	return nil
+}
+
 func (i *Integrator) initMultiTenancy() error {
 	integrator, err := NewTenantIntegrator(i.cfg.WAF.Tenant)
 	if err != nil {
@@ -421,6 +457,11 @@ func (i *Integrator) GetZeroTrustService() *zerotrust.Service {
 	return i.zeroTrustService
 }
 
+// GetSIEMExporter returns the SIEM exporter.
+func (i *Integrator) GetSIEMExporter() *siem.Exporter {
+	return i.siemExporter
+}
+
 // ZeroTrustMiddleware returns the Zero Trust middleware for HTTP handlers.
 func (i *Integrator) ZeroTrustMiddleware(next http.Handler) http.Handler {
 	if i.zeroTrustService == nil {
@@ -468,6 +509,9 @@ func (i *Integrator) Cleanup() {
 	}
 	if i.mlAnomalyLayer != nil {
 		i.mlAnomalyLayer.Stop()
+	}
+	if i.siemExporter != nil {
+		i.siemExporter.Stop()
 	}
 	log.Println("[v0.4.0] Cleanup complete")
 }
@@ -560,6 +604,8 @@ type Stats struct {
 	DLPBlockOnMatch         bool `json:"dlp_block_on_match"`
 	ZeroTrustEnabled        bool `json:"zero_trust_enabled"`
 	ZeroTrustRequireMTLS    bool `json:"zero_trust_require_mtls"`
+	SIEMEnabled             bool `json:"siem_enabled"`
+	SIEMFormat              string `json:"siem_format"`
 }
 
 // GetStats returns the current integration statistics.
@@ -577,6 +623,8 @@ func (i *Integrator) GetStats() Stats {
 		DLPBlockOnMatch:        i.cfg.WAF.DLP.BlockOnMatch,
 		ZeroTrustEnabled:       i.zeroTrustService != nil,
 		ZeroTrustRequireMTLS:   i.cfg.WAF.ZeroTrust.RequireMTLS,
+		SIEMEnabled:            i.siemExporter != nil,
+		SIEMFormat:             i.cfg.WAF.SIEM.Format,
 	}
 
 	if i.tenantIntegrator != nil {

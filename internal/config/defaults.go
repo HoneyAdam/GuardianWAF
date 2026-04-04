@@ -219,6 +219,14 @@ func DefaultConfig() *Config {
 				DeviceTrustThreshold: "medium",
 				AllowBypassPaths:     []string{"/healthz", "/metrics"},
 			},
+			SIEM: SIEMConfig{
+				Enabled:       false,
+				Format:        "json",
+				BatchSize:     100,
+				FlushInterval: 5 * time.Second,
+				Timeout:       10 * time.Second,
+				Fields:        make(map[string]string),
+			},
 		},
 		Dashboard: DashboardConfig{
 			Enabled: true,

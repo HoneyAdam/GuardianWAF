@@ -184,6 +184,7 @@ type WAFConfig struct {
 	Tenant           TenantConfig           `yaml:"tenant"`
 	DLP              DLPConfig              `yaml:"dlp"`
 	ZeroTrust        ZeroTrustConfig        `yaml:"zero_trust"`
+	SIEM             SIEMConfig             `yaml:"siem"`
 }
 
 // AIAnalysisConfig controls AI-powered threat analysis.
@@ -223,6 +224,21 @@ type ZeroTrustConfig struct {
 	DeviceTrustThreshold string        `yaml:"device_trust_threshold"`
 	AllowBypassPaths     []string      `yaml:"allow_bypass_paths"`
 }
+
+// SIEMConfig controls SIEM integration settings.
+type SIEMConfig struct {
+	Enabled       bool              `yaml:"enabled"`
+	Endpoint      string            `yaml:"endpoint"`
+	Format        string            `yaml:"format"` // cef, leef, json, splunk, elastic
+	APIKey        string            `yaml:"api_key"`
+	Index         string            `yaml:"index"`
+	BatchSize     int               `yaml:"batch_size"`
+	FlushInterval time.Duration     `yaml:"flush_interval"`
+	Timeout       time.Duration     `yaml:"timeout"`
+	SkipVerify    bool              `yaml:"skip_verify"`
+	Fields        map[string]string `yaml:"fields"`
+}
+
 type IPACLConfig struct {
 	Enabled   bool          `yaml:"enabled"`
 	Whitelist []string      `yaml:"whitelist"`
