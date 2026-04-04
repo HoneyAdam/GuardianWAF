@@ -64,14 +64,18 @@ type Layer struct {
 	loginPathRe []*regexp.Regexp
 	emailRe     *regexp.Regexp
 	locationDB  *LocationDB
+	lastLogin   map[string]*GeoLocation
+	lastTime    map[string]time.Time
 }
 
 // NewLayer creates a new ATO Protection layer.
 func NewLayer(cfg Config) (*Layer, error) {
 	l := &Layer{
-		config:  cfg,
-		tracker: NewAttemptTracker(),
-		emailRe: regexp.MustCompile(`(?i)^[\w.-]+@[\w.-]+\.\w+$`),
+		config:    cfg,
+		tracker:   NewAttemptTracker(),
+		emailRe:   regexp.MustCompile(`(?i)^[\w.-]+@[\w.-]+\.\w+$`),
+		lastLogin: make(map[string]*GeoLocation),
+		lastTime:  make(map[string]time.Time),
 	}
 
 	// Compile login path regexes
@@ -368,13 +372,11 @@ func (l *Layer) getLocation(ip net.IP) *GeoLocation {
 }
 
 func (l *Layer) getLastLoginLocation(email string) *GeoLocation {
-	// Would need session tracking implementation
-	return nil
+	return l.lastLogin[email]
 }
 
 func (l *Layer) getLastLoginTime(email string) time.Time {
-	// Would need session tracking implementation
-	return time.Time{}
+	return l.lastTime[email]
 }
 
 // Stats returns layer statistics.

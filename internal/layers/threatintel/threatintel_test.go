@@ -371,6 +371,15 @@ evil.com,95,phishing,phishtank
 	}
 }
 
+func TestLayer_StartStop(t *testing.T) {
+	cfg := Config{Enabled: true}
+	layer, _ := NewLayer(cfg)
+	layer.Start()
+	layer.Start() // idempotent
+	layer.Stop()
+	// Should not panic
+}
+
 // Benchmark
 func BenchmarkProcess(b *testing.B) {
 	cfg := Config{

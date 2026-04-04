@@ -24,21 +24,39 @@ type Config struct {
 	Events    EventsConfig    `yaml:"events"`
 }
 
-// AlertingConfig controls webhook-based alert delivery.
+// AlertingConfig controls webhook and email-based alert delivery.
 type AlertingConfig struct {
 	Enabled  bool            `yaml:"enabled"`
 	Webhooks []WebhookConfig `yaml:"webhooks"`
+	Emails   []EmailConfig   `yaml:"emails"`
 }
 
 // WebhookConfig defines a single webhook target.
 type WebhookConfig struct {
 	Name     string            `yaml:"name"`
 	URL      string            `yaml:"url"`
-	Type     string            `yaml:"type"`   // "slack", "discord", "generic"
+	Type     string            `yaml:"type"`   // "slack", "discord", "generic", "pagerduty"
 	Events   []string          `yaml:"events"` // "block", "challenge", "log", "all"
 	MinScore int               `yaml:"min_score"`
 	Cooldown time.Duration     `yaml:"cooldown"`
 	Headers  map[string]string `yaml:"headers"`
+}
+
+// EmailConfig defines SMTP email alert delivery.
+type EmailConfig struct {
+	Name       string        `yaml:"name"`
+	SMTPHost   string        `yaml:"smtp_host"`
+	SMTPPort   int           `yaml:"smtp_port"`
+	Username   string        `yaml:"username"`
+	Password   string        `yaml:"password"`
+	From       string        `yaml:"from"`
+	To         []string      `yaml:"to"`
+	UseTLS     bool          `yaml:"use_tls"`
+	Events     []string      `yaml:"events"`
+	MinScore   int           `yaml:"min_score"`
+	Cooldown   time.Duration `yaml:"cooldown"`
+	Subject    string        `yaml:"subject"`    // optional custom subject template
+	Template   string        `yaml:"template"`   // optional custom body template
 }
 
 // DockerConfig controls Docker container auto-discovery.

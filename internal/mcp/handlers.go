@@ -22,6 +22,12 @@ func (s *Server) RegisterAllTools() {
 	s.RegisterTool("guardianwaf_test_request", s.handleTestRequest)
 	s.RegisterTool("guardianwaf_get_top_ips", s.handleGetTopIPs)
 	s.RegisterTool("guardianwaf_get_detectors", s.handleGetDetectors)
+	s.RegisterTool("guardianwaf_get_alerting_status", s.handleGetAlertingStatus)
+	s.RegisterTool("guardianwaf_add_webhook", s.handleAddWebhook)
+	s.RegisterTool("guardianwaf_remove_webhook", s.handleRemoveWebhook)
+	s.RegisterTool("guardianwaf_add_email_target", s.handleAddEmailTarget)
+	s.RegisterTool("guardianwaf_remove_email_target", s.handleRemoveEmailTarget)
+	s.RegisterTool("guardianwaf_test_alert", s.handleTestAlert)
 }
 
 func (s *Server) getEngine() (EngineInterface, error) {
@@ -322,4 +328,151 @@ func (s *Server) handleGetDetectors(params json.RawMessage) (any, error) {
 		return nil, err
 	}
 	return eng.GetDetectors(), nil
+}
+
+func (s *Server) handleGetAlertingStatus(params json.RawMessage) (any, error) {
+	eng, err := s.getEngine()
+	if err != nil {
+		return nil, err
+	}
+	return eng.GetAlertingStatus(), nil
+}
+
+type webhookParam struct {
+	Name     string   `json:"name"`
+	URL      string   `json:"url"`
+	Type     string   `json:"type"`
+	Events   []string `json:"events"`
+	MinScore int      `json:"min_score"`
+	Cooldown string   `json:"cooldown"`
+}
+
+func (s *Server) handleAddWebhook(params json.RawMessage) (any, error) {
+	eng, err := s.getEngine()
+	if err != nil {
+		return nil, err
+	}
+	var p webhookParam
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, fmt.Errorf("invalid params: %w", err)
+	}
+	if p.Name == "" {
+		return nil, fmt.Errorf("name is required")
+	}
+	if p.URL == "" {
+		return nil, fmt.Errorf("url is required")
+	}
+	if p.Type == "" {
+		return nil, fmt.Errorf("type is required")
+	}
+	if err := eng.AddWebhook(p.Name, p.URL, p.Type, p.Events, p.MinScore, p.Cooldown); err != nil {
+		return nil, err
+	}
+	return map[string]any{"status": "ok", "name": p.Name, "action": "webhook added"}, nil
+}
+
+type removeWebhookParam struct {
+	Name string `json:"name"`
+}
+
+func (s *Server) handleRemoveWebhook(params json.RawMessage) (any, error) {
+	eng, err := s.getEngine()
+	if err != nil {
+		return nil, err
+	}
+	var p removeWebhookParam
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, fmt.Errorf("invalid params: %w", err)
+	}
+	if p.Name == "" {
+		return nil, fmt.Errorf("name is required")
+	}
+	if err := eng.RemoveWebhook(p.Name); err != nil {
+		return nil, err
+	}
+	return map[string]any{"status": "ok", "name": p.Name, "action": "webhook removed"}, nil
+}
+
+type emailTargetParam struct {
+	Name     string   `json:"name"`
+	SMTPHost string   `json:"smtp_host"`
+	SMTPPort int      `json:"smtp_port"`
+	Username string   `json:"username"`
+	Password string   `json:"password"`
+	From     string   `json:"from"`
+	To       []string `json:"to"`
+	UseTLS   bool     `json:"use_tls"`
+	Events   []string `json:"events"`
+	MinScore int      `json:"min_score"`
+}
+
+func (s *Server) handleAddEmailTarget(params json.RawMessage) (any, error) {
+	eng, err := s.getEngine()
+	if err != nil {
+		return nil, err
+	}
+	var p emailTargetParam
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, fmt.Errorf("invalid params: %w", err)
+	}
+	if p.Name == "" {
+		return nil, fmt.Errorf("name is required")
+	}
+	if p.SMTPHost == "" {
+		return nil, fmt.Errorf("smtp_host is required")
+	}
+	if p.From == "" {
+		return nil, fmt.Errorf("from is required")
+	}
+	if len(p.To) == 0 {
+		return nil, fmt.Errorf("to is required")
+	}
+	if err := eng.AddEmailTarget(p.Name, p.SMTPHost, p.SMTPPort, p.Username, p.Password, p.From, p.To, p.UseTLS, p.Events, p.MinScore); err != nil {
+		return nil, err
+	}
+	return map[string]any{"status": "ok", "name": p.Name, "action": "email target added"}, nil
+}
+
+type removeEmailTargetParam struct {
+	Name string `json:"name"`
+}
+
+func (s *Server) handleRemoveEmailTarget(params json.RawMessage) (any, error) {
+	eng, err := s.getEngine()
+	if err != nil {
+		return nil, err
+	}
+	var p removeEmailTargetParam
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, fmt.Errorf("invalid params: %w", err)
+	}
+	if p.Name == "" {
+		return nil, fmt.Errorf("name is required")
+	}
+	if err := eng.RemoveEmailTarget(p.Name); err != nil {
+		return nil, err
+	}
+	return map[string]any{"status": "ok", "name": p.Name, "action": "email target removed"}, nil
+}
+
+type testAlertParam struct {
+	Target string `json:"target"`
+}
+
+func (s *Server) handleTestAlert(params json.RawMessage) (any, error) {
+	eng, err := s.getEngine()
+	if err != nil {
+		return nil, err
+	}
+	var p testAlertParam
+	if err := json.Unmarshal(params, &p); err != nil {
+		return nil, fmt.Errorf("invalid params: %w", err)
+	}
+	if p.Target == "" {
+		return nil, fmt.Errorf("target is required")
+	}
+	if err := eng.TestAlert(p.Target); err != nil {
+		return nil, err
+	}
+	return map[string]any{"status": "ok", "target": p.Target, "action": "test alert sent"}, nil
 }

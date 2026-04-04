@@ -995,6 +995,329 @@ func TestWatcher_Sync_MultipleChanges(t *testing.T) {
 	}
 }
 
+// TestNewClient_SocketPath tests NewClient with a socket path.
+// On non-Windows, hostFlag is set; on Windows it stays empty.
+func TestNewClient_SocketPath(t *testing.T) {
+	c := NewClient("/var/run/docker.sock")
+	if c.socketPath != "/var/run/docker.sock" {
+		t.Errorf("expected socket path, got %q", c.socketPath)
+	}
+}
+
+// TestClient_Ping_EmptyVersion verifies Ping returns an error when docker
+// returns an empty version string.
+func TestClient_Ping_EmptyVersion(t *testing.T) {
+	c := NewClient("")
+	c.cmdFunc = func(_ context.Context, args ...string) (string, error) {
+		return "   ", nil
+	}
+	err := c.Ping()
+	if err == nil {
+		t.Fatal("expected error for empty version, got nil")
+	}
+	if !strContains(err.Error(), "empty version") {
+		t.Errorf("expected 'empty version' error, got: %v", err)
+	}
+}
+
+// TestClient_ListContainers_EmptyLines verifies that blank lines in docker ps
+// output are skipped without error.
+func TestClient_ListContainers_EmptyLines(t *testing.T) {
+	psOutput := "\n\n{\"ID\":\"abc123\"}\n\n"
+	inspectJSON := `[{
+		"Id": "abc123",
+		"Name": "/my-api",
+		"Config": {"Labels": {"gwaf.enable": "true"}, "ExposedPorts": {}},
+		"NetworkSettings": {"Networks": {"bridge": {"IPAddress": "172.17.0.2"}}},
+		"State": {"Status": "running", "Running": true}
+	}]`
+	c := NewClient("")
+	c.cmdFunc = func(_ context.Context, args ...string) (string, error) {
+		if len(args) > 0 && args[0] == "ps" {
+			return psOutput, nil
+		}
+		return inspectJSON, nil
+	}
+	containers, err := c.ListContainers("gwaf")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(containers) != 1 {
+		t.Fatalf("expected 1 container, got %d", len(containers))
+	}
+}
+
+// TestClient_ListContainers_ZeroValidIDs verifies that when ps output contains
+// lines that do not unmarshal to a valid ID, the result is nil.
+func TestClient_ListContainers_ZeroValidIDs(t *testing.T) {
+	psOutput := "not json\n{\"Foo\":\"bar\"}\n"
+	c := NewClient("")
+	c.cmdFunc = func(_ context.Context, args ...string) (string, error) {
+		return psOutput, nil
+	}
+	containers, err := c.ListContainers("gwaf")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if containers != nil {
+		t.Fatalf("expected nil containers, got %v", containers)
+	}
+}
+
+// TestClient_dockerCmd_NonExitError verifies that a non-*exec.ExitError
+// returned by exec.Command is propagated as-is.
+func TestClient_dockerCmd_NonExitError(t *testing.T) {
+	c := NewClient("")
+	c.cmdFunc = func(_ context.Context, args ...string) (string, error) {
+		return "", fmt.Errorf("some random error")
+	}
+	_, err := c.dockerCmd(context.Background(), "ps")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strContains(err.Error(), "some random error") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// TestContainerName_LongID verifies ContainerName returns the first 12 chars
+// when Names is empty and ID is longer than 12 characters.
+func TestContainerName_LongID(t *testing.T) {
+	longID := "abcdefghijklmnopqrstuvwxyz"
+	c := Container{ID: longID}
+	name := ContainerName(c)
+	if name != longID[:12] {
+		t.Errorf("expected %q, got %q", longID[:12], name)
+	}
+}
+
+// TestNewHTTPClient_DialContext exercises the custom DialContext returned by
+// NewHTTPClient so the dial function body is covered.
+func TestNewHTTPClient_DialContext(t *testing.T) {
+	client := NewHTTPClient("/nonexistent.sock")
+	transport := client.Transport.(*http.Transport)
+	conn, err := transport.DialContext(context.Background(), "tcp", "dummy:80")
+	if err == nil {
+		_ = conn.Close()
+		t.Fatal("expected dial error for invalid socket path")
+	}
+}
+
+// TestParseLabels_EmptyPrefix verifies that an empty prefix defaults to "gwaf".
+func TestParseLabels_EmptyPrefix(t *testing.T) {
+	labels := map[string]string{"gwaf.enable": "true", "gwaf.host": "test.com"}
+	svc := ParseLabels(labels, "")
+	if svc == nil {
+		t.Fatal("expected non-nil service")
+	}
+	if svc.Host != "test.com" {
+		t.Errorf("expected host test.com, got %q", svc.Host)
+	}
+}
+
+// TestDiscoverFromContainers_SkipDisabled verifies containers without
+// gwaf.enable=true are skipped.
+func TestDiscoverFromContainers_SkipDisabled(t *testing.T) {
+	containers := []Container{
+		{
+			ID:     "disabled",
+			Names:  []string{"/svc"},
+			Labels: map[string]string{"gwaf.enable": "false"},
+			NetworkSettings: struct {
+				Networks map[string]NetworkInfo `json:"Networks"`
+			}{
+				Networks: map[string]NetworkInfo{"bridge": {IPAddress: "172.17.0.2"}},
+			},
+			Ports: []ContainerPort{{PrivatePort: 8080, Type: "tcp"}},
+		},
+	}
+	services := DiscoverFromContainers(containers, "gwaf", "bridge")
+	if len(services) != 0 {
+		t.Fatalf("expected 0 services, got %d", len(services))
+	}
+}
+
+// TestAutoDetectPort_CommonPorts exercises the commonPorts fallback path.
+func TestAutoDetectPort_CommonPorts(t *testing.T) {
+	// Container has port 3000 in port list but as UDP so the first tcp-only loop
+	// is skipped, triggering the commonPorts match.
+	c := Container{
+		Ports: []ContainerPort{
+			{PrivatePort: 3000, Type: "udp"},
+		},
+	}
+	if autoDetectPort(c) != 3000 {
+		t.Errorf("expected 3000, got %d", autoDetectPort(c))
+	}
+}
+
+// TestClient_Ping_Error verifies Ping returns an error when dockerCmd fails.
+func TestClient_Ping_Error(t *testing.T) {
+	c := NewClient("")
+	c.cmdFunc = func(_ context.Context, args ...string) (string, error) {
+		return "", fmt.Errorf("docker daemon not running")
+	}
+	err := c.Ping()
+	if err == nil {
+		t.Fatal("expected error for ping failure")
+	}
+	if !strContains(err.Error(), "not reachable") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+// TestAutoDetectPort_FallbackFirstPort verifies fallback to the first exposed
+// port when it does not match any common web port.
+func TestAutoDetectPort_FallbackFirstPort(t *testing.T) {
+	c := Container{
+		Ports: []ContainerPort{
+			{PrivatePort: 9999, Type: "udp"},
+		},
+	}
+	if autoDetectPort(c) != 9999 {
+		t.Errorf("expected 9999, got %d", autoDetectPort(c))
+	}
+}
+
+// TestWatcher_loop_StopOnSecondIteration causes loop() to enter its second
+// iteration and then exit via stopCh.
+func TestWatcher_loop_StopOnSecondIteration(t *testing.T) {
+	// A client whose StreamEvents returns immediately, forcing loop() to
+	// go back to the top of the for loop where it can see stopCh.
+	c := NewClient("")
+	c.cmdFunc = func(_ context.Context, args ...string) (string, error) {
+		return "", nil
+	}
+	w := NewWatcher(c, "gwaf", "bridge", 10*time.Millisecond)
+	w.SetLogger(func(_, _ string) {})
+
+	w.Start()
+	// Let loop() spin through at least once
+	time.Sleep(50 * time.Millisecond)
+	w.Stop()
+}
+
+// TestWatcher_pollLoop_Tick exercises the ticker path in pollLoop.
+func TestWatcher_pollLoop_Tick(t *testing.T) {
+	c := makeClientWithCmdFunc(func(_ context.Context, args ...string) (string, error) {
+		return "", nil
+	})
+	w := NewWatcher(c, "gwaf", "bridge", 20*time.Millisecond)
+	w.SetLogger(func(_, _ string) {})
+
+	go func() {
+		// Let it tick once, then stop
+		time.Sleep(40 * time.Millisecond)
+		w.Stop()
+	}()
+
+	w.pollLoop()
+}
+
+// TestClient_StreamEvents_WithHostFlag verifies StreamEvents prepends --host
+// when the client was created with a socket path.
+func TestClient_StreamEvents_WithHostFlag(t *testing.T) {
+	// On non-Windows this sets hostFlag; on Windows it does not.
+	c := NewClient("/var/run/docker.sock")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // cancel immediately
+	ch := make(chan Event, 1)
+	_ = c.StreamEvents(ctx, "gwaf", ch)
+	// Should return quickly
+}
+
+// TestClient_StreamEvents_SendBlockedCtxDone verifies the select inside the
+// event goroutine takes the ctx.Done() path when the channel is full and the
+// context is cancelled.
+func TestClient_StreamEvents_SendBlockedCtxDone(t *testing.T) {
+	c := NewClient("")
+	// This test is best-effort; we mainly want to ensure the code path exists.
+	ctx, cancel := context.WithCancel(context.Background())
+	ch := make(chan Event) // unbuffered, will block
+	go func() {
+		// give StreamEvents time to start goroutine
+		time.Sleep(50 * time.Millisecond)
+		cancel()
+	}()
+	_ = c.StreamEvents(ctx, "gwaf", ch)
+}
+
+// TestClient_Ping_Success verifies Ping succeeds when docker returns a
+// non-empty version string.
+func TestClient_Ping_Success(t *testing.T) {
+	c := NewClient("")
+	c.cmdFunc = func(_ context.Context, args ...string) (string, error) {
+		return "24.0.7\n", nil
+	}
+	err := c.Ping()
+	if err != nil {
+		t.Fatalf("expected success, got: %v", err)
+	}
+}
+
+// TestClient_ListContainers_EmptyID verifies ps lines with empty IDs are skipped.
+func TestClient_ListContainers_EmptyID(t *testing.T) {
+	psOutput := `{"ID":""}`
+	c := NewClient("")
+	c.cmdFunc = func(_ context.Context, args ...string) (string, error) {
+		return psOutput, nil
+	}
+	containers, err := c.ListContainers("gwaf")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if containers != nil {
+		t.Fatalf("expected nil containers, got %v", containers)
+	}
+}
+
+// TestAutoDetectPort_EmptyPorts verifies autoDetectPort returns 80 when no
+// ports are exposed.
+func TestAutoDetectPort_EmptyPorts(t *testing.T) {
+	c := Container{Ports: []ContainerPort{}}
+	if autoDetectPort(c) != 80 {
+		t.Errorf("expected 80 for empty ports, got %d", autoDetectPort(c))
+	}
+}
+
+// TestWatcher_pollLoop_WithChange verifies pollLoop calls notifyChange when
+// sync detects a change.
+func TestWatcher_pollLoop_WithChange(t *testing.T) {
+	inspectJSON := `[{
+		"Id": "abc123",
+		"Name": "/my-api",
+		"Config": {
+			"Labels": {"gwaf.enable": "true", "gwaf.host": "api.test", "gwaf.port": "8080"},
+			"ExposedPorts": {"8080/tcp": {}}
+		},
+		"NetworkSettings": {
+			"Networks": {"bridge": {"IPAddress": "172.17.0.2"}}
+		},
+		"State": {"Status": "running", "Running": true}
+	}]`
+	c := makeClientWithCmdFunc(func(_ context.Context, args ...string) (string, error) {
+		if len(args) > 0 && args[0] == "ps" {
+			return `{"ID":"abc123"}`, nil
+		}
+		return inspectJSON, nil
+	})
+	w := NewWatcher(c, "gwaf", "bridge", 20*time.Millisecond)
+	w.SetLogger(func(_, _ string) {})
+
+	changed := false
+	w.SetOnChange(func() { changed = true })
+
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		w.Stop()
+	}()
+	w.pollLoop()
+
+	if !changed {
+		t.Error("expected notifyChange to be called when services change")
+	}
+}
+
 // strContains reports whether substr is within s.
 func strContains(s, substr string) bool {
 	return len(substr) <= len(s) && (s == substr || findSubstr(s, substr))

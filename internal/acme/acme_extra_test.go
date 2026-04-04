@@ -1,7 +1,6 @@
 package acme
 
 import (
-	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -1808,7 +1807,7 @@ func TestLoadOrObtain_CacheMissWithClient(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"status":     "valid",
 			"identifier": map[string]string{"value": "newcache.com"},
-			"challenges": []map[string]string{
+			"challenges": []map[string]any{
 				{"type": "http-01", "url": srv.URL + "/ch/1", "token": "tok"},
 			},
 		})
@@ -2124,7 +2123,7 @@ func TestLoadOrObtain_ObtainAndSaveSuccess(t *testing.T) {
 	var srv *httptest.Server
 
 	// Store the CSR public key for certificate generation
-	var csrPublicKey crypto.PublicKey
+	var csrPublicKey any
 	var mu sync.Mutex
 
 	mux.HandleFunc("/directory", func(w http.ResponseWriter, r *http.Request) {
@@ -2275,7 +2274,7 @@ func TestRenewIfNeeded_CallsLoadOrObtain(t *testing.T) {
 	var srv *httptest.Server
 
 	// Store the CSR public key for certificate generation
-	var csrPublicKey crypto.PublicKey
+	var csrPublicKey any
 	var mu sync.Mutex
 
 	mux.HandleFunc("/directory", func(w http.ResponseWriter, r *http.Request) {
@@ -2525,6 +2524,444 @@ func TestStartRenewal_TickerFires(t *testing.T) {
 
 	// Stop and verify it doesn't block
 	store.StopRenewal()
+}
+
+// --- LoadOrObtain with cached cert that has nil Leaf ---
+
+func TestLoadOrObtain_CachedCertNilLeaf(t *testing.T) {
+	dir := t.TempDir()
+
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "leafnil.com"},
+		DNSNames:     []string{"leafnil.com"},
+		NotBefore:    time.Now(),
+		NotAfter:     time.Now().Add(90 * 24 * time.Hour),
+	}
+	certDER, _ := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
+	keyDER, _ := x509.MarshalECPrivateKey(key)
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
+
+	_ = os.WriteFile(filepath.Join(dir, "leafnil.com.crt"), certPEM, 0600)
+	_ = os.WriteFile(filepath.Join(dir, "leafnil.com.key"), keyPEM, 0600)
+
+	store := NewCertDiskStore(dir, nil, nil)
+	cert, err := store.LoadOrObtain([]string{"leafnil.com"})
+	if err != nil {
+		t.Fatalf("LoadOrObtain: %v", err)
+	}
+	if cert == nil {
+		t.Fatal("expected cert")
+	}
+	// The path where cert.Leaf == nil && len(cert.Certificate) > 0 is exercised
+}
+
+// --- renewIfNeeded with cert that has nil Leaf ---
+
+func TestRenewIfNeeded_CertNilLeaf(t *testing.T) {
+	dir := t.TempDir()
+
+	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "leafnil2.com"},
+		DNSNames:     []string{"leafnil2.com"},
+		NotBefore:    time.Now(),
+		NotAfter:     time.Now().Add(90 * 24 * time.Hour),
+	}
+	certDER, _ := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
+	keyDER, _ := x509.MarshalECPrivateKey(key)
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
+
+	_ = os.WriteFile(filepath.Join(dir, "leafnil2.com.crt"), certPEM, 0600)
+	_ = os.WriteFile(filepath.Join(dir, "leafnil2.com.key"), keyPEM, 0600)
+
+	store := NewCertDiskStore(dir, nil, nil)
+	store.AddDomains([]string{"leafnil2.com"})
+
+	// Should parse leaf and find no renewal needed
+	store.renewIfNeeded()
+}
+
+// --- createOrder JSON decode error ---
+
+func TestCreateOrder_JSONDecodeError(t *testing.T) {
+	mux := http.NewServeMux()
+	var srv *httptest.Server
+
+	mux.HandleFunc("/directory", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"newNonce":   srv.URL + "/nonce",
+			"newAccount": srv.URL + "/account",
+			"newOrder":   srv.URL + "/order",
+		})
+	})
+	mux.HandleFunc("/nonce", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Replay-Nonce", "n")
+		w.WriteHeader(200)
+	})
+	mux.HandleFunc("/account", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", srv.URL+"/acct/1")
+		w.WriteHeader(201)
+	})
+	mux.HandleFunc("/order", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Replay-Nonce", "n2")
+		w.WriteHeader(201)
+		_, _ = w.Write([]byte("not valid json"))
+	})
+
+	srv = httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := NewClient(srv.URL + "/directory")
+	_ = c.Init(nil)
+	_ = c.Register("test@example.com")
+
+	_, _, err := c.createOrder([]string{"test.com"})
+	if err == nil {
+		t.Error("expected error for invalid JSON in createOrder")
+	}
+}
+
+// --- completeAuthorization initial signedPost error ---
+
+func TestCompleteAuthorization_SignedPostError(t *testing.T) {
+	mux := http.NewServeMux()
+	var srv *httptest.Server
+
+	mux.HandleFunc("/directory", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"newNonce":   srv.URL + "/nonce",
+			"newAccount": srv.URL + "/account",
+			"newOrder":   srv.URL + "/order",
+		})
+	})
+	mux.HandleFunc("/nonce", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Replay-Nonce", "n")
+		w.WriteHeader(200)
+	})
+	mux.HandleFunc("/account", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", srv.URL+"/acct/1")
+		w.WriteHeader(201)
+	})
+
+	srv = httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := NewClient(srv.URL + "/directory")
+	_ = c.Init(nil)
+	_ = c.Register("test@example.com")
+
+	// Empty nonce pool and point to unreachable nonce endpoint
+	c.mu.Lock()
+	c.nonces = c.nonces[:0]
+	c.directory.NewNonce = "http://127.0.0.1:1/nonce"
+	c.mu.Unlock()
+
+	err := c.completeAuthorization(srv.URL+"/authz/1", NewHTTP01Handler())
+	if err == nil {
+		t.Error("expected error when signedPost fails")
+	}
+}
+
+// --- completeAuthorization JSON decode error ---
+
+func TestCompleteAuthorization_JSONDecodeError(t *testing.T) {
+	mux := http.NewServeMux()
+	var srv *httptest.Server
+
+	mux.HandleFunc("/directory", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"newNonce":   srv.URL + "/nonce",
+			"newAccount": srv.URL + "/account",
+			"newOrder":   srv.URL + "/order",
+		})
+	})
+	mux.HandleFunc("/nonce", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Replay-Nonce", "n")
+		w.WriteHeader(200)
+	})
+	mux.HandleFunc("/account", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", srv.URL+"/acct/1")
+		w.WriteHeader(201)
+	})
+	mux.HandleFunc("/authz/badjson", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Replay-Nonce", "n2")
+		_, _ = w.Write([]byte("not json"))
+	})
+
+	srv = httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := NewClient(srv.URL + "/directory")
+	_ = c.Init(nil)
+	_ = c.Register("test@example.com")
+
+	err := c.completeAuthorization(srv.URL+"/authz/badjson", NewHTTP01Handler())
+	if err == nil {
+		t.Error("expected error for invalid JSON in completeAuthorization")
+	}
+}
+
+// --- pollCertificate signedPost error ---
+
+func TestPollCertificate_SignedPostError(t *testing.T) {
+	mux := http.NewServeMux()
+	var srv *httptest.Server
+
+	mux.HandleFunc("/directory", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"newNonce":   srv.URL + "/nonce",
+			"newAccount": srv.URL + "/account",
+			"newOrder":   srv.URL + "/order",
+		})
+	})
+	mux.HandleFunc("/nonce", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Replay-Nonce", "n")
+		w.WriteHeader(200)
+	})
+	mux.HandleFunc("/account", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", srv.URL+"/acct/1")
+		w.WriteHeader(201)
+	})
+
+	srv = httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := NewClient(srv.URL + "/directory")
+	_ = c.Init(nil)
+	_ = c.Register("test@example.com")
+
+	c.mu.Lock()
+	c.nonces = c.nonces[:0]
+	c.directory.NewNonce = "http://127.0.0.1:1/nonce"
+	c.mu.Unlock()
+
+	_, err := c.pollCertificate(srv.URL + "/order/1")
+	if err == nil {
+		t.Error("expected error when signedPost fails in pollCertificate")
+	}
+}
+
+// --- pollCertificate JSON decode error ---
+
+func TestPollCertificate_JSONDecodeError(t *testing.T) {
+	mux := http.NewServeMux()
+	var srv *httptest.Server
+
+	mux.HandleFunc("/directory", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"newNonce":   srv.URL + "/nonce",
+			"newAccount": srv.URL + "/account",
+			"newOrder":   srv.URL + "/order",
+		})
+	})
+	mux.HandleFunc("/nonce", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Replay-Nonce", "n")
+		w.WriteHeader(200)
+	})
+	mux.HandleFunc("/account", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", srv.URL+"/acct/1")
+		w.WriteHeader(201)
+	})
+	mux.HandleFunc("/order/badjson", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Replay-Nonce", "n2")
+		_, _ = w.Write([]byte("not json"))
+	})
+
+	srv = httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := NewClient(srv.URL + "/directory")
+	_ = c.Init(nil)
+	_ = c.Register("test@example.com")
+
+	_, err := c.pollCertificate(srv.URL + "/order/badjson")
+	if err == nil {
+		t.Error("expected error for invalid JSON in pollCertificate")
+	}
+}
+
+// --- completeAuthorization polling signedPost error ---
+
+func TestCompleteAuthorization_PollSignedPostError(t *testing.T) {
+	mux := http.NewServeMux()
+	var srv *httptest.Server
+	callCount := 0
+
+	mux.HandleFunc("/directory", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"newNonce":   srv.URL + "/nonce",
+			"newAccount": srv.URL + "/account",
+			"newOrder":   srv.URL + "/order",
+		})
+	})
+	mux.HandleFunc("/nonce", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Replay-Nonce", "n")
+		w.WriteHeader(200)
+	})
+	mux.HandleFunc("/account", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", srv.URL+"/acct/1")
+		w.WriteHeader(201)
+	})
+	mux.HandleFunc("/authz/pollfail", func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		if callCount == 1 {
+			// First call - pending with challenge
+			w.Header().Set("Replay-Nonce", "n-authz")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"status":     "pending",
+				"identifier": map[string]string{"value": "test.com"},
+				"challenges": []map[string]string{
+					{"type": "http-01", "url": srv.URL + "/challenge/1", "token": "tok"},
+				},
+			})
+		} else {
+			// Don't return nonce on poll, causing signedPost to eventually fail
+			// Actually we can't easily fail just the poll without affecting other calls.
+			// Instead, empty the pool and make nonce endpoint unreachable.
+		}
+	})
+	mux.HandleFunc("/challenge/1", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Replay-Nonce", "n-ch")
+		w.WriteHeader(200)
+	})
+
+	srv = httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := NewClient(srv.URL + "/directory")
+	_ = c.Init(nil)
+	_ = c.Register("test@example.com")
+
+	// After challenge response, consume all nonces and break nonce endpoint
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		c.mu.Lock()
+		c.nonces = c.nonces[:0]
+		c.directory.NewNonce = "http://127.0.0.1:1/nonce"
+		c.mu.Unlock()
+	}()
+
+	err := c.completeAuthorization(srv.URL+"/authz/pollfail", NewHTTP01Handler())
+	// This may or may not hit the polling path depending on timing.
+	// We just verify no panic.
+	_ = err
+}
+
+// --- fetchCertificateChain signedPost error ---
+
+func TestFetchCertificateChain_SignedPostError(t *testing.T) {
+	mux := http.NewServeMux()
+	var srv *httptest.Server
+
+	mux.HandleFunc("/directory", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"newNonce":   srv.URL + "/nonce",
+			"newAccount": srv.URL + "/account",
+			"newOrder":   srv.URL + "/order",
+		})
+	})
+	mux.HandleFunc("/nonce", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Replay-Nonce", "n")
+		w.WriteHeader(200)
+	})
+	mux.HandleFunc("/account", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", srv.URL+"/acct/1")
+		w.WriteHeader(201)
+	})
+	mux.HandleFunc("/order", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", srv.URL+"/order/1")
+		w.Header().Set("Replay-Nonce", "n-order")
+		w.WriteHeader(201)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status":         "pending",
+			"authorizations": []string{srv.URL + "/authz/1"},
+			"finalize":       srv.URL + "/finalize",
+		})
+	})
+	mux.HandleFunc("/authz/1", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Replay-Nonce", "n-authz")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status":     "valid",
+			"identifier": map[string]string{"value": "test.com"},
+			"challenges": []map[string]string{
+				{"type": "http-01", "url": srv.URL + "/challenge/1", "token": "tok"},
+			},
+		})
+	})
+	mux.HandleFunc("/finalize", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Replay-Nonce", "n-fin")
+		w.WriteHeader(200)
+		_ = json.NewEncoder(w).Encode(map[string]any{"status": "valid"})
+	})
+	mux.HandleFunc("/order/1", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Replay-Nonce", "n-poll")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status":      "valid",
+			"certificate": srv.URL + "/cert/1",
+		})
+	})
+
+	srv = httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := NewClient(srv.URL + "/directory")
+	_ = c.Init(nil)
+	_ = c.Register("test@example.com")
+
+	c.mu.Lock()
+	c.nonces = c.nonces[:0]
+	c.directory.NewNonce = "http://127.0.0.1:1/nonce"
+	c.mu.Unlock()
+
+	_, err := c.fetchCertificateChain(srv.URL + "/cert/1")
+	if err == nil {
+		t.Error("expected error when signedPost fails in fetchCertificateChain")
+	}
+}
+
+// --- finalizeOrder signedPost error ---
+
+func TestFinalizeOrder_SignedPostError(t *testing.T) {
+	mux := http.NewServeMux()
+	var srv *httptest.Server
+
+	mux.HandleFunc("/directory", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"newNonce":   srv.URL + "/nonce",
+			"newAccount": srv.URL + "/account",
+			"newOrder":   srv.URL + "/order",
+		})
+	})
+	mux.HandleFunc("/nonce", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Replay-Nonce", "n")
+		w.WriteHeader(200)
+	})
+	mux.HandleFunc("/account", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Location", srv.URL+"/acct/1")
+		w.WriteHeader(201)
+	})
+
+	srv = httptest.NewServer(mux)
+	defer srv.Close()
+
+	c := NewClient(srv.URL + "/directory")
+	_ = c.Init(nil)
+	_ = c.Register("test@example.com")
+
+	c.mu.Lock()
+	c.nonces = c.nonces[:0]
+	c.directory.NewNonce = "http://127.0.0.1:1/nonce"
+	c.mu.Unlock()
+
+	err := c.finalizeOrder(srv.URL+"/finalize", []byte("fake-csr"))
+	if err == nil {
+		t.Error("expected error when signedPost fails in finalizeOrder")
+	}
 }
 
 // --- LoadOrObtain expired cert falls through to obtain ---

@@ -763,6 +763,53 @@ func TestRuleNilAccumulator(t *testing.T) {
 	}
 }
 
+// TestRuleEmptyUserAgent covers the getFieldValue branch for user_agent when
+// the User-Agent header is missing.
+func TestRuleEmptyUserAgent(t *testing.T) {
+	layer := NewLayer(Config{
+		Enabled: true,
+		Rules: []Rule{{
+			ID: "r1", Name: "No UA", Enabled: true, Priority: 1,
+			Conditions: []Condition{{Field: "user_agent", Op: "equals", Value: ""}},
+			Action:     "log", Score: 5,
+		}},
+	}, nil)
+
+	ctx := testCtx("GET", "/", "1.2.3.4", nil)
+	ctx.Headers = map[string][]string{} // ensure no User-Agent
+	result := layer.Process(ctx)
+	if result.Action != engine.ActionLog {
+		t.Errorf("expected log for missing user-agent, got %s", result.Action)
+	}
+}
+
+// TestRuleEmptyHost covers the getFieldValue branch for host when Request is nil.
+func TestRuleEmptyHost(t *testing.T) {
+	layer := NewLayer(Config{
+		Enabled: true,
+		Rules: []Rule{{
+			ID: "r1", Name: "No host", Enabled: true, Priority: 1,
+			Conditions: []Condition{{Field: "host", Op: "equals", Value: ""}},
+			Action:     "log", Score: 5,
+		}},
+	}, nil)
+
+	ctx := &engine.RequestContext{
+		Request:     nil,
+		Method:      "GET",
+		Path:        "/",
+		ClientIP:    net.ParseIP("1.2.3.4"),
+		Headers:     map[string][]string{},
+		Cookies:     make(map[string]string),
+		Accumulator: engine.NewScoreAccumulator(2),
+		Metadata:    make(map[string]any),
+	}
+	result := layer.Process(ctx)
+	if result.Action != engine.ActionLog {
+		t.Errorf("expected log for nil request host, got %s", result.Action)
+	}
+}
+
 func BenchmarkRuleWithRegex(b *testing.B) {
 	layer := NewLayer(Config{
 		Enabled: true,

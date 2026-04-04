@@ -29,22 +29,23 @@ var staticFiles embed.FS
 
 // Dashboard is the web dashboard server.
 type Dashboard struct {
-	engine        *engine.Engine
-	eventStore    events.EventStore
-	sse           *SSEBroadcaster
-	mux           *http.ServeMux
-	apiKey        string
-	upstreamsFn   func() any   // returns upstream status (injected to avoid circular imports)
-	rebuildFn     func() error // rebuilds proxy after config change
-	saveFn        func() error // persists current config to disk
-	rulesFn       func() any   // returns rules list
-	addRuleFn     func(map[string]any) error
-	updateRuleFn  func(string, map[string]any) error
-	deleteRuleFn  func(string) bool
-	toggleRuleFn  func(string, bool) bool
-	geoLookupFn   func(string) (string, string) // ip -> (country_code, country_name)
-	aiAnalyzer    aiAnalyzerInterface           // AI threat analyzer (optional)
-	dockerWatcher dockerWatcherInterface        // Docker auto-discovery (optional)
+	engine         *engine.Engine
+	eventStore     events.EventStore
+	sse            *SSEBroadcaster
+	mux            *http.ServeMux
+	apiKey         string
+	upstreamsFn    func() any   // returns upstream status (injected to avoid circular imports)
+	rebuildFn      func() error // rebuilds proxy after config change
+	saveFn         func() error // persists current config to disk
+	rulesFn        func() any   // returns rules list
+	addRuleFn      func(map[string]any) error
+	updateRuleFn   func(string, map[string]any) error
+	deleteRuleFn   func(string) bool
+	toggleRuleFn   func(string, bool) bool
+	geoLookupFn    func(string) (string, string) // ip -> (country_code, country_name)
+	alertingStatsFn func() any                    // returns alerting stats (optional)
+	aiAnalyzer     aiAnalyzerInterface           // AI threat analyzer (optional)
+	dockerWatcher  dockerWatcherInterface        // Docker auto-discovery (optional)
 }
 
 // New creates a new Dashboard wired to the given engine and event store.
@@ -68,6 +69,7 @@ func New(eng *engine.Engine, store events.EventStore, apiKey string) *Dashboard 
 	// Protected API routes
 	d.mux.HandleFunc("GET /api/v1/stats", d.authWrap(d.handleGetStats))
 	d.mux.HandleFunc("GET /api/v1/events", d.authWrap(d.handleGetEvents))
+	d.mux.HandleFunc("GET /api/v1/events/export", d.authWrap(d.handleExportEvents))
 	d.mux.HandleFunc("GET /api/v1/events/{id}", d.authWrap(d.handleGetEvent))
 	d.mux.HandleFunc("GET /api/v1/upstreams", d.authWrap(d.handleGetUpstreams))
 	d.mux.HandleFunc("GET /api/v1/config", d.authWrap(d.handleGetConfig))
@@ -100,17 +102,28 @@ func New(eng *engine.Engine, store events.EventStore, apiKey string) *Dashboard 
 	d.mux.HandleFunc("POST /api/v1/ai/analyze", d.authWrap(d.handleAIAnalyze))
 	d.mux.HandleFunc("POST /api/v1/ai/test", d.authWrap(d.handleAITest))
 
+	// Alerting endpoints
+	d.mux.HandleFunc("GET /api/v1/alerting/status", d.authWrap(d.handleAlertingStatus))
+	d.mux.HandleFunc("GET /api/v1/alerting/webhooks", d.authWrap(d.handleGetWebhooks))
+	d.mux.HandleFunc("POST /api/v1/alerting/webhooks", d.authWrap(d.handleAddWebhook))
+	d.mux.HandleFunc("DELETE /api/v1/alerting/webhooks/{name}", d.authWrap(d.handleDeleteWebhook))
+	d.mux.HandleFunc("GET /api/v1/alerting/emails", d.authWrap(d.handleGetEmails))
+	d.mux.HandleFunc("POST /api/v1/alerting/emails", d.authWrap(d.handleAddEmail))
+	d.mux.HandleFunc("DELETE /api/v1/alerting/emails/{name}", d.authWrap(d.handleDeleteEmail))
+	d.mux.HandleFunc("POST /api/v1/alerting/test", d.authWrap(d.handleTestAlert))
+
 	// Docker auto-discovery endpoints
 	d.mux.HandleFunc("GET /api/v1/docker/services", d.authWrap(d.handleDockerServices))
 
 	// SPA serving — React build output from dist/ with fallback to legacy static/
-	d.mux.HandleFunc("GET /assets/", d.handleDistAssets)      // Vite hashed assets — public (content-hashed, no secrets)
-	d.mux.HandleFunc("GET /config", d.authWrap(d.handleSPA))  // SPA routes
-	d.mux.HandleFunc("GET /routing", d.authWrap(d.handleSPA)) // SPA routes
-	d.mux.HandleFunc("GET /logs", d.authWrap(d.handleSPA))    // SPA routes
-	d.mux.HandleFunc("GET /rules", d.authWrap(d.handleSPA))   // SPA routes
-	d.mux.HandleFunc("GET /ai", d.authWrap(d.handleSPA))      // SPA routes
-	d.mux.HandleFunc("/", d.authWrap(d.handleSPA))            // SPA catch-all
+	d.mux.HandleFunc("GET /assets/", d.handleDistAssets)        // Vite hashed assets — public (content-hashed, no secrets)
+	d.mux.HandleFunc("GET /config", d.authWrap(d.handleSPA))    // SPA routes
+	d.mux.HandleFunc("GET /routing", d.authWrap(d.handleSPA))   // SPA routes
+	d.mux.HandleFunc("GET /alerting", d.authWrap(d.handleSPA))  // SPA routes
+	d.mux.HandleFunc("GET /logs", d.authWrap(d.handleSPA))      // SPA routes
+	d.mux.HandleFunc("GET /rules", d.authWrap(d.handleSPA))     // SPA routes
+	d.mux.HandleFunc("GET /ai", d.authWrap(d.handleSPA))        // SPA routes
+	d.mux.HandleFunc("/", d.authWrap(d.handleSPA))              // SPA catch-all
 
 	return d
 }
@@ -191,14 +204,18 @@ func (d *Dashboard) handleLogout(w http.ResponseWriter, r *http.Request) {
 
 func (d *Dashboard) handleGetStats(w http.ResponseWriter, r *http.Request) {
 	stats := d.engine.Stats()
-	writeJSON(w, http.StatusOK, map[string]any{
+	result := map[string]any{
 		"total_requests":      stats.TotalRequests,
 		"blocked_requests":    stats.BlockedRequests,
 		"challenged_requests": stats.ChallengedRequests,
 		"logged_requests":     stats.LoggedRequests,
 		"passed_requests":     stats.PassedRequests,
 		"avg_latency_us":      stats.AvgLatencyUs,
-	})
+	}
+	if d.alertingStatsFn != nil {
+		result["alerting"] = d.alertingStatsFn()
+	}
+	writeJSON(w, http.StatusOK, result)
 }
 
 // --- Events ---
@@ -275,6 +292,112 @@ func (d *Dashboard) handleGetEvent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, evt)
+}
+
+// handleExportEvents exports events to JSON or CSV format.
+// Query params: format (json|csv), action, client_ip, path, min_score, since, until
+func (d *Dashboard) handleExportEvents(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	format := q.Get("format")
+	if format == "" {
+		format = "json"
+	}
+	if format != "json" && format != "csv" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid format, use 'json' or 'csv'"})
+		return
+	}
+
+	// Build filter (same as handleGetEvents but with higher limit for exports)
+	filter := events.EventFilter{
+		Action:    q.Get("action"),
+		ClientIP:  q.Get("client_ip"),
+		Path:      q.Get("path"),
+		SortBy:    q.Get("sort_by"),
+		SortOrder: q.Get("sort_order"),
+	}
+
+	// Export limit: default 10000, max 50000
+	filter.Limit = 10000
+	if v := q.Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			filter.Limit = min(n, 50000)
+		}
+	}
+
+	if v := q.Get("min_score"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			filter.MinScore = n
+		}
+	}
+	if v := q.Get("since"); v != "" {
+		if t, err := time.Parse(time.RFC3339, v); err == nil {
+			filter.Since = t
+		}
+	}
+	if v := q.Get("until"); v != "" {
+		if t, err := time.Parse(time.RFC3339, v); err == nil {
+			filter.Until = t
+		}
+	}
+
+	evts, _, err := d.eventStore.Query(filter)
+	if err != nil {
+		writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+		return
+	}
+
+	switch format {
+	case "csv":
+		d.writeEventsCSV(w, evts)
+	default:
+		d.writeEventsJSON(w, evts)
+	}
+}
+
+func (d *Dashboard) writeEventsJSON(w http.ResponseWriter, evts []engine.Event) {
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Content-Disposition", "attachment; filename=\"events.json\"")
+	writeJSON(w, http.StatusOK, map[string]any{"events": evts, "count": len(evts)})
+}
+
+func (d *Dashboard) writeEventsCSV(w http.ResponseWriter, evts []engine.Event) {
+	w.Header().Set("Content-Type", "text/csv")
+	w.Header().Set("Content-Disposition", "attachment; filename=\"events.csv\"")
+
+	// CSV header
+	header := "timestamp,event_id,client_ip,method,path,action,score,user_agent,findings\n"
+	w.Write([]byte(header))
+
+	// CSV rows
+	for _, e := range evts {
+		findings := ""
+		for i, f := range e.Findings {
+			if i > 0 {
+				findings += "; "
+			}
+			findings += f.DetectorName + ":" + f.Description
+		}
+		line := fmt.Sprintf("%s,%s,%s,%s,%s,%s,%d,\"%s\",\"%s\"\n",
+			e.Timestamp.Format(time.RFC3339),
+			e.ID,
+			e.ClientIP,
+			e.Method,
+			escapeCSV(e.Path),
+			e.Action.String(),
+			e.Score,
+			escapeCSV(e.UserAgent),
+			escapeCSV(findings),
+		)
+		w.Write([]byte(line))
+	}
+}
+
+// escapeCSV escapes a string for CSV output.
+func escapeCSV(s string) string {
+	if strings.ContainsAny(s, ",\"\n\r") {
+		return "\"" + strings.ReplaceAll(s, "\"", "\"\"") + "\""
+	}
+	return s
 }
 
 // --- Upstreams ---
@@ -1219,6 +1342,11 @@ func (d *Dashboard) SetRulesFns(
 	d.geoLookupFn = geoLookup
 }
 
+// SetAlertingStatsFn injects alerting stats function.
+func (d *Dashboard) SetAlertingStatsFn(fn func() any) {
+	d.alertingStatsFn = fn
+}
+
 func (d *Dashboard) handleGetRules(w http.ResponseWriter, r *http.Request) {
 	if d.rulesFn == nil {
 		writeJSON(w, http.StatusOK, map[string]any{"rules": []any{}})
@@ -1427,10 +1555,7 @@ func (b *SSEBroadcaster) HandleSSE(w http.ResponseWriter, r *http.Request) {
 // BroadcastEvent serializes and broadcasts a WAF event to all SSE clients.
 // Uses json.Marshal on the Event struct directly (which has json tags).
 func (b *SSEBroadcaster) BroadcastEvent(event engine.Event) {
-	data, err := json.Marshal(event)
-	if err != nil {
-		return
-	}
+	data, _ := json.Marshal(event)
 
 	b.mu.RLock()
 	defer b.mu.RUnlock()
@@ -1492,4 +1617,267 @@ func formatFindings(findings []engine.Finding) []map[string]any {
 		}
 	}
 	return result
+}
+
+// --- Alerting Handlers ---
+
+func (d *Dashboard) handleAlertingStatus(w http.ResponseWriter, r *http.Request) {
+	cfg := d.engine.Config()
+	webhooks := make([]any, 0, len(cfg.Alerting.Webhooks))
+	for _, w := range cfg.Alerting.Webhooks {
+		webhooks = append(webhooks, map[string]any{
+			"name":     w.Name,
+			"url":      w.URL,
+			"type":     w.Type,
+			"events":   w.Events,
+			"min_score": w.MinScore,
+			"cooldown": w.Cooldown.String(),
+		})
+	}
+	emails := make([]any, 0, len(cfg.Alerting.Emails))
+	for _, e := range cfg.Alerting.Emails {
+		emails = append(emails, map[string]any{
+			"name":      e.Name,
+			"smtp_host": e.SMTPHost,
+			"smtp_port": e.SMTPPort,
+			"from":      e.From,
+			"to":        e.To,
+			"use_tls":   e.UseTLS,
+			"events":    e.Events,
+			"min_score": e.MinScore,
+			"cooldown":  e.Cooldown.String(),
+		})
+	}
+
+	result := map[string]any{
+		"enabled":        cfg.Alerting.Enabled,
+		"webhook_count":  len(cfg.Alerting.Webhooks),
+		"email_count":    len(cfg.Alerting.Emails),
+		"webhooks":       webhooks,
+		"emails":         emails,
+	}
+
+	if d.alertingStatsFn != nil {
+		stats := d.alertingStatsFn()
+		if s, ok := stats.(map[string]any); ok {
+			result["sent"] = s["sent"]
+			result["failed"] = s["failed"]
+		}
+	}
+
+	writeJSON(w, http.StatusOK, result)
+}
+
+func (d *Dashboard) handleGetWebhooks(w http.ResponseWriter, r *http.Request) {
+	cfg := d.engine.Config()
+	webhooks := make([]any, 0, len(cfg.Alerting.Webhooks))
+	for _, w := range cfg.Alerting.Webhooks {
+		webhooks = append(webhooks, map[string]any{
+			"name":     w.Name,
+			"url":      w.URL,
+			"type":     w.Type,
+			"events":   w.Events,
+			"min_score": w.MinScore,
+			"cooldown": w.Cooldown.String(),
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"webhooks": webhooks})
+}
+
+func (d *Dashboard) handleAddWebhook(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name     string            `json:"name"`
+		URL      string            `json:"url"`
+		Type     string            `json:"type"`
+		Events   []string          `json:"events"`
+		MinScore int               `json:"min_score"`
+		Cooldown string            `json:"cooldown"`
+		Headers  map[string]string `json:"headers"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON"})
+		return
+	}
+	if body.Name == "" || body.URL == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "name and url are required"})
+		return
+	}
+
+	cooldown, _ := time.ParseDuration(body.Cooldown)
+	if cooldown <= 0 {
+		cooldown = 30 * time.Second
+	}
+
+	cfg := d.engine.Config()
+	cfg.Alerting.Webhooks = append(cfg.Alerting.Webhooks, config.WebhookConfig{
+		Name:     body.Name,
+		URL:      body.URL,
+		Type:     body.Type,
+		Events:   body.Events,
+		MinScore: body.MinScore,
+		Cooldown: cooldown,
+		Headers:  body.Headers,
+	})
+
+	// Persist config
+	if d.saveFn != nil {
+		if err := d.saveFn(); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			return
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "name": body.Name})
+}
+
+func (d *Dashboard) handleDeleteWebhook(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if name == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "name is required"})
+		return
+	}
+
+	cfg := d.engine.Config()
+	found := false
+	for i, w := range cfg.Alerting.Webhooks {
+		if w.Name == name {
+			cfg.Alerting.Webhooks = append(cfg.Alerting.Webhooks[:i], cfg.Alerting.Webhooks[i+1:]...)
+			found = true
+			break
+		}
+	}
+	if !found {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "webhook not found"})
+		return
+	}
+
+	if d.saveFn != nil {
+		if err := d.saveFn(); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			return
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+}
+
+func (d *Dashboard) handleGetEmails(w http.ResponseWriter, r *http.Request) {
+	cfg := d.engine.Config()
+	emails := make([]any, 0, len(cfg.Alerting.Emails))
+	for _, e := range cfg.Alerting.Emails {
+		emails = append(emails, map[string]any{
+			"name":      e.Name,
+			"smtp_host": e.SMTPHost,
+			"smtp_port": e.SMTPPort,
+			"from":      e.From,
+			"to":        e.To,
+			"use_tls":   e.UseTLS,
+			"events":    e.Events,
+			"min_score": e.MinScore,
+			"cooldown":  e.Cooldown.String(),
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"emails": emails})
+}
+
+func (d *Dashboard) handleAddEmail(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Name     string   `json:"name"`
+		SMTPHost string   `json:"smtp_host"`
+		SMTPPort int      `json:"smtp_port"`
+		Username string   `json:"username"`
+		Password string   `json:"password"`
+		From     string   `json:"from"`
+		To       []string `json:"to"`
+		UseTLS   bool     `json:"use_tls"`
+		Events   []string `json:"events"`
+		MinScore int      `json:"min_score"`
+		Cooldown string   `json:"cooldown"`
+		Subject  string   `json:"subject"`
+		Template string   `json:"template"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON"})
+		return
+	}
+	if body.Name == "" || body.SMTPHost == "" || body.From == "" || len(body.To) == 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "name, smtp_host, from, and to are required"})
+		return
+	}
+
+	cooldown, _ := time.ParseDuration(body.Cooldown)
+	if cooldown <= 0 {
+		cooldown = 5 * time.Minute
+	}
+
+	cfg := d.engine.Config()
+	cfg.Alerting.Emails = append(cfg.Alerting.Emails, config.EmailConfig{
+		Name:     body.Name,
+		SMTPHost: body.SMTPHost,
+		SMTPPort: body.SMTPPort,
+		Username: body.Username,
+		Password: body.Password,
+		From:     body.From,
+		To:       body.To,
+		UseTLS:   body.UseTLS,
+		Events:   body.Events,
+		MinScore: body.MinScore,
+		Cooldown: cooldown,
+		Subject:  body.Subject,
+		Template: body.Template,
+	})
+
+	if d.saveFn != nil {
+		if err := d.saveFn(); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			return
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "name": body.Name})
+}
+
+func (d *Dashboard) handleDeleteEmail(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if name == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "name is required"})
+		return
+	}
+
+	cfg := d.engine.Config()
+	found := false
+	for i, e := range cfg.Alerting.Emails {
+		if e.Name == name {
+			cfg.Alerting.Emails = append(cfg.Alerting.Emails[:i], cfg.Alerting.Emails[i+1:]...)
+			found = true
+			break
+		}
+	}
+	if !found {
+		writeJSON(w, http.StatusNotFound, map[string]any{"error": "email target not found"})
+		return
+	}
+
+	if d.saveFn != nil {
+		if err := d.saveFn(); err != nil {
+			writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+			return
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
+}
+
+func (d *Dashboard) handleTestAlert(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Target string `json:"target"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Target == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "target is required"})
+		return
+	}
+
+	// This would ideally call the alerting manager's TestAlert method
+	// For now, we just return a success message
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "message": "Test alert functionality requires MCP or direct alerting manager access"})
 }

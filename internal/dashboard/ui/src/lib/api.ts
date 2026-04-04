@@ -13,6 +13,14 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
 }
 
 export const api = {
+  // Generic request methods
+  get: <T>(path: string) => request<T>(path),
+  post: <T>(path: string, body?: unknown) =>
+    request<T>(path, { method: 'POST', body: JSON.stringify(body) }),
+  put: <T>(path: string, body?: unknown) =>
+    request<T>(path, { method: 'PUT', body: JSON.stringify(body) }),
+  delete: <T>(path: string) => request<T>(path, { method: 'DELETE' }),
+
   // Stats
   getStats: () => request<Stats>('/api/v1/stats'),
 
@@ -67,6 +75,21 @@ export const api = {
   // GeoIP
   geoipLookup: (ip: string) =>
     request<GeoIPResult>('/api/v1/geoip/lookup?ip=' + encodeURIComponent(ip)),
+
+  // Alerting
+  getAlertingStatus: () => request<AlertingStatusResponse>('/api/v1/alerting/status'),
+  getWebhooks: () => request<WebhooksResponse>('/api/v1/alerting/webhooks'),
+  addWebhook: (webhook: WebhookConfig) =>
+    request<ApiResult>('/api/v1/alerting/webhooks', { method: 'POST', body: JSON.stringify(webhook) }),
+  deleteWebhook: (name: string) =>
+    request<ApiResult>('/api/v1/alerting/webhooks/' + encodeURIComponent(name), { method: 'DELETE' }),
+  getEmails: () => request<EmailsResponse>('/api/v1/alerting/emails'),
+  addEmail: (email: EmailConfig) =>
+    request<ApiResult>('/api/v1/alerting/emails', { method: 'POST', body: JSON.stringify(email) }),
+  deleteEmail: (name: string) =>
+    request<ApiResult>('/api/v1/alerting/emails/' + encodeURIComponent(name), { method: 'DELETE' }),
+  testAlert: (target: string) =>
+    request<ApiResult>('/api/v1/alerting/test', { method: 'POST', body: JSON.stringify({ target }) }),
 }
 
 // --- Types ---
@@ -78,6 +101,18 @@ export interface Stats {
   logged_requests: number
   passed_requests: number
   avg_latency_us: number
+  alerting?: AlertingStats
+}
+
+export interface AlertingStats {
+  sent: number
+  failed: number
+  webhook_count: number
+  email_count: number
+  email?: {
+    sent: number
+    failed: number
+  }
 }
 
 export interface WafEvent {
@@ -236,4 +271,49 @@ export interface GeoIPResult {
   ip: string
   country: string
   name: string
+}
+
+// Alerting Types
+export interface AlertingStatusResponse {
+  enabled: boolean
+  webhook_count: number
+  email_count: number
+  sent?: number
+  failed?: number
+  webhooks: WebhookConfig[]
+  emails: EmailConfig[]
+}
+
+export interface WebhooksResponse {
+  webhooks: WebhookConfig[]
+}
+
+export interface EmailsResponse {
+  emails: EmailConfig[]
+}
+
+export interface WebhookConfig {
+  name: string
+  url: string
+  type: 'slack' | 'discord' | 'pagerduty' | 'generic'
+  events: string[]
+  min_score: number
+  cooldown: string
+  headers?: Record<string, string>
+}
+
+export interface EmailConfig {
+  name: string
+  smtp_host: string
+  smtp_port: number
+  username?: string
+  password?: string
+  from: string
+  to: string[]
+  use_tls: boolean
+  events: string[]
+  min_score: number
+  cooldown: string
+  subject?: string
+  template?: string
 }

@@ -1,4 +1,4 @@
-import { Shield, ShieldOff, ShieldAlert, FileText, CheckCircle, Timer } from 'lucide-react'
+import { Shield, ShieldOff, ShieldAlert, FileText, CheckCircle, Timer, BellRing } from 'lucide-react'
 import { cn, formatNumber, formatDuration } from '@/lib/utils'
 import type { Stats } from '@/lib/api'
 
@@ -16,6 +16,7 @@ const cards = [
 
 export function StatsCards({ stats }: StatsCardsProps) {
   const total = stats.total_requests || 1
+  const hasAlerting = stats.alerting && (stats.alerting.webhook_count > 0 || stats.alerting.email_count > 0)
 
   return (
     <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
@@ -50,6 +51,31 @@ export function StatsCards({ stats }: StatsCardsProps) {
         </div>
         <div className="text-2xl font-bold tracking-tight">{formatDuration(stats.avg_latency_us)}</div>
       </div>
+
+      {/* Alerting stats */}
+      {hasAlerting && (
+        <div className="rounded-lg border border-border bg-card p-4 transition-all hover:shadow-md hover:-translate-y-0.5 col-span-2 md:col-span-3 lg:col-span-2">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-md bg-blue-500/10">
+              <BellRing className="h-4 w-4 text-blue-400" />
+            </div>
+            <span className="text-xs text-muted-foreground">Alerting</span>
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <div className="text-lg font-bold tracking-tight">{formatNumber(stats.alerting!.sent)}</div>
+              <div className="text-xs text-muted">Sent</div>
+            </div>
+            <div>
+              <div className="text-lg font-bold tracking-tight text-destructive">{formatNumber(stats.alerting!.failed)}</div>
+              <div className="text-xs text-muted">Failed</div>
+            </div>
+          </div>
+          <div className="text-xs text-muted mt-1">
+            {stats.alerting!.webhook_count} webhooks, {stats.alerting!.email_count} emails
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -14,6 +14,9 @@ import (
 	"time"
 )
 
+// randReader allows tests to inject failures for generateRequestID.
+var randReader = rand.Read
+
 // RequestContext carries all per-request state through the WAF pipeline.
 // Allocated from a sync.Pool to minimize GC pressure.
 type RequestContext struct {
@@ -255,7 +258,7 @@ func extractClientIP(r *http.Request) net.IP {
 // Uses crypto/rand for cryptographically secure random bytes.
 func generateRequestID() string {
 	b := make([]byte, 16)
-	_, err := rand.Read(b)
+	_, err := randReader(b)
 	if err != nil {
 		// Fallback: return a zero-filled ID (extremely unlikely path)
 		return "00000000-0000-0000-0000-000000000000"

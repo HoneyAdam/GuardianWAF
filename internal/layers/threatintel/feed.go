@@ -270,9 +270,6 @@ func (f *FeedManager) parseCSV(r io.Reader) ([]ThreatEntry, error) {
 		}
 
 		parts := strings.Split(line, ",")
-		if len(parts) < 1 {
-			continue
-		}
 
 		ip := strings.TrimSpace(parts[0])
 		if ip == "" {

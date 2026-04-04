@@ -21,10 +21,10 @@ type APIKeyConfig struct {
 
 // APIKeyValidator validates API keys.
 type APIKeyValidator struct {
-	keys      map[string]*APIKeyConfig // prefix -> config
-	hashes    map[string]*APIKeyConfig // hash -> config
-	mu        sync.RWMutex
-	trackers  map[string]*keyTracker // key_id -> tracker
+	keys     map[string]*APIKeyConfig // prefix -> config
+	hashes   map[string]*APIKeyConfig // hash -> config
+	mu       sync.RWMutex
+	trackers map[string]*keyTracker // key_id -> tracker
 }
 
 type keyTracker struct {
@@ -73,20 +73,7 @@ func (v *APIKeyValidator) Validate(key, path string) (*APIKeyConfig, error) {
 	// Look up by hash
 	cfg, ok := v.hashes[hashStr]
 	if !ok {
-		// Try prefix lookup first
-		for prefix, c := range v.keys {
-			if strings.HasPrefix(key, prefix) {
-				// Verify full hash
-				if v.hashes["sha256:"+hashStr[7:]] == c {
-					cfg = c
-					ok = true
-					break
-				}
-			}
-		}
-		if !ok {
-			return nil, ErrInvalidAPIKey
-		}
+		return nil, ErrInvalidAPIKey
 	}
 
 	// Check if key is enabled

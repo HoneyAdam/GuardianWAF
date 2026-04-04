@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { NavLink } from 'react-router'
-import { LayoutDashboard, Globe, Settings, ScrollText, Shield, ShieldCheck, PanelLeftClose, PanelLeft, Brain } from 'lucide-react'
+import { LayoutDashboard, Globe, Settings, ScrollText, Shield, ShieldCheck, PanelLeftClose, PanelLeft, Brain, Bell } from 'lucide-react'
 import { cn } from '@/lib/utils'
 
 const navItems = [
@@ -8,6 +8,7 @@ const navItems = [
   { to: '/routing', label: 'Routing', icon: Globe },
   { to: '/rules', label: 'Rules', icon: ShieldCheck },
   { to: '/config', label: 'WAF Config', icon: Settings },
+  { to: '/alerting', label: 'Alerting', icon: Bell },
   { to: '/ai', label: 'AI Analysis', icon: Brain },
   { to: '/logs', label: 'Logs', icon: ScrollText },
 ]

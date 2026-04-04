@@ -269,6 +269,70 @@ func TestGetLastLoginTime_ReturnsZero(t *testing.T) {
 	}
 }
 
+func TestCheckImpossibleTravel_Block(t *testing.T) {
+	cfg := Config{
+		Enabled:    true,
+		LoginPaths: []string{"/login"},
+		Travel: ImpossibleTravelConfig{
+			Enabled:       true,
+			MaxDistanceKm: 500,
+			MaxTimeHours:  2,
+			BlockDuration: time.Hour,
+		},
+		GeoDBPath: "/fake/geodb",
+	}
+	layer, _ := NewLayer(cfg)
+
+	layer.locationDB.Add("1.2.3.4", &GeoLocation{Latitude: 40.7128, Longitude: -74.0060})
+	layer.lastLogin["traveler@example.com"] = &GeoLocation{Latitude: 51.5074, Longitude: -0.1278}
+	layer.lastTime["traveler@example.com"] = time.Now().Add(-30 * time.Minute)
+
+	ctx := &engine.RequestContext{
+		Path:       "/login",
+		Method:     "POST",
+		ClientIP:   net.ParseIP("1.2.3.4"),
+		BodyString: `{"email":"traveler@example.com"}`,
+		Headers:    map[string][]string{},
+	}
+
+	result := layer.checkImpossibleTravel(ctx, "traveler@example.com")
+	if result.Action != engine.ActionBlock {
+		t.Errorf("expected block for impossible travel, got %v", result.Action)
+	}
+}
+
+func TestCheckImpossibleTravel_Possible(t *testing.T) {
+	cfg := Config{
+		Enabled:    true,
+		LoginPaths: []string{"/login"},
+		Travel: ImpossibleTravelConfig{
+			Enabled:       true,
+			MaxDistanceKm: 500,
+			MaxTimeHours:  2,
+			BlockDuration: time.Hour,
+		},
+		GeoDBPath: "/fake/geodb",
+	}
+	layer, _ := NewLayer(cfg)
+
+	layer.locationDB.Add("1.2.3.4", &GeoLocation{Latitude: 40.7128, Longitude: -74.0060})
+	layer.lastLogin["traveler@example.com"] = &GeoLocation{Latitude: 40.7300, Longitude: -73.9900}
+	layer.lastTime["traveler@example.com"] = time.Now().Add(-30 * time.Minute)
+
+	ctx := &engine.RequestContext{
+		Path:       "/login",
+		Method:     "POST",
+		ClientIP:   net.ParseIP("1.2.3.4"),
+		BodyString: `{"email":"traveler@example.com"}`,
+		Headers:    map[string][]string{},
+	}
+
+	result := layer.checkImpossibleTravel(ctx, "traveler@example.com")
+	if result.Action != engine.ActionPass {
+		t.Errorf("expected pass for possible travel, got %v", result.Action)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // checkBruteForce — per-email path and threshold boundary
 // ---------------------------------------------------------------------------

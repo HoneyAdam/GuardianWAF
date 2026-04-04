@@ -263,6 +263,13 @@ func PopulateFromNode(cfg *Config, node *Node) error {
 		}
 	}
 
+	// Alerting
+	if n := node.Get("alerting"); n != nil {
+		if err := populateAlerting(&cfg.Alerting, n); err != nil {
+			return fmt.Errorf("alerting: %w", err)
+		}
+	}
+
 	return nil
 }
 
@@ -1250,6 +1257,133 @@ func populateEvents(ev *EventsConfig, n *Node) error {
 	}
 	if v := n.Get("file_path"); v != nil && !v.IsNull {
 		ev.FilePath = v.String()
+	}
+	return nil
+}
+
+// --- Alerting ---
+
+func populateAlerting(alert *AlertingConfig, n *Node) error {
+	if n.Kind != MapNode {
+		return nil
+	}
+	if v := n.Get("enabled"); v != nil {
+		b, err := nodeBool(v)
+		if err != nil {
+			return fmt.Errorf("enabled: %w", err)
+		}
+		alert.Enabled = b
+	}
+	if w := n.Get("webhooks"); w != nil && w.Kind == SequenceNode {
+		items := w.Slice()
+		alert.Webhooks = make([]WebhookConfig, 0, len(items))
+		for _, item := range items {
+			if item.Kind != MapNode {
+				continue
+			}
+			wc := WebhookConfig{}
+			if v := item.Get("name"); v != nil && !v.IsNull {
+				wc.Name = v.String()
+			}
+			if v := item.Get("url"); v != nil && !v.IsNull {
+				wc.URL = v.String()
+			}
+			if v := item.Get("type"); v != nil && !v.IsNull {
+				wc.Type = v.String()
+			}
+			if v := item.Get("events"); v != nil {
+				wc.Events = nodeStringSlice(v)
+			}
+			if v := item.Get("min_score"); v != nil {
+				i, err := nodeInt(v)
+				if err != nil {
+					return fmt.Errorf("min_score: %w", err)
+				}
+				wc.MinScore = i
+			}
+			if v := item.Get("cooldown"); v != nil && !v.IsNull {
+				d, err := parseDuration(v.String())
+				if err != nil {
+					return fmt.Errorf("cooldown: %w", err)
+				}
+				wc.Cooldown = d
+			}
+			if v := item.Get("headers"); v != nil && v.Kind == MapNode {
+				wc.Headers = make(map[string]string)
+				for k, vn := range v.Map() {
+					if vn != nil && !vn.IsNull {
+						wc.Headers[k] = vn.String()
+					}
+				}
+			}
+			alert.Webhooks = append(alert.Webhooks, wc)
+		}
+	}
+	if e := n.Get("emails"); e != nil && e.Kind == SequenceNode {
+		items := e.Slice()
+		alert.Emails = make([]EmailConfig, 0, len(items))
+		for _, item := range items {
+			if item.Kind != MapNode {
+				continue
+			}
+			ec := EmailConfig{}
+			if v := item.Get("name"); v != nil && !v.IsNull {
+				ec.Name = v.String()
+			}
+			if v := item.Get("smtp_host"); v != nil && !v.IsNull {
+				ec.SMTPHost = v.String()
+			}
+			if v := item.Get("smtp_port"); v != nil && !v.IsNull {
+				p, err := nodeInt(v)
+				if err != nil {
+					return fmt.Errorf("smtp_port: %w", err)
+				}
+				ec.SMTPPort = p
+			}
+			if v := item.Get("username"); v != nil && !v.IsNull {
+				ec.Username = v.String()
+			}
+			if v := item.Get("password"); v != nil && !v.IsNull {
+				ec.Password = v.String()
+			}
+			if v := item.Get("from"); v != nil && !v.IsNull {
+				ec.From = v.String()
+			}
+			if v := item.Get("to"); v != nil {
+				ec.To = nodeStringSlice(v)
+			}
+			if v := item.Get("use_tls"); v != nil {
+				b, err := nodeBool(v)
+				if err != nil {
+					return fmt.Errorf("use_tls: %w", err)
+				}
+				ec.UseTLS = b
+			}
+			if v := item.Get("events"); v != nil {
+				ec.Events = nodeStringSlice(v)
+			}
+			if v := item.Get("min_score"); v != nil {
+				i, err := nodeInt(v)
+				if err != nil {
+					return fmt.Errorf("min_score: %w", err)
+				}
+				ec.MinScore = i
+			}
+			if v := item.Get("cooldown"); v != nil && !v.IsNull {
+				d, err := parseDuration(v.String())
+				if err != nil {
+					return fmt.Errorf("cooldown: %w", err)
+				}
+				ec.Cooldown = d
+			}
+			if v := item.Get("subject"); v != nil && !v.IsNull {
+				ec.Subject = v.String()
+			}
+			if v := item.Get("template"); v != nil && !v.IsNull {
+				ec.Template = v.String()
+			}
+			alert.Emails = append(alert.Emails, ec)
+		}
 	}
 	return nil
 }

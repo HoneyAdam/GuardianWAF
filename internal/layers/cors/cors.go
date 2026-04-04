@@ -87,11 +87,7 @@ func compileWildcard(pattern string) *regexp.Regexp {
 
 	// Build full regex
 	fullPattern := "^" + schemeRegex + "://" + regexHost + "$"
-	re, err := regexp.Compile(fullPattern)
-	if err != nil {
-		return nil
-	}
-	return re
+	return regexp.MustCompile(fullPattern)
 }
 
 // Name returns the layer name.

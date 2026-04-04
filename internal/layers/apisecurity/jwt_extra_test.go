@@ -1921,3 +1921,92 @@ func TestFetchJWKS_UnknownCurve(t *testing.T) {
 		t.Error("expected key with unknown curve to not be cached")
 	}
 }
+
+// --- JWT malformed parts ---
+
+func TestJWTValidate_InvalidHeaderJSON(t *testing.T) {
+	v, _ := NewJWTValidator(JWTConfig{Enabled: true})
+	v.publicKey = []byte("secret")
+	// "aW52YWxpZA" is base64 for "invalid" (not JSON)
+	_, err := v.Validate("aW52YWxpZA.eyJhbGciOiJIUzI1NiJ9.sig")
+	if err == nil || !strings.Contains(err.Error(), "header JSON") {
+		t.Errorf("expected header JSON error, got: %v", err)
+	}
+}
+
+func TestJWTValidate_InvalidPayloadEncoding(t *testing.T) {
+	v, _ := NewJWTValidator(JWTConfig{Enabled: true})
+	v.publicKey = []byte("secret")
+	_, err := v.Validate("eyJhbGciOiJIUzI1NiJ9.!!!.sig")
+	if err == nil || !strings.Contains(err.Error(), "payload encoding") {
+		t.Errorf("expected payload encoding error, got: %v", err)
+	}
+}
+
+func TestJWTValidate_InvalidPayloadJSON(t *testing.T) {
+	v, _ := NewJWTValidator(JWTConfig{Enabled: true})
+	v.publicKey = []byte("secret")
+	_, err := v.Validate("eyJhbGciOiJIUzI1NiJ9.aW52YWxpZA.sig")
+	if err == nil || !strings.Contains(err.Error(), "payload JSON") {
+		t.Errorf("expected payload JSON error, got: %v", err)
+	}
+}
+
+func TestJWTValidate_InvalidSignatureEncoding(t *testing.T) {
+	v, _ := NewJWTValidator(JWTConfig{Enabled: true})
+	v.publicKey = []byte("secret")
+	_, err := v.Validate("eyJhbGciOiJIUzI1NiJ9.e30.!!!")
+	if err == nil || !strings.Contains(err.Error(), "signature encoding") {
+		t.Errorf("expected signature encoding error, got: %v", err)
+	}
+}
+
+// --- fetchJWKS error branches ---
+
+func TestFetchJWKS_InvalidURL(t *testing.T) {
+	v, _ := NewJWTValidator(JWTConfig{Enabled: true, JWKSURL: "://bad-url"})
+	v.fetchJWKS() // should hit http.NewRequestWithContext error
+}
+
+func TestFetchJWKS_RequestError(t *testing.T) {
+	v, _ := NewJWTValidator(JWTConfig{Enabled: true, JWKSURL: "http://[::1]:99999"})
+	v.fetchJWKS() // should hit client.Do error (bad port)
+}
+
+// --- parseValue malformed ASN.1 length ---
+
+func TestParseValue_MalformedLength(t *testing.T) {
+	// 0x30 = SEQUENCE, 0x82 = 2-byte length, but only 1 byte follows
+	p := &asn1Parser{data: []byte{0x30, 0x82, 0x01}}
+	var esig struct{ R, S *big.Int }
+	err := p.parseValue(&esig)
+	if err == nil {
+		t.Error("expected error for malformed ASN.1 length")
+	}
+}
+
+// --- parseRSAPublicKey ---
+
+func TestParseRSAPublicKey_LongDER(t *testing.T) {
+	der := make([]byte, 40)
+	key := parseRSAPublicKey(der)
+	if key != nil {
+		t.Error("expected nil for stub RSA parser")
+	}
+}
+
+// --- loadPublicKeyFromFile open error ---
+
+func TestLoadPublicKeyFromFile_OpenError(t *testing.T) {
+	SetFileOps(
+		func(path string) (any, error) { return nil, fmt.Errorf("open failed") },
+		func(any) {},
+		func(any, []byte) (int, error) { return 0, nil },
+	)
+	defer SetFileOps(nil, nil, nil)
+
+	_, err := loadPublicKeyFromFile("test.pem")
+	if err == nil || !strings.Contains(err.Error(), "open failed") {
+		t.Errorf("expected open error, got: %v", err)
+	}
+}

@@ -6,6 +6,7 @@ import RoutingPage from '@/pages/routing'
 import LogsPage from '@/pages/logs'
 import RulesPage from '@/pages/rules'
 import AIPage from '@/pages/ai'
+import AlertingPage from '@/pages/alerting'
 
 export function App() {
   return (
@@ -16,6 +17,7 @@ export function App() {
           <Route path="/routing" element={<RoutingPage />} />
           <Route path="/rules" element={<RulesPage />} />
           <Route path="/config" element={<ConfigPage />} />
+          <Route path="/alerting" element={<AlertingPage />} />
           <Route path="/ai" element={<AIPage />} />
           <Route path="/logs" element={<LogsPage />} />
         </Route>

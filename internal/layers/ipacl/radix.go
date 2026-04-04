@@ -163,21 +163,12 @@ func (t *RadixTree) walk(node *radixNode, bits []byte, result *[]string) {
 		// Convert from IPv6-mapped back to IPv4 display if applicable
 		if prefixLen >= 96 && isIPv4Mapped(ip) {
 			ipv4 := ip.To4()
-			if ipv4 != nil {
-				cidr := fmt.Sprintf("%s/%d", ipv4.String(), prefixLen-96)
-				// /32 → bare IP
-				if prefixLen == 128 {
-					*result = append(*result, ipv4.String())
-				} else {
-					*result = append(*result, cidr)
-				}
+			cidr := fmt.Sprintf("%s/%d", ipv4.String(), prefixLen-96)
+			// /32 → bare IP
+			if prefixLen == 128 {
+				*result = append(*result, ipv4.String())
 			} else {
-				// Fallback to standard IP formatting
-				if prefixLen == 128 {
-					*result = append(*result, ip.String())
-				} else {
-					*result = append(*result, fmt.Sprintf("%s/%d", ip.String(), prefixLen))
-				}
+				*result = append(*result, cidr)
 			}
 		} else {
 			// Standard IP formatting for non-IPv4-mapped addresses
@@ -230,9 +221,6 @@ func parseCIDROrIP(s string) (net.IP, *net.IPNet, error) {
 	if err == nil {
 		// Normalize the network IP to 16-byte form
 		ip = network.IP.To16()
-		if ip == nil {
-			return nil, nil, fmt.Errorf("invalid IP in CIDR: %s", s)
-		}
 		// Adjust mask for IPv4 CIDRs: net.ParseCIDR for "10.0.0.0/8" gives a 4-byte mask
 		// We need to map to the IPv6-mapped equivalent
 		ones, bits := network.Mask.Size()
@@ -251,9 +239,6 @@ func parseCIDROrIP(s string) (net.IP, *net.IPNet, error) {
 		return nil, nil, fmt.Errorf("invalid IP or CIDR: %s", s)
 	}
 	ip = parsed.To16()
-	if ip == nil {
-		return nil, nil, fmt.Errorf("invalid IP: %s", s)
-	}
 	mask := net.CIDRMask(128, 128)
 	network = &net.IPNet{IP: ip, Mask: mask}
 	return ip, network, nil

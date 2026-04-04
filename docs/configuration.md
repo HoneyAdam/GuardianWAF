@@ -253,6 +253,60 @@ events:
   storage: memory                # "memory" or "file"
   max_events: 100000             # Default: 100000
   file_path: /var/log/guardianwaf/events.jsonl  # Used when storage is "file"
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Alerting (Webhooks & Email)
+# ─────────────────────────────────────────────────────────────────────────────
+
+alerting:
+  enabled: false                 # Default: false
+
+  # Webhook targets (Slack, Discord, PagerDuty, generic)
+  webhooks:
+    - name: "security-slack"     # Human-readable name
+      url: "https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
+      type: "slack"              # Options: slack, discord, pagerduty, generic
+      events: ["block", "challenge"]  # Which events to alert on: block, challenge, log, all
+      min_score: 50              # Minimum score to trigger alert
+      cooldown: 5m               # Cooldown between alerts from same IP
+      headers: {}                # Additional headers for generic webhooks
+
+    - name: "security-discord"
+      url: "https://discord.com/api/webhooks/YOUR/WEBHOOK"
+      type: "discord"
+      events: ["block"]
+      min_score: 50
+      cooldown: 5m
+
+    - name: "pagerduty"
+      url: "https://events.pagerduty.com/v2/enqueue"
+      type: "pagerduty"
+      events: ["block", "challenge"]
+      min_score: 50
+      cooldown: 1m
+      headers:
+        Authorization: "Token token=YOUR_ROUTING_KEY"
+
+  # Email alerts via SMTP
+  emails:
+    - name: "security-team"
+      smtp_host: "smtp.gmail.com"
+      smtp_port: 587             # Default: 587
+      username: "your-email@gmail.com"
+      password: "your-app-password"
+      from: "alerts@yourdomain.com"
+      to: ["security@yourdomain.com", "admin@yourdomain.com"]
+      use_tls: true              # Enable TLS encryption
+      events: ["block"]          # Events to send email for
+      min_score: 75              # Higher threshold for emails
+      cooldown: 15m              # Longer cooldown for emails
+      subject: "[GuardianWAF] Security Alert - {{Action}} from {{ClientIP}}"
+      template: |                # Optional custom email template
+        Event ID: {{EventID}}
+        Action: {{Action}}
+        Client IP: {{ClientIP}}
+        Score: {{Score}}
+        Path: {{Method}} {{Path}}
 ```
 
 ---
@@ -280,6 +334,7 @@ All environment variables use the `GWAF_` prefix. These override values from the
 | `GWAF_TLS_LISTEN` | `tls.listen` | `:8443` |
 | `GWAF_TLS_CERT_FILE` | `tls.cert_file` | `/etc/ssl/cert.pem` |
 | `GWAF_TLS_KEY_FILE` | `tls.key_file` | `/etc/ssl/key.pem` |
+| `GWAF_ALERTING_ENABLED` | `alerting.enabled` | `true` |
 
 Example:
 

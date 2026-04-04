@@ -728,3 +728,72 @@ func TestFeedManager_loadURL_Jsonl(t *testing.T) {
 		t.Errorf("expected 2 entries, got %d", len(entries))
 	}
 }
+
+// Cover loadURL NewRequest error branch.
+func TestFeedManager_loadURL_InvalidURL(t *testing.T) {
+	fm := NewFeedManager(FeedConfig{Type: "url", URL: "://bad-url"})
+	_, err := fm.LoadOnce(context.Background())
+	if err == nil {
+		t.Error("expected error for invalid URL")
+	}
+}
+
+// Cover parseJSON decode error branch.
+func TestFeedManager_ParseJSON_Invalid(t *testing.T) {
+	fm := NewFeedManager(FeedConfig{Format: "json"})
+	_, err := fm.parseJSON(strings.NewReader("not valid json"))
+	if err == nil {
+		t.Error("expected error for invalid JSON")
+	}
+}
+
+// Cover NewLayer with feeds loading initial data.
+func TestLayer_WithFeed(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/feed.jsonl"
+	content := `{"ip":"1.2.3.4","score":90,"type":"malware"}` + "\n"
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := Config{
+		Enabled: true,
+		Feeds:   []FeedConfig{{Type: "file", Path: path, Format: "jsonl"}},
+	}
+	layer, err := NewLayer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify feed data was loaded during NewLayer
+	if layer.ipCache.Len() != 1 {
+		t.Errorf("expected 1 entry from feed, got %d", layer.ipCache.Len())
+	}
+}
+
+// Cover checkIP with invalid CIDR in cache.
+func TestCheckIP_InvalidCIDR(t *testing.T) {
+	layer, _ := NewLayer(Config{Enabled: true})
+	layer.cidrCache["not-a-valid-cidr"] = &ThreatInfo{Score: 50, Type: "test"}
+
+	info, ok := layer.checkIP(net.ParseIP("1.2.3.4"))
+	if ok {
+		t.Errorf("expected no match for invalid CIDR, got %+v", info)
+	}
+}
+
+// TestLayer_StartStop_WithFeeds covers Start/Stop loop bodies when feeds exist.
+func TestLayer_StartStop_WithFeeds(t *testing.T) {
+	cfg := Config{
+		Enabled: true,
+		Feeds: []FeedConfig{
+			{Type: "file", Path: "test.csv", Format: "csv", Refresh: time.Hour},
+		},
+	}
+	layer, err := NewLayer(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	layer.Start()
+	layer.Stop()
+}

@@ -1,5 +1,5 @@
-// Package alerting provides webhook-based alert delivery for GuardianWAF.
-// Sends notifications to Slack, Discord, or custom HTTP endpoints when
+// Package alerting provides webhook and email-based alert delivery for GuardianWAF.
+// Sends notifications to Slack, Discord, custom HTTP endpoints, or via SMTP email when
 // security events occur (blocks, challenges, high-score events).
 package alerting
 
@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/guardianwaf/guardianwaf/internal/config"
 	"github.com/guardianwaf/guardianwaf/internal/engine"
 )
 
@@ -21,7 +22,7 @@ import (
 type WebhookTarget struct {
 	Name     string
 	URL      string
-	Type     string   // "slack", "discord", "generic"
+	Type     string   // "slack", "discord", "generic", "pagerduty"
 	Events   []string // "block", "challenge", "log", "all"
 	MinScore int
 	Cooldown time.Duration
@@ -41,11 +42,12 @@ type Alert struct {
 	UserAgent string   `json:"user_agent,omitempty"`
 }
 
-// Manager manages webhook delivery for security events.
+// Manager manages webhook and email delivery for security events.
 type Manager struct {
-	webhooks   []webhook
-	httpClient *http.Client
-	logFn      func(level, msg string)
+	webhooks    []webhook
+	emailTargets []*EmailTarget
+	httpClient  *http.Client
+	logFn       func(level, msg string)
 
 	// Stats
 	sent   atomic.Int64
@@ -60,12 +62,13 @@ type webhook struct {
 
 // Stats holds alerting statistics.
 type Stats struct {
-	Sent         int64 `json:"sent"`
-	Failed       int64 `json:"failed"`
-	WebhookCount int   `json:"webhook_count"`
+	Sent         int64         `json:"sent"`
+	Failed       int64         `json:"failed"`
+	WebhookCount int           `json:"webhook_count"`
+	EmailCount   int           `json:"email_count"`
+	Email        EmailStats    `json:"email,omitempty"`
 }
 
-// NewManager creates an alerting manager from config.
 // NewManager creates an alerting manager with the given webhook targets.
 func NewManager(targets []WebhookTarget) *Manager {
 	m := &Manager{
@@ -85,6 +88,19 @@ func NewManager(targets []WebhookTarget) *Manager {
 	return m
 }
 
+// NewManagerWithEmail creates an alerting manager with both webhook and email targets.
+func NewManagerWithEmail(targets []WebhookTarget, emails []config.EmailConfig) *Manager {
+	m := NewManager(targets)
+
+	for _, cfg := range emails {
+		if cfg.SMTPHost != "" && len(cfg.To) > 0 {
+			m.emailTargets = append(m.emailTargets, NewEmailTarget(cfg))
+		}
+	}
+
+	return m
+}
+
 // SetLogger sets the log callback.
 func (m *Manager) SetLogger(fn func(level, msg string)) {
 	m.logFn = fn
@@ -96,10 +112,12 @@ func (m *Manager) GetStats() Stats {
 		Sent:         m.sent.Load(),
 		Failed:       m.failed.Load(),
 		WebhookCount: len(m.webhooks),
+		EmailCount:   len(m.emailTargets),
+		Email:        GetEmailStats(),
 	}
 }
 
-// HandleEvent processes a WAF event and fires matching webhooks.
+// HandleEvent processes a WAF event and fires matching webhooks and emails.
 func (m *Manager) HandleEvent(event *engine.Event) {
 	action := event.Action.String()
 
@@ -120,6 +138,7 @@ func (m *Manager) HandleEvent(event *engine.Event) {
 		UserAgent: event.UserAgent,
 	}
 
+	// Process webhooks
 	for i := range m.webhooks {
 		wh := &m.webhooks[i]
 
@@ -146,24 +165,48 @@ func (m *Manager) HandleEvent(event *engine.Event) {
 		// Fire async
 		go m.send(&wh.config, &alert)
 	}
+
+	// Process email alerts
+	for _, et := range m.emailTargets {
+		cfg := et.config
+
+		// Check if this email target cares about this event type
+		if !matchesEvent(cfg.Events, action) {
+			continue
+		}
+
+		// Check minimum score
+		if cfg.MinScore > 0 && event.Score < cfg.MinScore {
+			continue
+		}
+
+		// Cooldown per IP
+		if et.cooldown > 0 {
+			if last, ok := et.lastFire.Load(event.ClientIP); ok {
+				if time.Since(last.(time.Time)) < et.cooldown {
+					continue
+				}
+			}
+			et.lastFire.Store(event.ClientIP, time.Now())
+		}
+
+		// Send email async
+		go m.SendEmail(et, event)
+	}
 }
 
 // send delivers an alert to a webhook endpoint.
 func (m *Manager) send(wc *WebhookTarget, alert *Alert) {
 	var body []byte
-	var err error
-
 	switch wc.Type {
 	case "slack":
-		body, err = json.Marshal(slackPayload(alert))
+		body, _ = json.Marshal(slackPayload(alert))
 	case "discord":
-		body, err = json.Marshal(discordPayload(alert))
+		body, _ = json.Marshal(discordPayload(alert))
+	case "pagerduty":
+		body, _ = json.Marshal(pagerdutyPayload(alert))
 	default:
-		body, err = json.Marshal(alert)
-	}
-	if err != nil {
-		m.failed.Add(1)
-		return
+		body, _ = json.Marshal(alert)
 	}
 
 	ctx := context.Background()
@@ -281,4 +324,135 @@ func discordPayload(a *Alert) map[string]any {
 			},
 		},
 	}
+}
+
+// --- PagerDuty Events API v2 format ---
+
+func pagerdutyPayload(a *Alert) map[string]any {
+	// Map action to PagerDuty severity
+	severity := "warning"
+	switch a.Action {
+	case "block":
+		severity = "critical"
+	case "challenge":
+		severity = "warning"
+	case "log":
+		severity = "info"
+	}
+
+	// Create dedup key based on IP and action
+	dedupKey := fmt.Sprintf("guardianwaf-%s-%s", a.ClientIP, a.Action)
+
+	return map[string]any{
+		"routing_key":  "", // Will be set via custom header or URL
+		"event_action": "trigger",
+		"dedup_key":    dedupKey,
+		"payload": map[string]any{
+			"summary":   fmt.Sprintf("GuardianWAF %s: %s %s from %s", a.Action, a.Method, a.Path, a.ClientIP),
+			"severity":  severity,
+			"source":    a.ClientIP,
+			"timestamp": a.Timestamp,
+			"component": "WAF",
+			"group":     "security",
+			"class":     a.Action,
+			"custom_details": map[string]any{
+				"event_id":   a.EventID,
+				"client_ip":  a.ClientIP,
+				"method":     a.Method,
+				"path":       a.Path,
+				"score":      a.Score,
+				"action":     a.Action,
+				"user_agent": a.UserAgent,
+				"findings":   a.Findings,
+			},
+		},
+	}
+}
+
+// AddWebhook adds a new webhook target at runtime.
+func (m *Manager) AddWebhook(target WebhookTarget) {
+	wh := webhook{
+		config:   target,
+		cooldown: target.Cooldown,
+		lastFire: &sync.Map{},
+	}
+	if wh.cooldown <= 0 {
+		wh.cooldown = 30 * time.Second
+	}
+	m.webhooks = append(m.webhooks, wh)
+	m.logFn("info", fmt.Sprintf("Webhook target added: %s", target.Name))
+}
+
+// RemoveWebhook removes a webhook target by name. Returns true if found and removed.
+func (m *Manager) RemoveWebhook(name string) bool {
+	for i, wh := range m.webhooks {
+		if wh.config.Name == name {
+			m.webhooks = append(m.webhooks[:i], m.webhooks[i+1:]...)
+			m.logFn("info", fmt.Sprintf("Webhook target removed: %s", name))
+			return true
+		}
+	}
+	return false
+}
+
+// AddEmailTarget adds a new email target at runtime.
+func (m *Manager) AddEmailTarget(cfg config.EmailConfig) {
+	if cfg.SMTPHost != "" && len(cfg.To) > 0 {
+		m.emailTargets = append(m.emailTargets, NewEmailTarget(cfg))
+		m.logFn("info", fmt.Sprintf("Email target added: %s", cfg.Name))
+	}
+}
+
+// RemoveEmailTarget removes an email target by name. Returns true if found and removed.
+func (m *Manager) RemoveEmailTarget(name string) bool {
+	for i, et := range m.emailTargets {
+		if et.config.Name == name {
+			m.emailTargets = append(m.emailTargets[:i], m.emailTargets[i+1:]...)
+			m.logFn("info", fmt.Sprintf("Email target removed: %s", name))
+			return true
+		}
+	}
+	return false
+}
+
+// TestAlert sends a test alert to the specified target.
+func (m *Manager) TestAlert(targetName string) error {
+	testAlert := Alert{
+		Timestamp: time.Now().Format(time.RFC3339),
+		EventID:   "test-" + time.Now().Format("20060102150405"),
+		ClientIP:  "127.0.0.1",
+		Method:    "GET",
+		Path:      "/test/alert",
+		Action:    "block",
+		Score:     75,
+		Findings:  []string{"Test alert from GuardianWAF MCP"},
+		UserAgent: "GuardianWAF-Test/1.0",
+	}
+
+	// Try webhooks first
+	for i := range m.webhooks {
+		if m.webhooks[i].config.Name == targetName {
+			m.send(&m.webhooks[i].config, &testAlert)
+			return nil
+		}
+	}
+
+	// Try email targets
+	for _, et := range m.emailTargets {
+		if et.config.Name == targetName {
+			event := engine.Event{
+				ID:        testAlert.EventID,
+				Timestamp: time.Now(),
+				ClientIP:  testAlert.ClientIP,
+				Method:    testAlert.Method,
+				Path:      testAlert.Path,
+				Score:     testAlert.Score,
+				UserAgent: testAlert.UserAgent,
+			}
+			m.SendEmail(et, &event)
+			return nil
+		}
+	}
+
+	return fmt.Errorf("target %s not found", targetName)
 }

@@ -295,3 +295,145 @@ func TestMarshalYAML_Map(t *testing.T) {
 		t.Error("expected allow_methods in output")
 	}
 }
+
+// --- populateAlerting ---
+
+func TestPopulateAlerting(t *testing.T) {
+	yaml := `
+alerting:
+  enabled: true
+  webhooks:
+    - name: primary
+      url: https://hooks.example.com/webhook
+      type: slack
+      events: [block, challenge]
+      min_score: 50
+      cooldown: 5m
+      headers:
+        Authorization: Bearer secret
+`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	cfg := DefaultConfig()
+	if err := PopulateFromNode(cfg, node); err != nil {
+		t.Fatalf("PopulateFromNode: %v", err)
+	}
+	if !cfg.Alerting.Enabled {
+		t.Error("expected alerting enabled")
+	}
+	if len(cfg.Alerting.Webhooks) != 1 {
+		t.Fatalf("expected 1 webhook, got %d", len(cfg.Alerting.Webhooks))
+	}
+	wh := cfg.Alerting.Webhooks[0]
+	if wh.Name != "primary" {
+		t.Errorf("expected name 'primary', got %q", wh.Name)
+	}
+	if wh.URL != "https://hooks.example.com/webhook" {
+		t.Errorf("expected URL, got %q", wh.URL)
+	}
+	if wh.Type != "slack" {
+		t.Errorf("expected type 'slack', got %q", wh.Type)
+	}
+	if len(wh.Events) != 2 {
+		t.Errorf("expected 2 events, got %d", len(wh.Events))
+	}
+	if wh.MinScore != 50 {
+		t.Errorf("expected min_score 50, got %d", wh.MinScore)
+	}
+	if wh.Cooldown != 5*time.Minute {
+		t.Errorf("expected cooldown 5m, got %v", wh.Cooldown)
+	}
+	if wh.Headers["Authorization"] != "Bearer secret" {
+		t.Errorf("expected Authorization header, got %q", wh.Headers["Authorization"])
+	}
+}
+
+func TestPopulateAlerting_InvalidBool(t *testing.T) {
+	yaml := `
+alerting:
+  enabled: notabool
+`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid boolean")
+	}
+}
+
+func TestPopulateAlerting_InvalidMinScore(t *testing.T) {
+	yaml := `
+alerting:
+  enabled: true
+  webhooks:
+    - name: bad
+      min_score: notanumber
+`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid min_score")
+	}
+}
+
+func TestPopulateAlerting_InvalidCooldown(t *testing.T) {
+	yaml := `
+alerting:
+  enabled: true
+  webhooks:
+    - name: bad
+      cooldown: notaduration
+`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	cfg := DefaultConfig()
+	err = PopulateFromNode(cfg, node)
+	if err == nil {
+		t.Fatal("expected error for invalid cooldown")
+	}
+}
+
+func TestPopulateAlerting_NonMapNode(t *testing.T) {
+	alert := AlertingConfig{}
+	node := &Node{Kind: ScalarNode, Value: "just a string"}
+	err := populateAlerting(&alert, node)
+	if err != nil {
+		t.Fatalf("expected no error for non-map node, got %v", err)
+	}
+}
+
+func TestPopulateAlerting_WebhookNonMapItem(t *testing.T) {
+	yaml := `
+alerting:
+  enabled: true
+  webhooks:
+    - "not a map"
+    - name: valid
+      url: https://example.com
+`
+	node, err := Parse([]byte(yaml))
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	cfg := DefaultConfig()
+	if err := PopulateFromNode(cfg, node); err != nil {
+		t.Fatalf("PopulateFromNode: %v", err)
+	}
+	if len(cfg.Alerting.Webhooks) != 1 {
+		t.Fatalf("expected 1 webhook (skipping non-map item), got %d", len(cfg.Alerting.Webhooks))
+	}
+	if cfg.Alerting.Webhooks[0].Name != "valid" {
+		t.Errorf("expected webhook 'valid', got %q", cfg.Alerting.Webhooks[0].Name)
+	}
+}

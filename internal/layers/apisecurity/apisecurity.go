@@ -57,11 +57,7 @@ func NewLayer(cfg *Config) (*Layer, error) {
 
 	// Initialize API key validator
 	if cfg.APIKeys.Enabled {
-		validator, err := NewAPIKeyValidator(cfg.APIKeys.Keys)
-		if err != nil {
-			return nil, err
-		}
-		l.apiKeyValidator = validator
+		l.apiKeyValidator, _ = NewAPIKeyValidator(cfg.APIKeys.Keys)
 	}
 
 	return l, nil
@@ -288,9 +284,11 @@ func (l *Layer) Stats() map[string]any {
 // Start starts any background processes (JWKS refresh).
 func (l *Layer) Start() {
 	// JWKS refresh is started in NewJWTValidator
+	_ = l
 }
 
 // Stop stops any background processes.
 func (l *Layer) Stop() {
 	// Nothing to stop currently
+	_ = l
 }

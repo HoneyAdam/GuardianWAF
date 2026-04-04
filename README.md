@@ -66,6 +66,14 @@ GuardianWAF is a production-grade Web Application Firewall written in pure Go wi
 - Hard cost limits: tokens/hour, tokens/day, requests/hour to prevent runaway API costs
 - See [AI Analysis Guide](docs/ai-analysis.md) for setup and configuration
 
+**Alerting & Notifications**
+- Real-time webhook alerts for Slack, Discord, PagerDuty, and generic HTTP endpoints
+- SMTP email alerts with TLS encryption support
+- Per-target event filtering (block, challenge, log, or all events)
+- Minimum score thresholds and cooldown periods per IP
+- Custom email templates with variable substitution
+- Dashboard integration with alerting statistics
+
 **Deployment**
 - Three deployment modes: standalone reverse proxy, Go library middleware, sidecar proxy
 - Single static binary with zero external Go dependencies -- no CGO, no shared libraries
@@ -90,7 +98,7 @@ GuardianWAF is a production-grade Web Application Firewall written in pure Go wi
 - In-memory or file-based event storage (up to 100K events)
 
 **Developer Experience**
-- MCP server with 15 tools over stdio + SSE transports (Claude Code, Claude Desktop, VS Code)
+- MCP server with 21 tools over stdio + SSE transports (Claude Code, Claude Desktop, VS Code)
 - Functional options API for library mode
 - Event callbacks for custom alerting
 - `check` command for dry-run request testing

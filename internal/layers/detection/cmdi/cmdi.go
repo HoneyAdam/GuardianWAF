@@ -172,9 +172,6 @@ func checkShellMetachars(_, lower, location string) []engine.Finding {
 				continue
 			}
 			cmd := extractFirstWord(trimmed)
-			if cmd == "" {
-				continue
-			}
 
 			if isReconCommand(cmd) {
 				score := max(s.score, 65)

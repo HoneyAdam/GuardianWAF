@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"net/http"
 	"os"
@@ -49,6 +50,12 @@ var (
 	date    = "unknown"
 )
 
+// osExit and signalNotify are injectable for testing.
+var (
+	osExit       = os.Exit
+	signalNotify = signal.Notify
+)
+
 func init() {
 	// Register UA parser so Event structs get browser/OS/device info
 	engine.SetUAParser(func(ua string) (browser, brVersion, os, deviceType string, isBot bool) {
@@ -58,29 +65,36 @@ func init() {
 }
 
 func main() {
-	if len(os.Args) < 2 {
+	osExit(runMain(os.Args))
+}
+
+func runMain(args []string) int {
+	if len(args) < 2 {
 		printUsage()
-		os.Exit(1)
+		return 1
 	}
 
-	switch os.Args[1] {
+	switch args[1] {
 	case "serve":
-		cmdServe(os.Args[2:])
+		cmdServe(args[2:])
 	case "sidecar":
-		cmdSidecar(os.Args[2:])
+		cmdSidecar(args[2:])
 	case "check":
-		cmdCheck(os.Args[2:])
+		cmdCheck(args[2:])
 	case "validate":
-		cmdValidate(os.Args[2:])
+		cmdValidate(args[2:])
+	case "test-alert":
+		cmdTestAlert(args[2:])
 	case "version":
 		cmdVersion()
 	case "help", "-h", "--help":
 		printUsage()
 	default:
-		fmt.Fprintf(os.Stderr, "Unknown command: %s\n\n", os.Args[1])
+		fmt.Fprintf(os.Stderr, "Unknown command: %s\n\n", args[1])
 		printUsage()
-		os.Exit(1)
+		return 1
 	}
+	return 0
 }
 
 func printUsage() {
@@ -94,6 +108,7 @@ COMMANDS:
   sidecar     Start in lightweight sidecar proxy mode
   check       Test a request against the WAF (dry-run)
   validate    Validate a configuration file
+  test-alert  Send test alert to configured targets
   version     Print version information
   help        Show help
 
@@ -142,7 +157,7 @@ func cmdServe(args []string) {
 	// 3. Validate
 	if err := config.Validate(cfg); err != nil {
 		fmt.Fprintf(os.Stderr, "Configuration error: %v\n", err)
-		os.Exit(1)
+		osExit(1)
 	}
 
 	// 4. Create event infrastructure
@@ -153,7 +168,7 @@ func cmdServe(args []string) {
 	eng, err := engine.NewEngine(cfg, eventStore, eventBus)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to create engine: %v\n", err)
-		os.Exit(1)
+		osExit(1)
 	}
 
 	// 6. Wire all layers
@@ -378,13 +393,10 @@ func cmdServe(args []string) {
 	// 10. Start MCP server if enabled
 	var mcpSSE *mcp.SSEHandler
 	if cfg.MCP.Enabled {
-		if cfg.MCP.Transport == "stdio" {
-			go startMCPServer(eng, cfg, eventStore)
-		}
 		// SSE transport — served via dashboard port, auth-protected
 		mcpSrv := mcp.NewServer(nil, nil)
 		mcpSrv.SetServerInfo("guardianwaf", version)
-		mcpSrv.SetEngine(&mcpEngineAdapter{engine: eng, cfg: cfg, eventStore: eventStore})
+		mcpSrv.SetEngine(&mcpEngineAdapter{engine: eng, cfg: cfg, eventStore: eventStore, alertMgr: nil})
 		mcpSrv.RegisterAllTools()
 		mcpSSE = mcp.NewSSEHandler(mcpSrv, cfg.Dashboard.APIKey)
 		eng.Logs.Info("MCP SSE transport enabled")
@@ -548,7 +560,8 @@ func cmdServe(args []string) {
 	}
 
 	// 10c. Start alerting/webhooks if enabled
-	if cfg.Alerting.Enabled && len(cfg.Alerting.Webhooks) > 0 {
+	var alertMgr *alerting.Manager
+	if cfg.Alerting.Enabled && (len(cfg.Alerting.Webhooks) > 0 || len(cfg.Alerting.Emails) > 0) {
 		var targets []alerting.WebhookTarget
 		for _, wc := range cfg.Alerting.Webhooks {
 			targets = append(targets, alerting.WebhookTarget{
@@ -557,7 +570,7 @@ func cmdServe(args []string) {
 				Cooldown: wc.Cooldown, Headers: wc.Headers,
 			})
 		}
-		alertMgr := alerting.NewManager(targets)
+		alertMgr = alerting.NewManagerWithEmail(targets, cfg.Alerting.Emails)
 		alertMgr.SetLogger(eng.Logs.Add)
 
 		// Subscribe to event bus
@@ -568,7 +581,17 @@ func cmdServe(args []string) {
 				alertMgr.HandleEvent(&event)
 			}
 		}()
-		eng.Logs.Infof("Alerting enabled (%d webhooks)", len(targets))
+		eng.Logs.Infof("Alerting enabled (%d webhooks, %d emails)", len(targets), len(cfg.Alerting.Emails))
+
+		// Set alerting stats for dashboard
+		if dash != nil {
+			dash.SetAlertingStatsFn(func() any { return alertMgr.GetStats() })
+		}
+
+		// Start MCP stdio server now that alertMgr is available
+		if cfg.MCP.Enabled && cfg.MCP.Transport == "stdio" {
+			go startMCPServer(eng, cfg, eventStore, alertMgr, os.Stdin, os.Stdout)
+		}
 	}
 
 	// 10d. Start Docker auto-discovery if enabled
@@ -651,7 +674,7 @@ func cmdServe(args []string) {
 
 	// 12. Graceful shutdown handling
 	shutdown := make(chan os.Signal, 1)
-	signal.Notify(shutdown, syscall.SIGINT, syscall.SIGTERM)
+	signalNotify(shutdown, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
 		msg := fmt.Sprintf("GuardianWAF %s starting in %s mode on %s", version, cfg.Mode, cfg.Listen)
@@ -660,7 +683,7 @@ func cmdServe(args []string) {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			eng.Logs.Errorf("HTTP server error: %v", err)
 			fmt.Fprintf(os.Stderr, "HTTP server error: %v\n", err)
-			os.Exit(1)
+			osExit(1)
 		}
 	}()
 
@@ -746,8 +769,8 @@ func cmdSidecar(args []string) {
 	fs.StringVar(configPath, "c", "", "Path to config file (short)")
 	upstream := fs.String("upstream", "", "Upstream URL (required if no config)")
 	fs.StringVar(upstream, "u", "", "Upstream URL (short)")
-	listenAddr := fs.String("listen", ":8088", "Listen address")
-	fs.StringVar(listenAddr, "l", ":8088", "Listen address (short)")
+	listenAddr := fs.String("listen", "", "Listen address")
+	fs.StringVar(listenAddr, "l", "", "Listen address (short)")
 	mode := fs.String("mode", "", "Override WAF mode")
 	fs.StringVar(mode, "m", "", "Override WAF mode (short)")
 	logLevel := fs.String("log-level", "", "Override log level")
@@ -792,13 +815,13 @@ func cmdSidecar(args []string) {
 	// Validate we have an upstream
 	if len(cfg.Upstreams) == 0 {
 		fmt.Fprintf(os.Stderr, "Error: --upstream is required when no config file is provided\n")
-		os.Exit(1)
+		osExit(1)
 	}
 
 	// Validate
 	if err := config.Validate(cfg); err != nil {
 		fmt.Fprintf(os.Stderr, "Configuration error: %v\n", err)
-		os.Exit(1)
+		osExit(1)
 	}
 
 	// Create event infrastructure
@@ -809,7 +832,7 @@ func cmdSidecar(args []string) {
 	eng, err := engine.NewEngine(cfg, eventStore, eventBus)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to create engine: %v\n", err)
-		os.Exit(1)
+		osExit(1)
 	}
 
 	// Wire layers
@@ -906,13 +929,13 @@ func cmdSidecar(args []string) {
 
 	// Graceful shutdown
 	shutdown := make(chan os.Signal, 1)
-	signal.Notify(shutdown, syscall.SIGINT, syscall.SIGTERM)
+	signalNotify(shutdown, syscall.SIGINT, syscall.SIGTERM)
 
 	go func() {
 		fmt.Printf("GuardianWAF sidecar %s starting on %s -> %s\n", version, cfg.Listen, upstreamSummary(cfg))
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			fmt.Fprintf(os.Stderr, "HTTP server error: %v\n", err)
-			os.Exit(1)
+			osExit(1)
 		}
 	}()
 
@@ -1044,7 +1067,7 @@ func cmdCheck(args []string) {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		fs.Usage()
-		os.Exit(1)
+		osExit(1)
 	}
 
 	// Print results
@@ -1080,7 +1103,7 @@ func cmdCheck(args []string) {
 
 	// Exit code based on action
 	if result.Action == "block" {
-		os.Exit(2)
+		osExit(2)
 	}
 }
 
@@ -1113,7 +1136,7 @@ func cmdValidate(args []string) {
 	result, err := runValidate(*configPath)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "%v\n", err)
-		os.Exit(1)
+		osExit(1)
 	}
 
 	cfg := result.Config
@@ -1130,6 +1153,80 @@ func cmdValidate(args []string) {
 	fmt.Printf("  Bot Detect: %v\n", cfg.WAF.BotDetection.Enabled)
 	fmt.Printf("  Dashboard:  %v (%s)\n", cfg.Dashboard.Enabled, cfg.Dashboard.Listen)
 	fmt.Printf("  MCP:        %v (%s)\n", cfg.MCP.Enabled, cfg.MCP.Transport)
+	fmt.Printf("  Alerting:   %v (%d webhooks, %d emails)\n", cfg.Alerting.Enabled, len(cfg.Alerting.Webhooks), len(cfg.Alerting.Emails))
+}
+
+func cmdTestAlert(args []string) {
+	fs := flag.NewFlagSet("test-alert", flag.ExitOnError)
+	configPath := fs.String("config", "guardianwaf.yaml", "Path to config file")
+	target := fs.String("target", "", "Target name (webhook or email)")
+	all := fs.Bool("all", false, "Test all configured targets")
+	_ = fs.Parse(args)
+
+	cfg, err := config.LoadFile(*configPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load config: %v\n", err)
+		osExit(1)
+	}
+
+	if !cfg.Alerting.Enabled {
+		fmt.Fprintf(os.Stderr, "Alerting is not enabled in configuration\n")
+		osExit(1)
+	}
+
+	// Create alerting manager
+	var targets []alerting.WebhookTarget
+	for _, w := range cfg.Alerting.Webhooks {
+		targets = append(targets, alerting.WebhookTarget{
+			Name:     w.Name,
+			URL:      w.URL,
+			Type:     w.Type,
+			Events:   w.Events,
+			MinScore: w.MinScore,
+			Cooldown: w.Cooldown,
+			Headers:  w.Headers,
+		})
+	}
+
+	mgr := alerting.NewManagerWithEmail(targets, cfg.Alerting.Emails)
+
+	// Test specific target or all
+	if *all {
+		fmt.Println("Testing all configured alert targets...")
+		for _, w := range cfg.Alerting.Webhooks {
+			fmt.Printf("  Testing webhook: %s... ", w.Name)
+			if err := mgr.TestAlert(w.Name); err != nil {
+				fmt.Printf("FAILED: %v\n", err)
+			} else {
+				fmt.Println("OK")
+			}
+		}
+		for _, e := range cfg.Alerting.Emails {
+			fmt.Printf("  Testing email: %s... ", e.Name)
+			if err := mgr.TestAlert(e.Name); err != nil {
+				fmt.Printf("FAILED: %v\n", err)
+			} else {
+				fmt.Println("OK")
+			}
+		}
+	} else if *target != "" {
+		fmt.Printf("Testing alert target: %s... ", *target)
+		if err := mgr.TestAlert(*target); err != nil {
+			fmt.Printf("FAILED: %v\n", err)
+			osExit(1)
+		}
+		fmt.Println("OK")
+	} else {
+		fmt.Fprintf(os.Stderr, "Usage: guardianwaf test-alert -target=<name> or -all\n")
+		fmt.Fprintf(os.Stderr, "\nConfigured targets:\n")
+		for _, w := range cfg.Alerting.Webhooks {
+			fmt.Fprintf(os.Stderr, "  Webhook: %s (%s)\n", w.Name, w.Type)
+		}
+		for _, e := range cfg.Alerting.Emails {
+			fmt.Fprintf(os.Stderr, "  Email: %s (%s)\n", e.Name, e.SMTPHost)
+		}
+		osExit(1)
+	}
 }
 
 // ConfigSummary holds summary information about a loaded config.
@@ -1178,7 +1275,7 @@ func loadConfig(path string) *config.Config {
 			}
 		}
 		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
-		os.Exit(1)
+		osExit(1)
 	}
 	return cfg
 }
@@ -1603,10 +1700,16 @@ func startDashboard(cfg *config.Config, eng *engine.Engine) (*http.Server, *dash
 
 // startMCPServer starts the MCP JSON-RPC server over stdio.
 // It runs in a goroutine and blocks until stdin is closed.
-func startMCPServer(eng *engine.Engine, cfg *config.Config, store events.EventStore) {
-	mcpSrv := mcp.NewServer(os.Stdin, os.Stdout)
+func startMCPServer(eng *engine.Engine, cfg *config.Config, store events.EventStore, alertMgr *alerting.Manager, stdin io.Reader, stdout io.Writer) {
+	if stdin == nil {
+		stdin = os.Stdin
+	}
+	if stdout == nil {
+		stdout = os.Stdout
+	}
+	mcpSrv := mcp.NewServer(stdin, stdout)
 	mcpSrv.SetServerInfo("guardianwaf", version)
-	mcpSrv.SetEngine(&mcpEngineAdapter{engine: eng, cfg: cfg, eventStore: store})
+	mcpSrv.SetEngine(&mcpEngineAdapter{engine: eng, cfg: cfg, eventStore: store, alertMgr: alertMgr})
 	mcpSrv.RegisterAllTools()
 
 	if err := mcpSrv.Run(); err != nil {
@@ -1637,6 +1740,7 @@ type mcpEngineAdapter struct {
 	engine     *engine.Engine
 	cfg        *config.Config
 	eventStore events.EventStore
+	alertMgr   *alerting.Manager
 }
 
 func (a *mcpEngineAdapter) GetStats() any {
@@ -1940,6 +2044,93 @@ func (a *mcpEngineAdapter) TestRequest(method, urlStr string, headers map[string
 		"findings": findings,
 		"duration": event.Duration.String(),
 	}, nil
+}
+
+func (a *mcpEngineAdapter) GetAlertingStatus() any {
+	if a.alertMgr == nil {
+		return map[string]any{
+			"enabled":       false,
+			"webhook_count": 0,
+			"email_count":   0,
+			"sent":          0,
+			"failed":        0,
+		}
+	}
+	stats := a.alertMgr.GetStats()
+	return map[string]any{
+		"enabled":       true,
+		"webhook_count": stats.WebhookCount,
+		"email_count":   stats.EmailCount,
+		"sent":          stats.Sent,
+		"failed":        stats.Failed,
+	}
+}
+
+func (a *mcpEngineAdapter) AddWebhook(name, url, webhookType string, events []string, minScore int, cooldown string) error {
+	if a.alertMgr == nil {
+		return fmt.Errorf("alerting manager not available")
+	}
+	d, err := time.ParseDuration(cooldown)
+	if err != nil && cooldown != "" {
+		return fmt.Errorf("invalid cooldown duration: %w", err)
+	}
+	target := alerting.WebhookTarget{
+		Name:     name,
+		URL:      url,
+		Type:     webhookType,
+		Events:   events,
+		MinScore: minScore,
+		Cooldown: d,
+	}
+	a.alertMgr.AddWebhook(target)
+	return nil
+}
+
+func (a *mcpEngineAdapter) RemoveWebhook(name string) error {
+	if a.alertMgr == nil {
+		return fmt.Errorf("alerting manager not available")
+	}
+	if !a.alertMgr.RemoveWebhook(name) {
+		return fmt.Errorf("webhook %s not found", name)
+	}
+	return nil
+}
+
+func (a *mcpEngineAdapter) AddEmailTarget(name, smtpHost string, smtpPort int, username, password, from string, to []string, useTLS bool, events []string, minScore int) error {
+	if a.alertMgr == nil {
+		return fmt.Errorf("alerting manager not available")
+	}
+	cfg := config.EmailConfig{
+		Name:     name,
+		SMTPHost: smtpHost,
+		SMTPPort: smtpPort,
+		Username: username,
+		Password: password,
+		From:     from,
+		To:       to,
+		UseTLS:   useTLS,
+		Events:   events,
+		MinScore: minScore,
+	}
+	a.alertMgr.AddEmailTarget(cfg)
+	return nil
+}
+
+func (a *mcpEngineAdapter) RemoveEmailTarget(name string) error {
+	if a.alertMgr == nil {
+		return fmt.Errorf("alerting manager not available")
+	}
+	if !a.alertMgr.RemoveEmailTarget(name) {
+		return fmt.Errorf("email target %s not found", name)
+	}
+	return nil
+}
+
+func (a *mcpEngineAdapter) TestAlert(target string) error {
+	if a.alertMgr == nil {
+		return fmt.Errorf("alerting manager not available")
+	}
+	return a.alertMgr.TestAlert(target)
 }
 
 // collectACMEDomains gathers all domains that need ACME certificates.

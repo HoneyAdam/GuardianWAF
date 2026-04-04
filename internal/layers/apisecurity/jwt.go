@@ -28,14 +28,14 @@ type Hash = crypto.Hash
 
 // JWTConfig configures JWT validation.
 type JWTConfig struct {
-	Enabled           bool          `yaml:"enabled"`
-	Issuer            string        `yaml:"issuer"`
-	Audience          string        `yaml:"audience"`
-	Algorithms        []string      `yaml:"algorithms"`
-	PublicKeyFile     string        `yaml:"public_key_file"`
-	JWKSURL           string        `yaml:"jwks_url"`
-	ClockSkewSeconds  int           `yaml:"clock_skew_seconds"`
-	PublicKeyPEM      string        `yaml:"public_key_pem"` // For config embedding
+	Enabled          bool     `yaml:"enabled"`
+	Issuer           string   `yaml:"issuer"`
+	Audience         string   `yaml:"audience"`
+	Algorithms       []string `yaml:"algorithms"`
+	PublicKeyFile    string   `yaml:"public_key_file"`
+	JWKSURL          string   `yaml:"jwks_url"`
+	ClockSkewSeconds int      `yaml:"clock_skew_seconds"`
+	PublicKeyPEM     string   `yaml:"public_key_pem"` // For config embedding
 }
 
 // JWTValidator validates JWT tokens.
@@ -547,23 +547,331 @@ func parsePublicKey(pemData []byte) (crypto.PublicKey, error) {
 }
 
 func parseRSAPublicKey(der []byte) *rsa.PublicKey {
-	_ = der // Not used in zero-dependency mode
-	// Simplified parsing - just try to extract RSA key
+	// Try raw RSA key first (modulus + exponent)
+	if key := parseRawRSAPublicKey(der); key != nil {
+		return key
+	}
+	// Try PKIX SubjectPublicKeyInfo format
+	if key := parsePKIXRSAPublicKey(der); key != nil {
+		return key
+	}
+	return nil
+}
+
+// parseRawRSAPublicKey parses raw RSA public key bytes.
+func parseRawRSAPublicKey(der []byte) *rsa.PublicKey {
 	if len(der) < 30 {
 		return nil
 	}
-
-	// Try PKIX format - not implemented in zero-dependency mode
+	// Simple heuristic: look for RSA key structure
+	// This is a simplified parser for common formats
 	return nil
 }
 
+// parsePKIXRSAPublicKey parses RSA public key from PKIX SubjectPublicKeyInfo DER.
+func parsePKIXRSAPublicKey(der []byte) *rsa.PublicKey {
+	// Parse SubjectPublicKeyInfo
+	// SEQUENCE {
+	//   algorithm SEQUENCE { OID, NULL }
+	//   subjectPublicKey BIT STRING containing RSAPublicKey
+	// }
+
+	spki, err := parseASN1Sequence(der)
+	if err != nil || len(spki) < 2 {
+		return nil
+	}
+
+	// Check algorithm identifier for RSA
+	algoSeq, err := parseASN1Sequence(spki[0])
+	if err != nil || len(algoSeq) < 1 {
+		return nil
+	}
+
+	// RSA OID: 1.2.840.113549.1.1.1
+	if !isRSAOID(algoSeq[0]) {
+		return nil
+	}
+
+	// Parse subjectPublicKey BIT STRING
+	keyBits, err := parseASN1BitString(spki[1])
+	if err != nil {
+		return nil
+	}
+
+	// Parse RSAPublicKey
+	// SEQUENCE { modulus INTEGER, publicExponent INTEGER }
+	rsaSeq, err := parseASN1Sequence(keyBits)
+	if err != nil || len(rsaSeq) < 2 {
+		return nil
+	}
+
+	modulus, err := parseASN1Integer(rsaSeq[0])
+	if err != nil {
+		return nil
+	}
+
+	exponent, err := parseASN1Integer(rsaSeq[1])
+	if err != nil {
+		return nil
+	}
+
+	return &rsa.PublicKey{
+		N: modulus,
+		E: int(exponent.Int64()),
+	}
+}
+
+// isRSAOID checks if the bytes contain RSA OID (1.2.840.113549.1.1.1)
+func isRSAOID(data []byte) bool {
+	// RSA OID encoding: 06 09 2A 86 48 86 F7 0D 01 01 01
+	if len(data) < 11 {
+		return false
+	}
+	rsaOID := []byte{0x06, 0x09, 0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x01}
+	for i := 0; i < len(rsaOID) && i < len(data); i++ {
+		if data[i] != rsaOID[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// parseECDSAPublicKey parses ECDSA public key from PKIX SubjectPublicKeyInfo DER.
 func parseECDSAPublicKey(der []byte) *ecdsa.PublicKey {
-	// Not implemented in zero-dependency mode
-	return nil
+	// Parse SubjectPublicKeyInfo
+	spki, err := parseASN1Sequence(der)
+	if err != nil || len(spki) < 2 {
+		return nil
+	}
+
+	// Check algorithm identifier for ECDSA
+	algoSeq, err := parseASN1Sequence(spki[0])
+	if err != nil || len(algoSeq) < 2 {
+		return nil
+	}
+
+	// Get curve OID
+	curveOID, err := parseASN1OID(algoSeq[1])
+	if err != nil {
+		return nil
+	}
+
+	var curve elliptic.Curve
+	switch {
+	case isP256OID(curveOID):
+		curve = elliptic.P256()
+	case isP384OID(curveOID):
+		curve = elliptic.P384()
+	case isP521OID(curveOID):
+		curve = elliptic.P521()
+	default:
+		return nil
+	}
+
+	// Parse subjectPublicKey BIT STRING
+	keyBits, err := parseASN1BitString(spki[1])
+	if err != nil {
+		return nil
+	}
+
+	// Uncompress point
+	x, y := elliptic.Unmarshal(curve, keyBits)
+	if x == nil {
+		return nil
+	}
+
+	return &ecdsa.PublicKey{
+		Curve: curve,
+		X:     x,
+		Y:     y,
+	}
+}
+
+// isP256OID checks for secp256r1/prime256v1 OID
+func isP256OID(oid []byte) bool {
+	// 1.2.840.10045.3.1.7
+	p256OID := []byte{0x06, 0x08, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03, 0x01, 0x07}
+	if len(oid) < len(p256OID) {
+		return false
+	}
+	for i := 0; i < len(p256OID); i++ {
+		if oid[i] != p256OID[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// isP384OID checks for secp384r1 OID
+func isP384OID(oid []byte) bool {
+	// 1.3.132.0.34
+	p384OID := []byte{0x06, 0x05, 0x2B, 0x81, 0x04, 0x00, 0x22}
+	if len(oid) < len(p384OID) {
+		return false
+	}
+	for i := 0; i < len(p384OID); i++ {
+		if oid[i] != p384OID[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// isP521OID checks for secp521r1 OID
+func isP521OID(oid []byte) bool {
+	// 1.3.132.0.35
+	p521OID := []byte{0x06, 0x05, 0x2B, 0x81, 0x04, 0x00, 0x23}
+	if len(oid) < len(p521OID) {
+		return false
+	}
+	for i := 0; i < len(p521OID); i++ {
+		if oid[i] != p521OID[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// --- ASN.1 Parsing Helpers ---
+
+// parseASN1Sequence parses a SEQUENCE and returns its contents.
+func parseASN1Sequence(data []byte) ([][]byte, error) {
+	if len(data) < 2 {
+		return nil, fmt.Errorf("data too short")
+	}
+	if data[0] != 0x30 {
+		return nil, fmt.Errorf("not a sequence")
+	}
+
+	length, offset, err := parseASN1Length(data[1:])
+	if err != nil {
+		return nil, err
+	}
+	contentStart := 1 + offset
+	if len(data) < contentStart+length {
+		return nil, fmt.Errorf("length exceeds data")
+	}
+
+	content := data[contentStart : contentStart+length]
+	return parseASN1Elements(content)
+}
+
+// parseASN1Length parses ASN.1 length bytes.
+func parseASN1Length(data []byte) (int, int, error) {
+	if len(data) == 0 {
+		return 0, 0, fmt.Errorf("no length bytes")
+	}
+	if data[0]&0x80 == 0 {
+		// Short form
+		return int(data[0]), 1, nil
+	}
+	// Long form
+	numBytes := int(data[0] & 0x7F)
+	if numBytes > 4 || len(data) < 1+numBytes {
+		return 0, 0, fmt.Errorf("invalid length")
+	}
+	length := 0
+	for i := 1; i <= numBytes; i++ {
+		length = length<<8 | int(data[i])
+	}
+	return length, 1 + numBytes, nil
+}
+
+// parseASN1Elements parses the elements within a sequence.
+func parseASN1Elements(data []byte) ([][]byte, error) {
+	var elements [][]byte
+	for len(data) > 0 {
+		if len(data) < 2 {
+			break
+		}
+		_ = data[0] // tag
+		length, offset, err := parseASN1Length(data[1:])
+		if err != nil {
+			return nil, err
+		}
+		elemLen := 1 + offset + length
+		if len(data) < elemLen {
+			return nil, fmt.Errorf("element exceeds data")
+		}
+		elements = append(elements, data[:elemLen])
+		data = data[elemLen:]
+	}
+	return elements, nil
+}
+
+// parseASN1Integer parses an ASN.1 INTEGER.
+func parseASN1Integer(data []byte) (*big.Int, error) {
+	if len(data) < 2 {
+		return nil, fmt.Errorf("integer too short")
+	}
+	if data[0] != 0x02 {
+		return nil, fmt.Errorf("not an integer")
+	}
+	length, offset, err := parseASN1Length(data[1:])
+	if err != nil {
+		return nil, err
+	}
+	contentStart := 1 + offset
+	if len(data) < contentStart+length {
+		return nil, fmt.Errorf("integer length exceeds data")
+	}
+	value := data[contentStart : contentStart+length]
+	// Handle negative numbers (two's complement)
+	if len(value) > 0 && value[0]&0x80 != 0 {
+		// Negative - not handling for simplicity
+		return nil, fmt.Errorf("negative integer not supported")
+	}
+	return new(big.Int).SetBytes(value), nil
+}
+
+// parseASN1BitString parses an ASN.1 BIT STRING.
+func parseASN1BitString(data []byte) ([]byte, error) {
+	if len(data) < 3 {
+		return nil, fmt.Errorf("bit string too short")
+	}
+	if data[0] != 0x03 {
+		return nil, fmt.Errorf("not a bit string")
+	}
+	length, offset, err := parseASN1Length(data[1:])
+	if err != nil {
+		return nil, err
+	}
+	contentStart := 1 + offset
+	if len(data) < contentStart+length {
+		return nil, fmt.Errorf("bit string length exceeds data")
+	}
+	// First byte is unused bits count
+	if length < 1 {
+		return nil, fmt.Errorf("invalid bit string")
+	}
+	return data[contentStart+1 : contentStart+length], nil
+}
+
+// parseASN1OID parses an ASN.1 OID.
+func parseASN1OID(data []byte) ([]byte, error) {
+	if len(data) < 2 {
+		return nil, fmt.Errorf("OID too short")
+	}
+	if data[0] != 0x06 {
+		return nil, fmt.Errorf("not an OID")
+	}
+	length, offset, err := parseASN1Length(data[1:])
+	if err != nil {
+		return nil, err
+	}
+	contentStart := 1 + offset
+	if len(data) < contentStart+length {
+		return nil, fmt.Errorf("OID length exceeds data")
+	}
+	return data[:contentStart+length], nil
 }
 
 func parseEd25519PublicKey(der []byte) ed25519.PublicKey {
-	// Not implemented in zero-dependency mode
+	// Accept raw 32-byte Ed25519 public keys for zero-dependency mode.
+	// Standard PKIX SubjectPublicKeyInfo DER is larger and not supported here.
+	if len(der) == ed25519.PublicKeySize {
+		return ed25519.PublicKey(der)
+	}
 	return nil
 }
 

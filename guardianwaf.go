@@ -70,6 +70,14 @@ type DetectionConfig struct {
 	CmdInjection  DetectorConfig
 	XXE           DetectorConfig
 	SSRF          DetectorConfig
+	Exclusions    []ExclusionConfig
+}
+
+// ExclusionConfig defines paths that skip specific detectors.
+type ExclusionConfig struct {
+	Path      string
+	Detectors []string
+	Reason    string
 }
 
 // DetectorConfig toggles a single detector and sets its score multiplier.
@@ -310,6 +318,14 @@ func convertConfig(cfg Config) *config.Config {
 	detectors["xxe"] = toInternalDetector(cfg.Detection.XXE, true)
 	detectors["ssrf"] = toInternalDetector(cfg.Detection.SSRF, true)
 	c.WAF.Detection.Detectors = detectors
+
+	for _, exc := range cfg.Detection.Exclusions {
+		c.WAF.Detection.Exclusions = append(c.WAF.Detection.Exclusions, config.ExclusionConfig{
+			Path:      exc.Path,
+			Detectors: exc.Detectors,
+			Reason:    exc.Reason,
+		})
+	}
 
 	// Sanitizer
 	if cfg.Sanitizer.MaxURLLength > 0 {

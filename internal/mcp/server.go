@@ -65,6 +65,13 @@ type EngineInterface interface {
 	GetTopIPs(n int) any
 	GetDetectors() any
 	TestRequest(method, url string, headers map[string]string) (any, error)
+	// Alerting management
+	GetAlertingStatus() any
+	AddWebhook(name, url, webhookType string, events []string, minScore int, cooldown string) error
+	RemoveWebhook(name string) error
+	AddEmailTarget(name, smtpHost string, smtpPort int, username, password, from string, to []string, useTLS bool, events []string, minScore int) error
+	RemoveEmailTarget(name string) error
+	TestAlert(target string) error
 }
 
 // Server is a JSON-RPC 2.0 MCP server that communicates over stdio.

@@ -8,6 +8,35 @@ import (
 	"github.com/guardianwaf/guardianwaf/internal/engine"
 )
 
+func TestRadixTree_Entries_BareIPv4(t *testing.T) {
+	rt := NewRadixTree()
+	if err := rt.Insert("192.168.1.1", "block"); err != nil {
+		t.Fatal(err)
+	}
+	entries := rt.Entries()
+	if len(entries) != 1 || entries[0] != "192.168.1.1" {
+		t.Errorf("expected ['192.168.1.1'], got %v", entries)
+	}
+}
+
+func TestIsIPv4Mapped_ShortIP(t *testing.T) {
+	shortIP := net.ParseIP("1.2.3.4").To4() // 4-byte IPv4
+	if isIPv4Mapped(shortIP) {
+		t.Error("expected false for 4-byte IP")
+	}
+}
+
+func TestRadixTree_Entries_IPv6CIDR(t *testing.T) {
+	rt := NewRadixTree()
+	if err := rt.Insert("2001:db8::/32", "block"); err != nil {
+		t.Fatal(err)
+	}
+	entries := rt.Entries()
+	if len(entries) != 1 || entries[0] != "2001:db8::/32" {
+		t.Errorf("expected ['2001:db8::/32'], got %v", entries)
+	}
+}
+
 func TestIPACL_ActiveBans(t *testing.T) {
 	cfg := Config{
 		Enabled: true,

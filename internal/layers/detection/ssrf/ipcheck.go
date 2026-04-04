@@ -241,8 +241,5 @@ func parseHexUint8(s string) (byte, bool) {
 			return 0, false
 		}
 	}
-	if n > 255 {
-		return 0, false
-	}
 	return byte(n), true
 }

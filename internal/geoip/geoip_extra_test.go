@@ -401,10 +401,17 @@ func TestStartAutoRefresh_WithDownloadURL(t *testing.T) {
 	stop := db.StartAutoRefresh(csv, srv.URL+"/geo.csv", 100*time.Millisecond)
 	defer stop()
 
-	time.Sleep(250 * time.Millisecond)
+	var got string
+	for i := 0; i < 50; i++ {
+		got = db.Lookup(net.ParseIP("8.8.8.1"))
+		if got == "US" {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 
 	// After refresh, data should have changed
-	if got := db.Lookup(net.ParseIP("8.8.8.1")); got != "US" {
+	if got != "US" {
 		t.Errorf("expected US after refresh, got %q", got)
 	}
 }

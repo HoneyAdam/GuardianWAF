@@ -259,5 +259,151 @@ func AllTools() []ToolDefinition {
 				"properties": map[string]any{},
 			},
 		},
+		{
+			Name:        "guardianwaf_get_alerting_status",
+			Description: "Get alerting configuration status including webhooks, email targets, and statistics",
+			InputSchema: map[string]any{
+				"type":       "object",
+				"properties": map[string]any{},
+			},
+		},
+		{
+			Name:        "guardianwaf_add_webhook",
+			Description: "Add a webhook alerting target for Slack, Discord, PagerDuty, or generic HTTP endpoints",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"name": map[string]any{
+						"type":        "string",
+						"description": "Unique name for this webhook target",
+					},
+					"url": map[string]any{
+						"type":        "string",
+						"description": "Webhook URL endpoint",
+					},
+					"type": map[string]any{
+						"type":        "string",
+						"description": "Webhook type",
+						"enum":        []string{"slack", "discord", "pagerduty", "generic"},
+					},
+					"events": map[string]any{
+						"type":        "array",
+						"description": "Events to alert on: block, challenge, log, or all",
+						"items": map[string]any{
+							"type": "string",
+							"enum": []string{"block", "challenge", "log", "all"},
+						},
+					},
+					"min_score": map[string]any{
+						"type":        "integer",
+						"description": "Minimum threat score to trigger alert (default: 50)",
+					},
+					"cooldown": map[string]any{
+						"type":        "string",
+						"description": "Cooldown between alerts from same IP (e.g., '30s', '5m', '1h')",
+					},
+				},
+				"required": []string{"name", "url", "type"},
+			},
+		},
+		{
+			Name:        "guardianwaf_remove_webhook",
+			Description: "Remove a webhook alerting target by name",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"name": map[string]any{
+						"type":        "string",
+						"description": "Name of the webhook target to remove",
+					},
+				},
+				"required": []string{"name"},
+			},
+		},
+		{
+			Name:        "guardianwaf_add_email_target",
+			Description: "Add an email alerting target via SMTP",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"name": map[string]any{
+						"type":        "string",
+						"description": "Unique name for this email target",
+					},
+					"smtp_host": map[string]any{
+						"type":        "string",
+						"description": "SMTP server hostname",
+					},
+					"smtp_port": map[string]any{
+						"type":        "integer",
+						"description": "SMTP server port (default: 587)",
+					},
+					"username": map[string]any{
+						"type":        "string",
+						"description": "SMTP authentication username",
+					},
+					"password": map[string]any{
+						"type":        "string",
+						"description": "SMTP authentication password",
+					},
+					"from": map[string]any{
+						"type":        "string",
+						"description": "From email address",
+					},
+					"to": map[string]any{
+						"type":        "array",
+						"description": "Recipient email addresses",
+						"items": map[string]any{
+							"type": "string",
+						},
+					},
+					"use_tls": map[string]any{
+						"type":        "boolean",
+						"description": "Enable TLS encryption (default: true)",
+					},
+					"events": map[string]any{
+						"type":        "array",
+						"description": "Events to alert on",
+						"items": map[string]any{
+							"type": "string",
+							"enum": []string{"block", "challenge", "log", "all"},
+						},
+					},
+					"min_score": map[string]any{
+						"type":        "integer",
+						"description": "Minimum score to trigger email (default: 75)",
+					},
+				},
+				"required": []string{"name", "smtp_host", "from", "to"},
+			},
+		},
+		{
+			Name:        "guardianwaf_remove_email_target",
+			Description: "Remove an email alerting target by name",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"name": map[string]any{
+						"type":        "string",
+						"description": "Name of the email target to remove",
+					},
+				},
+				"required": []string{"name"},
+			},
+		},
+		{
+			Name:        "guardianwaf_test_alert",
+			Description: "Send a test alert to verify webhook or email configuration",
+			InputSchema: map[string]any{
+				"type": "object",
+				"properties": map[string]any{
+					"target": map[string]any{
+						"type":        "string",
+						"description": "Name of the webhook or email target to test",
+					},
+				},
+				"required": []string{"target"},
+			},
+		},
 	}
 }

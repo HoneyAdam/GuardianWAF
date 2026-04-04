@@ -28,9 +28,6 @@ func MaskCreditCards(s string) string {
 			if len(digits) >= 13 && len(digits) <= 19 && luhnCheck(digits) {
 				// Mask all but last 4 digits
 				maskEnd := len(positions) - 4
-				if maskEnd < 0 {
-					maskEnd = 0
-				}
 				for k := 0; k < maskEnd; k++ {
 					result[positions[k]] = '*'
 				}
@@ -142,11 +139,6 @@ func MaskAPIKeys(s string) string {
 				// Show first 4 and last 4, mask the rest
 				maskStart := start + 4
 				maskEnd := pos - 4
-				if maskEnd <= maskStart {
-					// Too short to show both ends, mask everything
-					maskStart = start
-					maskEnd = pos
-				}
 				for k := maskStart; k < maskEnd; k++ {
 					result[k] = '*'
 				}

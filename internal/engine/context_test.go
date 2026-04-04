@@ -2,6 +2,7 @@ package engine
 
 import (
 	"bytes"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -509,5 +510,18 @@ func TestExtractClientIP_BareInvalidIP(t *testing.T) {
 
 	if ctx.ClientIP != nil {
 		t.Errorf("expected nil ClientIP for invalid bare RemoteAddr, got %s", ctx.ClientIP)
+	}
+}
+
+func TestGenerateRequestID_Fallback(t *testing.T) {
+	orig := randReader
+	randReader = func([]byte) (int, error) {
+		return 0, errors.New("rng failure")
+	}
+	defer func() { randReader = orig }()
+
+	id := generateRequestID()
+	if id != "00000000-0000-0000-0000-000000000000" {
+		t.Errorf("expected fallback zero UUID, got %q", id)
 	}
 }

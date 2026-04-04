@@ -73,6 +73,22 @@ func (m *mockEngine) TestRequest(method, url string, headers map[string]string) 
 		"action": "pass",
 	}, nil
 }
+func (m *mockEngine) GetAlertingStatus() any {
+	return map[string]any{
+		"enabled":       false,
+		"webhook_count": 0,
+		"email_count":   0,
+	}
+}
+func (m *mockEngine) AddWebhook(name, url, webhookType string, events []string, minScore int, cooldown string) error {
+	return nil
+}
+func (m *mockEngine) RemoveWebhook(name string) error { return nil }
+func (m *mockEngine) AddEmailTarget(name, smtpHost string, smtpPort int, username, password, from string, to []string, useTLS bool, events []string, minScore int) error {
+	return nil
+}
+func (m *mockEngine) RemoveEmailTarget(name string) error { return nil }
+func (m *mockEngine) TestAlert(target string) error { return nil }
 
 // sendRequest encodes a JSON-RPC request and returns the written bytes.
 func sendRequest(id any, method string, params any) string {
@@ -167,15 +183,15 @@ func TestRegisterAllTools(t *testing.T) {
 	s.SetEngine(newMockEngine())
 	s.RegisterAllTools()
 
-	if s.ToolCount() != 15 {
-		t.Fatalf("expected 15 tools registered, got %d", s.ToolCount())
+	if s.ToolCount() != 21 {
+		t.Fatalf("expected 21 tools registered, got %d", s.ToolCount())
 	}
 }
 
 func TestAllToolsDefinitions(t *testing.T) {
 	tools := AllTools()
-	if len(tools) != 15 {
-		t.Fatalf("expected 15 tool definitions, got %d", len(tools))
+	if len(tools) != 21 {
+		t.Fatalf("expected 21 tool definitions, got %d", len(tools))
 	}
 
 	// Verify all tools have required fields
@@ -327,8 +343,8 @@ func TestToolsList(t *testing.T) {
 		t.Fatal("tools is not an array")
 	}
 
-	if len(tools) != 15 {
-		t.Fatalf("expected 15 tools, got %d", len(tools))
+	if len(tools) != 21 {
+		t.Fatalf("expected 21 tools, got %d", len(tools))
 	}
 }
 
