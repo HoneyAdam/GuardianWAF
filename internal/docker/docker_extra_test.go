@@ -89,7 +89,7 @@ func TestClient_StreamEvents_Cancel(t *testing.T) {
 
 	ch := make(chan Event, 1)
 	err := c.StreamEvents(ctx, "gwaf", ch)
-	// Should return quickly since context is cancelled
+	// Should return quickly since context is canceled
 	_ = err
 }
 
@@ -1228,7 +1228,7 @@ func TestClient_StreamEvents_WithHostFlag(t *testing.T) {
 
 // TestClient_StreamEvents_SendBlockedCtxDone verifies the select inside the
 // event goroutine takes the ctx.Done() path when the channel is full and the
-// context is cancelled.
+// context is canceled.
 func TestClient_StreamEvents_SendBlockedCtxDone(t *testing.T) {
 	c := NewClient("")
 	// This test is best-effort; we mainly want to ensure the code path exists.

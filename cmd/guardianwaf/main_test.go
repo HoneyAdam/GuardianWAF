@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"reflect"
 	"fmt"
 	"io"
 	"net"
@@ -13,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -110,7 +110,7 @@ func TestLoadConfig_DefaultFallback(t *testing.T) {
 func TestLoadConfig_FromFile(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.yaml")
-	os.WriteFile(path, []byte("mode: monitor\nlisten: \":9090\"\n"), 0644)
+	os.WriteFile(path, []byte("mode: monitor\nlisten: \":9090\"\n"), 0o644)
 
 	cfg := loadConfig(path)
 	if cfg.Mode != "monitor" {
@@ -488,7 +488,7 @@ func TestCmdCheck_MissingURL(t *testing.T) {
 	// But we can verify the config loading and engine creation path.
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.yaml")
-	os.WriteFile(path, []byte("mode: monitor\n"), 0644)
+	os.WriteFile(path, []byte("mode: monitor\n"), 0o644)
 
 	cfg := loadConfig(path)
 	store := events.NewMemoryStore(1000)
@@ -543,7 +543,7 @@ waf:
   detection:
     enabled: true
 `
-	os.WriteFile(path, []byte(content), 0644)
+	os.WriteFile(path, []byte(content), 0o644)
 
 	cfg, err := config.LoadFile(path)
 	if err != nil {
@@ -582,7 +582,7 @@ func TestBuildReverseProxy_StripPrefix(t *testing.T) {
 	req := httptest.NewRequest("GET", "/api/users", nil)
 	handler.ServeHTTP(rr, req)
 	// The reverse proxy should have forwarded the request
-		_ = rr.Code // proxy attempted forwarding
+	_ = rr.Code // proxy attempted forwarding
 }
 
 // --- Subprocess CLI tests for os.Exit-calling commands ---
@@ -616,7 +616,7 @@ waf:
   sanitizer:
     enabled: true
 `
-	os.WriteFile(path, []byte(content), 0644)
+	os.WriteFile(path, []byte(content), 0o644)
 	return path
 }
 
@@ -775,7 +775,7 @@ dashboard:
 mcp:
   enabled: false
 `, port)
-	os.WriteFile(cfgPath, []byte(cfgContent), 0644)
+	os.WriteFile(cfgPath, []byte(cfgContent), 0o644)
 
 	cmd := exec.Command(bin, "serve", "-config", cfgPath)
 	cmd.Stdout = io.Discard
@@ -997,7 +997,7 @@ func TestLoadConfig_NonDefaultPathNotFound(t *testing.T) {
 	// We can't test os.Exit directly, but we can test the file-exists path
 	dir := t.TempDir()
 	path := filepath.Join(dir, "exists.yaml")
-	os.WriteFile(path, []byte("mode: monitor\n"), 0644)
+	os.WriteFile(path, []byte("mode: monitor\n"), 0o644)
 	cfg := loadConfig(path)
 	if cfg.Mode != "monitor" {
 		t.Errorf("expected 'monitor', got %q", cfg.Mode)
@@ -1223,7 +1223,7 @@ func TestLoadGeoIP_ValidDBPath(t *testing.T) {
 	dir := t.TempDir()
 	csvPath := filepath.Join(dir, "geoip.csv")
 	csvContent := "1.0.0.0,1.0.0.255,US\n2.0.0.0,2.0.0.255,DE\n"
-	os.WriteFile(csvPath, []byte(csvContent), 0644)
+	os.WriteFile(csvPath, []byte(csvContent), 0o644)
 
 	cfg := &config.Config{
 		WAF: config.WAFConfig{
@@ -1609,7 +1609,7 @@ func TestAddLayers_CustomRulesWithGeoIP(t *testing.T) {
 	dir := t.TempDir()
 	csvPath := filepath.Join(dir, "geoip.csv")
 	csvContent := "1.0.0.0,1.0.0.255,US\n"
-	os.WriteFile(csvPath, []byte(csvContent), 0644)
+	os.WriteFile(csvPath, []byte(csvContent), 0o644)
 
 	cfg := config.DefaultConfig()
 	cfg.WAF.CustomRules.Enabled = true
@@ -1955,7 +1955,7 @@ func TestValidateConfigFile_Valid(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "valid.yaml")
 	content := "mode: enforce\nlisten: \":8088\"\n"
-	os.WriteFile(cfgPath, []byte(content), 0644)
+	os.WriteFile(cfgPath, []byte(content), 0o644)
 
 	cfg, summary, err := validateConfigFile(cfgPath)
 	if err != nil {
@@ -1986,7 +1986,7 @@ func TestValidateConfigFile_InvalidYAML(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "invalid.yaml")
 	content := "mode: [invalid\n  unclosed"
-	os.WriteFile(cfgPath, []byte(content), 0644)
+	os.WriteFile(cfgPath, []byte(content), 0o644)
 
 	_, _, err := validateConfigFile(cfgPath)
 	if err == nil {
@@ -2008,7 +2008,7 @@ routes:
   - path: /api
     upstream: backend
 `
-	os.WriteFile(cfgPath, []byte(content), 0644)
+	os.WriteFile(cfgPath, []byte(content), 0o644)
 
 	_, summary, err := validateConfigFile(cfgPath)
 	if err != nil {
@@ -2039,7 +2039,7 @@ waf:
         enabled: true
         multiplier: 1.5
 `
-	os.WriteFile(cfgPath, []byte(content), 0644)
+	os.WriteFile(cfgPath, []byte(content), 0o644)
 
 	cfg, summary, err := validateConfigFile(cfgPath)
 	if err != nil {
@@ -2078,7 +2078,7 @@ waf:
         window: 60s
         action: block
 `
-	os.WriteFile(cfgPath, []byte(content), 0644)
+	os.WriteFile(cfgPath, []byte(content), 0o644)
 
 	cfg, summary, err := validateConfigFile(cfgPath)
 	if err != nil {
@@ -2103,7 +2103,7 @@ func TestLoadConfig_ExistingDefaultPath(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "guardianwaf.yaml")
 	content := "mode: enforce\nlisten: \":9090\"\n"
-	os.WriteFile(cfgPath, []byte(content), 0644)
+	os.WriteFile(cfgPath, []byte(content), 0o644)
 
 	os.Chdir(dir)
 
@@ -2136,7 +2136,7 @@ waf:
       block: 10
       log: 50
 `
-	os.WriteFile(cfgPath, []byte(content), 0644)
+	os.WriteFile(cfgPath, []byte(content), 0o644)
 
 	_, _, err := validateConfigFile(cfgPath)
 	if err == nil {
@@ -2153,7 +2153,7 @@ func TestRunValidate_ValidConfig(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "valid.yaml")
 	content := "mode: enforce\nlisten: \":8088\"\n"
-	os.WriteFile(cfgPath, []byte(content), 0644)
+	os.WriteFile(cfgPath, []byte(content), 0o644)
 
 	result, err := runValidate(cfgPath)
 	if err != nil {
@@ -2187,7 +2187,7 @@ func TestRunValidate_InvalidYAML(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "invalid.yaml")
 	content := "mode: [invalid\n  unclosed"
-	os.WriteFile(cfgPath, []byte(content), 0644)
+	os.WriteFile(cfgPath, []byte(content), 0o644)
 
 	_, err := runValidate(cfgPath)
 	if err == nil {
@@ -2222,7 +2222,7 @@ waf:
   detection:
     enabled: true
 `
-	os.WriteFile(cfgPath, []byte(content), 0644)
+	os.WriteFile(cfgPath, []byte(content), 0o644)
 
 	result, err := runCheck(&CheckOptions{
 		ConfigPath: cfgPath,
@@ -2244,7 +2244,7 @@ func TestRunCheck_WithHeaders(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "test.yaml")
 	content := "mode: monitor\nlisten: \":8088\"\n"
-	os.WriteFile(cfgPath, []byte(content), 0644)
+	os.WriteFile(cfgPath, []byte(content), 0o644)
 
 	result, err := runCheck(&CheckOptions{
 		ConfigPath: cfgPath,
@@ -2265,7 +2265,7 @@ func TestRunCheck_FullURL(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "test.yaml")
 	content := "mode: monitor\nlisten: \":8088\"\n"
-	os.WriteFile(cfgPath, []byte(content), 0644)
+	os.WriteFile(cfgPath, []byte(content), 0o644)
 
 	result, err := runCheck(&CheckOptions{
 		ConfigPath: cfgPath,
@@ -2284,7 +2284,7 @@ func TestRunCheck_InvalidMethod(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "test.yaml")
 	content := "mode: monitor\nlisten: \":8088\"\n"
-	os.WriteFile(cfgPath, []byte(content), 0644)
+	os.WriteFile(cfgPath, []byte(content), 0o644)
 
 	_, err := runCheck(&CheckOptions{
 		ConfigPath: cfgPath,
@@ -2310,7 +2310,7 @@ waf:
         enabled: true
         multiplier: 1.0
 `
-	os.WriteFile(cfgPath, []byte(content), 0644)
+	os.WriteFile(cfgPath, []byte(content), 0o644)
 
 	result, err := runCheck(&CheckOptions{
 		ConfigPath: cfgPath,
@@ -2337,7 +2337,7 @@ func TestRunCheck_InvalidHeader(t *testing.T) {
 	// Invalid headers are silently ignored, not an error
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "test.yaml")
-	os.WriteFile(cfgPath, []byte("mode: monitor\n"), 0644)
+	os.WriteFile(cfgPath, []byte("mode: monitor\n"), 0o644)
 
 	result, err := runCheck(&CheckOptions{
 		ConfigPath: cfgPath,
@@ -2367,7 +2367,7 @@ waf:
         enabled: true
         multiplier: 1.0
 `
-	os.WriteFile(cfgPath, []byte(content), 0644)
+	os.WriteFile(cfgPath, []byte(content), 0o644)
 
 	result, err := runCheck(&CheckOptions{
 		ConfigPath: cfgPath,
@@ -2396,7 +2396,7 @@ waf:
         enabled: true
         multiplier: 1.0
 `
-	os.WriteFile(cfgPath, []byte(content), 0644)
+	os.WriteFile(cfgPath, []byte(content), 0o644)
 
 	result, err := runCheck(&CheckOptions{
 		ConfigPath: cfgPath,
@@ -3226,7 +3226,7 @@ func TestLoadGeoIP_WithAutoRefresh(t *testing.T) {
 	dir := t.TempDir()
 	csvPath := filepath.Join(dir, "geoip.csv")
 	csvContent := "1.0.0.0,1.0.0.255,US\n2.0.0.0,2.0.0.255,DE\n"
-	os.WriteFile(csvPath, []byte(csvContent), 0644)
+	os.WriteFile(csvPath, []byte(csvContent), 0o644)
 
 	cfg := &config.Config{
 		WAF: config.WAFConfig{
@@ -3557,7 +3557,7 @@ func TestServeHandler_WithChallengeAndMetrics(t *testing.T) {
 func TestLoadGeoIP_DBPathExistsInvalidCSV(t *testing.T) {
 	dir := t.TempDir()
 	csvPath := filepath.Join(dir, "bad.csv")
-	os.WriteFile(csvPath, []byte("invalid,csv,content\nnot,geoip,data\n"), 0644)
+	os.WriteFile(csvPath, []byte("invalid,csv,content\nnot,geoip,data\n"), 0o644)
 
 	cfg := &config.Config{
 		WAF: config.WAFConfig{
@@ -3657,7 +3657,7 @@ waf:
   detection:
     enabled: true
 `
-	os.WriteFile(cfgPath, []byte(content), 0644)
+	os.WriteFile(cfgPath, []byte(content), 0o644)
 
 	result, err := runCheck(&CheckOptions{
 		ConfigPath: cfgPath,
@@ -3688,7 +3688,7 @@ waf:
         enabled: true
         multiplier: 1.0
 `
-	os.WriteFile(cfgPath, []byte(content), 0644)
+	os.WriteFile(cfgPath, []byte(content), 0o644)
 
 	result, err := runCheck(&CheckOptions{
 		ConfigPath: cfgPath,
@@ -3719,7 +3719,7 @@ waf:
         enabled: true
         multiplier: 1.0
 `
-	os.WriteFile(cfgPath, []byte(content), 0644)
+	os.WriteFile(cfgPath, []byte(content), 0o644)
 
 	result, err := runCheck(&CheckOptions{
 		ConfigPath: cfgPath,
@@ -3755,7 +3755,7 @@ waf:
         enabled: true
         multiplier: 1.0
 `
-	os.WriteFile(cfgPath, []byte(content), 0644)
+	os.WriteFile(cfgPath, []byte(content), 0o644)
 
 	result, err := runCheck(&CheckOptions{
 		ConfigPath: cfgPath,

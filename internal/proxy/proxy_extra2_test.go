@@ -171,7 +171,7 @@ func TestCheck_ContextCancellation(t *testing.T) {
 
 	result := hc.check(ctx, target)
 	if result {
-		t.Error("expected unhealthy when context is cancelled")
+		t.Error("expected unhealthy when context is canceled")
 	}
 }
 

@@ -827,7 +827,7 @@ func TestClient_Analyze_Unreachable(t *testing.T) {
 	}
 }
 
-// --- Client.Analyze: context cancelled ---
+// --- Client.Analyze: context canceled ---
 
 func TestClient_Analyze_ContextCancelled(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -846,7 +846,7 @@ func TestClient_Analyze_ContextCancelled(t *testing.T) {
 
 	_, _, err := client.Analyze(ctx, "sys", "user")
 	if err == nil {
-		t.Error("expected error for cancelled context")
+		t.Error("expected error for canceled context")
 	}
 }
 
