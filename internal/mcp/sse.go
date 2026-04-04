@@ -25,6 +25,7 @@ type sseClient struct {
 	w       http.ResponseWriter
 	flusher http.Flusher
 	done    chan struct{}
+	mu      sync.Mutex // Protects writes to w
 }
 
 // NewSSEHandler creates an HTTP handler that serves MCP over SSE.
@@ -85,7 +86,9 @@ func (h *SSEHandler) handleSSE(w http.ResponseWriter, r *http.Request) {
 		scheme = "https"
 	}
 	messageURL := fmt.Sprintf("%s://%s/mcp/message", scheme, r.Host)
+	client.mu.Lock()
 	fmt.Fprintf(w, "event: endpoint\ndata: %s\n\n", messageURL)
+	client.mu.Unlock()
 	flusher.Flush()
 
 	// Keep connection alive until client disconnects
@@ -142,8 +145,10 @@ func (h *SSEHandler) broadcastResponse(resp JSONRPCResponse) {
 			continue
 		default:
 		}
+		client.mu.Lock()
 		fmt.Fprintf(client.w, "event: message\ndata: %s\n\n", string(data))
 		client.flusher.Flush()
+		client.mu.Unlock()
 	}
 }
 
