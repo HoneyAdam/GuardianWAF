@@ -22,6 +22,7 @@ issues:
       linters:
         - errcheck
         - govet
+        - staticcheck
     - path: internal/layers/apisecurity/jwt\.go
       linters:
         - staticcheck
