@@ -201,6 +201,15 @@ func DefaultConfig() *Config {
 					MaxIPACLs:            1000,
 				},
 			},
+			DLP: DLPConfig{
+				Enabled:      false,
+				ScanRequest:  true,
+				ScanResponse: true,
+				BlockOnMatch: false,
+				MaskResponse: true,
+				MaxBodySize:  1024 * 1024, // 1MB
+				Patterns:     []string{"credit_card", "ssn", "api_key", "private_key", "tax_id"},
+			},
 		},
 		Dashboard: DashboardConfig{
 			Enabled: true,

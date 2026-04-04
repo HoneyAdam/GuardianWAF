@@ -182,6 +182,7 @@ type WAFConfig struct {
 	GraphQL          GraphQLConfig          `yaml:"graphql"`
 	GRPC             GRPCConfig             `yaml:"grpc"`
 	Tenant           TenantConfig           `yaml:"tenant"`
+	DLP              DLPConfig              `yaml:"dlp"`
 }
 
 // AIAnalysisConfig controls AI-powered threat analysis.
@@ -199,7 +200,16 @@ type AIAnalysisConfig struct {
 	AutoBlockTTL     time.Duration `yaml:"auto_block_ttl"`
 }
 
-// IPACLConfig controls IP-based allow/deny lists and automatic banning.
+// DLPConfig controls Data Loss Prevention pattern detection.
+type DLPConfig struct {
+	Enabled      bool     `yaml:"enabled"`
+	ScanRequest  bool     `yaml:"scan_request"`
+	ScanResponse bool     `yaml:"scan_response"`
+	BlockOnMatch bool     `yaml:"block_on_match"`
+	MaskResponse bool     `yaml:"mask_response"`
+	MaxBodySize  int      `yaml:"max_body_size"`
+	Patterns     []string `yaml:"patterns"`
+}
 type IPACLConfig struct {
 	Enabled   bool          `yaml:"enabled"`
 	Whitelist []string      `yaml:"whitelist"`

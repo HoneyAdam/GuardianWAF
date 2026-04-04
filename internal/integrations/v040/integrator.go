@@ -12,6 +12,7 @@ import (
 	"github.com/guardianwaf/guardianwaf/internal/discovery"
 	"github.com/guardianwaf/guardianwaf/internal/engine"
 	"github.com/guardianwaf/guardianwaf/internal/layers/botdetect"
+	"github.com/guardianwaf/guardianwaf/internal/layers/dlp"
 	"github.com/guardianwaf/guardianwaf/internal/layers/graphql"
 	"github.com/guardianwaf/guardianwaf/internal/ml/anomaly"
 	"github.com/guardianwaf/guardianwaf/internal/proxy/grpc"
@@ -31,6 +32,7 @@ type Integrator struct {
 	// Phase 2 Components
 	grpcProxy         *grpc.Proxy
 	tenantIntegrator  *TenantIntegrator
+	dlpLayer          *dlp.EngineLayer
 
 	// HTTP handlers
 	biometricHandler http.HandlerFunc
@@ -83,6 +85,13 @@ func NewIntegrator(cfg *config.Config) (*Integrator, error) {
 	if cfg.WAF.Tenant.Enabled {
 		if err := i.initMultiTenancy(); err != nil {
 			return nil, fmt.Errorf("tenant: %w", err)
+		}
+	}
+
+	// Initialize Advanced DLP (Phase 2)
+	if cfg.WAF.DLP.Enabled {
+		if err := i.initDLP(); err != nil {
+			return nil, fmt.Errorf("dlp: %w", err)
 		}
 	}
 
@@ -249,6 +258,14 @@ func (i *Integrator) RegisterLayers(e *engine.Engine) {
 		})
 	}
 
+	// Layer 550: Advanced DLP (after bot detection, before response)
+	if i.dlpLayer != nil {
+		e.AddLayer(engine.OrderedLayer{
+			Layer: i.dlpLayer,
+			Order: 550,
+		})
+	}
+
 	log.Println("[v0.4.0] All layers registered with engine pipeline")
 }
 
@@ -287,6 +304,28 @@ func (i *Integrator) initMultiTenancy() error {
 	i.tenantIntegrator = integrator
 	log.Printf("[v0.4.0] Multi-tenancy enabled (max_tenants=%d)",
 		i.cfg.WAF.Tenant.MaxTenants)
+	return nil
+}
+
+// initDLP initializes the Advanced DLP layer.
+func (i *Integrator) initDLP() error {
+	dlpCfg := i.cfg.WAF.DLP
+
+	cfg := &dlp.Config{
+		Enabled:      dlpCfg.Enabled,
+		ScanRequest:  dlpCfg.ScanRequest,
+		ScanResponse: dlpCfg.ScanResponse,
+		BlockOnMatch: dlpCfg.BlockOnMatch,
+		MaskResponse: dlpCfg.MaskResponse,
+		MaxBodySize:  dlpCfg.MaxBodySize,
+		Patterns:     dlpCfg.Patterns,
+	}
+
+	layer := dlp.NewEngineLayer(cfg)
+	i.dlpLayer = layer
+
+	log.Printf("[v0.4.0] Advanced DLP enabled (patterns=%v, block=%v)",
+		dlpCfg.Patterns, dlpCfg.BlockOnMatch)
 	return nil
 }
 
@@ -347,6 +386,11 @@ func (i *Integrator) GetGRPCProxy() *grpc.Proxy {
 // GetTenantIntegrator returns the tenant integrator for multi-tenancy.
 func (i *Integrator) GetTenantIntegrator() *TenantIntegrator {
 	return i.tenantIntegrator
+}
+
+// GetDLPLayer returns the DLP layer for response scanning.
+func (i *Integrator) GetDLPLayer() *dlp.EngineLayer {
+	return i.dlpLayer
 }
 
 // TenantMiddleware returns the tenant middleware for HTTP handlers.
@@ -452,6 +496,8 @@ type Stats struct {
 	GRPCEnabled             bool `json:"grpc_enabled"`
 	MultiTenancyEnabled     bool `json:"multi_tenancy_enabled"`
 	TenantCount             int  `json:"tenant_count"`
+	DLPEnabled              bool `json:"dlp_enabled"`
+	DLPBlockOnMatch         bool `json:"dlp_block_on_match"`
 }
 
 // GetStats returns the current integration statistics.
@@ -465,6 +511,8 @@ func (i *Integrator) GetStats() Stats {
 		CaptchaEnabled:         i.cfg.WAF.BotDetection.Enhanced.Captcha.Enabled,
 		GRPCEnabled:            i.grpcProxy != nil,
 		MultiTenancyEnabled:    i.tenantIntegrator != nil,
+		DLPEnabled:             i.dlpLayer != nil,
+		DLPBlockOnMatch:        i.cfg.WAF.DLP.BlockOnMatch,
 	}
 
 	if i.tenantIntegrator != nil {
