@@ -60,10 +60,16 @@ func TestHandleSSE_HTTPS(t *testing.T) {
 		close(done)
 	}()
 
-	for i := 0; i < 200 && rec.Body.Len() == 0; i++ {
+	// Wait for SSE data with timeout
+	var bodyStr string
+	for i := 0; i < 200; i++ {
 		time.Sleep(10 * time.Millisecond)
+		bodyStr = rec.Body.String()
+		if len(bodyStr) > 0 {
+			break
+		}
 	}
-	if rec.Body.Len() == 0 {
+	if len(bodyStr) == 0 {
 		t.Fatal("timed out waiting for SSE data")
 	}
 	cancel()
@@ -76,7 +82,7 @@ func TestHandleSSE_HTTPS(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", rec.Code)
 	}
-	body := rec.Body.String()
+	body := bodyStr
 	if !bytes.Contains([]byte(body), []byte("https://")) {
 		t.Fatalf("expected https scheme in endpoint, got %s", body)
 	}
