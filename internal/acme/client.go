@@ -157,8 +157,8 @@ func (c *Client) ObtainCertificate(domains []string, challengeHandler *HTTP01Han
 
 	// 2. Complete authorizations
 	for _, authzURL := range orderResp.Authorizations {
-		if err := c.completeAuthorization(authzURL, challengeHandler); err != nil {
-			return nil, nil, fmt.Errorf("authorization: %w", err)
+		if authzErr := c.completeAuthorization(authzURL, challengeHandler); authzErr != nil {
+			return nil, nil, fmt.Errorf("authorization: %w", authzErr)
 		}
 	}
 
@@ -174,8 +174,8 @@ func (c *Client) ObtainCertificate(domains []string, challengeHandler *HTTP01Han
 	}
 
 	// 4. Finalize order
-	if err := c.finalizeOrder(orderResp.Finalize, csr); err != nil {
-		return nil, nil, fmt.Errorf("finalizing order: %w", err)
+	if finalizeErr := c.finalizeOrder(orderResp.Finalize, csr); finalizeErr != nil {
+		return nil, nil, fmt.Errorf("finalizing order: %w", finalizeErr)
 	}
 
 	// 5. Poll for certificate
@@ -248,8 +248,8 @@ func (c *Client) completeAuthorization(authzURL string, handler *HTTP01Handler) 
 	defer resp.Body.Close()
 
 	var authz authorization
-	if err := json.NewDecoder(resp.Body).Decode(&authz); err != nil {
-		return err
+	if decodeErr := json.NewDecoder(resp.Body).Decode(&authz); decodeErr != nil {
+		return decodeErr
 	}
 
 	if authz.Status == "valid" {

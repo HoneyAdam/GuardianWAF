@@ -93,18 +93,18 @@ func (m *Manager) sendTLS(addr string, auth smtp.Auth, from string, to []string,
 	defer client.Close()
 
 	if auth != nil {
-		if err := client.Auth(auth); err != nil {
-			return fmt.Errorf("SMTP auth failed: %w", err)
+		if authErr := client.Auth(auth); authErr != nil {
+			return fmt.Errorf("SMTP auth failed: %w", authErr)
 		}
 	}
 
-	if err := client.Mail(from); err != nil {
-		return fmt.Errorf("SMTP MAIL command failed: %w", err)
+	if mailErr := client.Mail(from); mailErr != nil {
+		return fmt.Errorf("SMTP MAIL command failed: %w", mailErr)
 	}
 
 	for _, rcpt := range to {
-		if err := client.Rcpt(rcpt); err != nil {
-			return fmt.Errorf("SMTP RCPT command failed: %w", err)
+		if rcptErr := client.Rcpt(rcpt); rcptErr != nil {
+			return fmt.Errorf("SMTP RCPT command failed: %w", rcptErr)
 		}
 	}
 
