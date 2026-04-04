@@ -9,12 +9,12 @@ import (
 
 // Config holds the configuration for the API Security layer.
 type Config struct {
-	Enabled     bool          `yaml:"enabled"`
-	JWT         JWTConfig     `yaml:"jwt"`
-	APIKeys     APIKeysConfig `yaml:"api_keys"`
-	SkipPaths   []string      `yaml:"skip_paths"`
-	HeaderName  string        `yaml:"header_name"`  // API key header name
-	QueryParam  string        `yaml:"query_param"`  // API key query parameter
+	Enabled    bool          `yaml:"enabled"`
+	JWT        JWTConfig     `yaml:"jwt"`
+	APIKeys    APIKeysConfig `yaml:"api_keys"`
+	SkipPaths  []string      `yaml:"skip_paths"`
+	HeaderName string        `yaml:"header_name"` // API key header name
+	QueryParam string        `yaml:"query_param"` // API key query parameter
 }
 
 // APIKeysConfig configures API key authentication.
@@ -27,11 +27,11 @@ type APIKeysConfig struct {
 
 // Layer implements engine.Layer for API security.
 type Layer struct {
-	config         Config
-	jwtValidator   *JWTValidator
+	config          Config
+	jwtValidator    *JWTValidator
 	apiKeyValidator *APIKeyValidator
-	skipPathMap    map[string]bool
-	mu             sync.RWMutex
+	skipPathMap     map[string]bool
+	mu              sync.RWMutex
 }
 
 // NewLayer creates a new API Security layer.

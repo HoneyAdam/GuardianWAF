@@ -891,9 +891,11 @@ func loadPublicKeyFromFile(path string) (crypto.PublicKey, error) {
 }
 
 // Stub functions for file operations (avoid os import)
-var openFile = func(path string) (any, error) { return nil, fmt.Errorf("file operations require runtime") }
-var closeFile = func(any) {}
-var readFile = func(any, []byte) (int, error) { return 0, fmt.Errorf("file operations require runtime") }
+var (
+	openFile  = func(path string) (any, error) { return nil, fmt.Errorf("file operations require runtime") }
+	closeFile = func(any) {}
+	readFile  = func(any, []byte) (int, error) { return 0, fmt.Errorf("file operations require runtime") }
+)
 
 // GenerateToken generates a test JWT token (for testing only).
 func GenerateToken(claims JWTClaims, secret []byte, alg string) (string, error) {
