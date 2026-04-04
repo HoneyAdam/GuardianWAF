@@ -90,6 +90,42 @@
   - `WAF.GRPC`
   - `WAF.Tenant`
   - `WAF.DLP`
+  - `WAF.ZeroTrust`
+  - `WAF.SIEM`
+  - `WAF.Cache`
+  - `WAF.Replay`
+  - `WAF.Canary`
+
+#### Phase 3: Zero Trust, SIEM, Advanced Caching, Request Replay, Canary Releases
+
+- **Zero Trust Network Access (ZTNA)**
+  - mTLS client certificate verification
+  - Device attestation with 5 trust levels
+  - Session-based authentication with TTL
+  - Certificate revocation checking
+  - Zero Trust middleware
+
+- **SIEM Integration**
+  - 6 export formats: CEF, LEEF, JSON, Syslog, Splunk, Elasticsearch
+  - Batch export with configurable size and flush interval
+  - HTTP/TLS transport support
+
+- **Advanced Caching Layer**
+  - Memory (LRU) and Redis backends
+  - Configurable TTL and size limits
+  - Cache key generation
+  - Stale-while-revalidate support
+
+- **Request Replay**
+  - HTTP request/response recording
+  - JSON and binary format support
+  - Replay engine with rate limiting
+  - Dry-run mode
+
+- **Canary Releases**
+  - 5 routing strategies: percentage, header, cookie, geographic, random
+  - Dynamic percentage adjustment
+  - Automatic rollback on error/latency thresholds
 
 ### Security
 
@@ -106,5 +142,13 @@
   - gRPC proxy: 12 tests
   - DLP patterns: 22 tests
 - Overall test coverage maintained >95%
+
+### Phase 3 Tests
+
+- **Zero Trust**: 15 test cases (mTLS, attestation, sessions)
+- **SIEM**: 12 test cases (formatters, exporters)
+- **Advanced Caching**: 25 test cases (memory, Redis, layer)
+- **Request Replay**: 18 test cases (recorder, replayer, filters)
+- **Canary Releases**: 19 test cases (strategies, routing, rollback)
 
 ## [0.3.0] - 2026-04-04
