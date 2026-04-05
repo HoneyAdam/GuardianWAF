@@ -22,6 +22,7 @@ import (
 	"github.com/guardianwaf/guardianwaf/internal/layers/graphql"
 	"github.com/guardianwaf/guardianwaf/internal/layers/replay"
 	"github.com/guardianwaf/guardianwaf/internal/layers/siem"
+	"github.com/guardianwaf/guardianwaf/internal/layers/websocket"
 	"github.com/guardianwaf/guardianwaf/internal/layers/zerotrust"
 	"github.com/guardianwaf/guardianwaf/internal/ml/anomaly"
 	"github.com/guardianwaf/guardianwaf/internal/proxy/grpc"
@@ -50,6 +51,7 @@ type Integrator struct {
 	analyticsLayer    *analytics.Layer
 	clusterLayer      *cluster.Layer
 	remediationLayer  *remediation.Layer
+	websocketLayer    *websocket.Layer
 
 	// HTTP handlers
 	biometricHandler http.HandlerFunc
@@ -165,6 +167,13 @@ func NewIntegrator(cfg *config.Config) (*Integrator, error) {
 	if cfg.WAF.Remediation.Enabled {
 		if err := i.initRemediation(); err != nil {
 			return nil, fmt.Errorf("remediation: %w", err)
+		}
+	}
+
+	// Initialize WebSocket (Phase 4)
+	if cfg.WAF.WebSocket.Enabled {
+		if err := i.initWebSocket(); err != nil {
+			return nil, fmt.Errorf("websocket: %w", err)
 		}
 	}
 
@@ -312,6 +321,14 @@ func (i *Integrator) RegisterLayers(e *engine.Engine) {
 		e.AddLayer(engine.OrderedLayer{
 			Layer: i.clusterLayer,
 			Order: 75,
+		})
+	}
+
+	// Layer 76: WebSocket Security (early validation of handshake)
+	if i.websocketLayer != nil {
+		e.AddLayer(engine.OrderedLayer{
+			Layer: i.websocketLayer,
+			Order: 76,
 		})
 	}
 
@@ -620,6 +637,9 @@ func (i *Integrator) Cleanup() {
 	if i.remediationLayer != nil {
 		i.remediationLayer.Stop()
 	}
+	if i.websocketLayer != nil {
+		i.websocketLayer.Stop()
+	}
 	log.Println("[v0.4.0] Cleanup complete")
 }
 
@@ -725,6 +745,8 @@ type Stats struct {
 	RemediationEnabled      bool   `json:"remediation_enabled"`
 	RemediationAutoApply    bool   `json:"remediation_auto_apply"`
 	RemediationRulesActive  int    `json:"remediation_rules_active"`
+	WebSocketEnabled        bool   `json:"websocket_enabled"`
+	WebSocketConnections    int    `json:"websocket_connections"`
 }
 
 // GetStats returns the current integration statistics.
@@ -755,6 +777,7 @@ func (i *Integrator) GetStats() Stats {
 		ClusterIsLeader:        i.IsClusterLeader(),
 		RemediationEnabled:     i.remediationLayer != nil,
 		RemediationAutoApply:   i.cfg.WAF.Remediation.AutoApply,
+		WebSocketEnabled:       i.websocketLayer != nil,
 	}
 
 	if i.tenantIntegrator != nil {
@@ -764,6 +787,10 @@ func (i *Integrator) GetStats() Stats {
 
 	if i.remediationLayer != nil {
 		stats.RemediationRulesActive = len(i.remediationLayer.GetEngine().GetActiveRules())
+	}
+
+	if i.websocketLayer != nil && i.websocketLayer.GetSecurity() != nil {
+		stats.WebSocketConnections = len(i.websocketLayer.GetSecurity().GetAllConnections())
 	}
 
 	return stats
@@ -1028,5 +1055,57 @@ func (i *Integrator) RemediationHandler() http.Handler {
 		return nil
 	}
 	return i.remediationLayer.GetHandler()
+}
+
+// initWebSocket initializes the WebSocket security layer.
+func (i *Integrator) initWebSocket() error {
+	wsCfg := i.cfg.WAF.WebSocket
+
+	cfg := &websocket.Config{
+		Enabled:             wsCfg.Enabled,
+		MaxMessageSize:      wsCfg.MaxMessageSize,
+		MaxFrameSize:        wsCfg.MaxFrameSize,
+		RateLimitPerSecond:  wsCfg.RateLimitPerSecond,
+		RateLimitBurst:      wsCfg.RateLimitBurst,
+		AllowedOrigins:      wsCfg.AllowedOrigins,
+		BlockedExtensions:   wsCfg.BlockedExtensions,
+		BlockEmptyMessages:  wsCfg.BlockEmptyMessages,
+		BlockBinaryMessages: wsCfg.BlockBinaryMessages,
+		MaxConcurrentPerIP:  wsCfg.MaxConcurrentPerIP,
+		HandshakeTimeout:    wsCfg.HandshakeTimeout,
+		IdleTimeout:         wsCfg.IdleTimeout,
+		ScanPayloads:        wsCfg.ScanPayloads,
+	}
+
+	layer, err := websocket.NewLayer(cfg)
+	if err != nil {
+		return err
+	}
+
+	i.websocketLayer = layer
+	log.Printf("[v0.4.0+] WebSocket Security enabled (scan_payloads=%v, rate_limit=%d/s)",
+		wsCfg.ScanPayloads, wsCfg.RateLimitPerSecond)
+	return nil
+}
+
+// GetWebSocketLayer returns the WebSocket layer.
+func (i *Integrator) GetWebSocketLayer() *websocket.Layer {
+	return i.websocketLayer
+}
+
+// GetWebSocketSecurity returns the WebSocket security instance.
+func (i *Integrator) GetWebSocketSecurity() *websocket.Security {
+	if i.websocketLayer == nil {
+		return nil
+	}
+	return i.websocketLayer.GetSecurity()
+}
+
+// WebSocketHandler returns the WebSocket HTTP handler.
+func (i *Integrator) WebSocketHandler() http.Handler {
+	if i.websocketLayer == nil {
+		return nil
+	}
+	return websocket.NewHandler(i.websocketLayer.GetSecurity())
 }
 

@@ -191,6 +191,7 @@ type WAFConfig struct {
 	Analytics        AnalyticsConfig        `yaml:"analytics"`
 	Cluster          ClusterConfig          `yaml:"cluster"`
 	Remediation      RemediationConfig      `yaml:"remediation"`
+	WebSocket        WebSocketConfig        `yaml:"websocket"`
 }
 
 // AIAnalysisConfig controls AI-powered threat analysis.
@@ -333,6 +334,23 @@ type RemediationConfig struct {
 	RuleTTL             time.Duration `yaml:"rule_ttl"`
 	ExcludedPaths       []string      `yaml:"excluded_paths"`
 	StoragePath         string        `yaml:"storage_path"`
+}
+
+// WebSocketConfig controls WebSocket security settings.
+type WebSocketConfig struct {
+	Enabled             bool          `yaml:"enabled"`
+	MaxMessageSize      int64         `yaml:"max_message_size"`
+	MaxFrameSize        int64         `yaml:"max_frame_size"`
+	RateLimitPerSecond  int           `yaml:"rate_limit_per_second"`
+	RateLimitBurst      int           `yaml:"rate_limit_burst"`
+	AllowedOrigins      []string      `yaml:"allowed_origins"`
+	BlockedExtensions   []string      `yaml:"blocked_extensions"`
+	BlockEmptyMessages  bool          `yaml:"block_empty_messages"`
+	BlockBinaryMessages bool          `yaml:"block_binary_messages"`
+	MaxConcurrentPerIP  int           `yaml:"max_concurrent_per_ip"`
+	HandshakeTimeout    time.Duration `yaml:"handshake_timeout"`
+	IdleTimeout         time.Duration `yaml:"idle_timeout"`
+	ScanPayloads        bool          `yaml:"scan_payloads"`
 }
 
 // SIEMConfig controls SIEM integration settings.
