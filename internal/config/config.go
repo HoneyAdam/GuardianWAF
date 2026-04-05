@@ -599,13 +599,27 @@ type GraphQLConfig struct {
 
 // GRPCConfig controls gRPC/gRPC-Web proxy settings.
 type GRPCConfig struct {
-	Enabled        bool     `yaml:"enabled"`
-	GRPCWebEnabled bool     `yaml:"grpc_web_enabled"`
-	ProtoPaths     []string `yaml:"proto_paths"`
-	AllowedMethods []string `yaml:"allowed_methods"`
-	BlockedMethods []string `yaml:"blocked_methods"`
-	ValidateProto  bool     `yaml:"validate_proto"`
-	MaxMessageSize int      `yaml:"max_message_size"`
+	Enabled              bool            `yaml:"enabled"`
+	GRPCWebEnabled       bool            `yaml:"grpc_web_enabled"`       // gRPC-Web bridge support
+	ProtoPaths           []string        `yaml:"proto_paths"`            // Paths to .proto files
+	AllowedServices      []string        `yaml:"allowed_services"`       // Empty = allow all
+	BlockedServices      []string        `yaml:"blocked_services"`       // Block specific services
+	AllowedMethods       []string        `yaml:"allowed_methods"`        // Format: "service/method"
+	BlockedMethods       []string        `yaml:"blocked_methods"`        // Format: "service/method"
+	ValidateProto        bool            `yaml:"validate_proto"`         // Validate protobuf messages
+	ReflectionEnabled    bool            `yaml:"reflection_enabled"`     // Enable gRPC reflection
+	MaxMessageSize       int             `yaml:"max_message_size"`       // Max request/response size
+	MaxStreamDuration    time.Duration   `yaml:"max_stream_duration"`    // Max streaming duration
+	MaxConcurrentStreams int             `yaml:"max_concurrent_streams"` // Max concurrent streams per connection
+	MethodRateLimits     []GRPCRateLimit `yaml:"method_rate_limits"`     // Per-method rate limits
+	RequireTLS           bool            `yaml:"require_tls"`            // Require TLS for gRPC
+}
+
+// GRPCRateLimit defines rate limiting for a specific gRPC method.
+type GRPCRateLimit struct {
+	Method            string `yaml:"method"` // Full method name: "package.service/method"
+	RequestsPerSecond int    `yaml:"requests_per_second"`
+	BurstSize         int    `yaml:"burst_size"`
 }
 
 // TenantConfig controls multi-tenancy settings.

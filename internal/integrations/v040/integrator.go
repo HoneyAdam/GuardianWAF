@@ -20,12 +20,13 @@ import (
 	"github.com/guardianwaf/guardianwaf/internal/layers/canary"
 	"github.com/guardianwaf/guardianwaf/internal/layers/dlp"
 	"github.com/guardianwaf/guardianwaf/internal/layers/graphql"
+	"github.com/guardianwaf/guardianwaf/internal/layers/grpc"
 	"github.com/guardianwaf/guardianwaf/internal/layers/replay"
 	"github.com/guardianwaf/guardianwaf/internal/layers/siem"
 	"github.com/guardianwaf/guardianwaf/internal/layers/websocket"
 	"github.com/guardianwaf/guardianwaf/internal/layers/zerotrust"
 	"github.com/guardianwaf/guardianwaf/internal/ml/anomaly"
-	"github.com/guardianwaf/guardianwaf/internal/proxy/grpc"
+	proxygrpc "github.com/guardianwaf/guardianwaf/internal/proxy/grpc"
 )
 
 // Integrator manages all v0.4.0 Phase 1 and Phase 2 features.
@@ -40,7 +41,8 @@ type Integrator struct {
 	botCollector     *botdetect.BiometricCollector
 
 	// Phase 2 Components
-	grpcProxy         *grpc.Proxy
+	grpcProxy         *proxygrpc.Proxy
+	grpcLayer         *grpc.Layer
 	tenantIntegrator  *TenantIntegrator
 	dlpLayer          *dlp.EngineLayer
 	zeroTrustService  *zerotrust.Service
@@ -332,6 +334,14 @@ func (i *Integrator) RegisterLayers(e *engine.Engine) {
 		})
 	}
 
+	// Layer 78: gRPC Security (after WebSocket)
+	if i.grpcLayer != nil {
+		e.AddLayer(engine.OrderedLayer{
+			Layer: i.grpcLayer,
+			Order: 78,
+		})
+	}
+
 	// Layer 450: GraphQL Security (before detection)
 	if i.graphqlLayer != nil {
 		e.AddLayer(engine.OrderedLayer{
@@ -371,7 +381,7 @@ func (i *Integrator) RegisterLayers(e *engine.Engine) {
 func (i *Integrator) initGRPC() error {
 	grpcCfg := i.cfg.WAF.GRPC
 
-	cfg := &grpc.Config{
+	cfg := &proxygrpc.Config{
 		Enabled:        grpcCfg.Enabled,
 		GRPCWebEnabled: grpcCfg.GRPCWebEnabled,
 		ProtoPaths:     grpcCfg.ProtoPaths,
@@ -381,7 +391,7 @@ func (i *Integrator) initGRPC() error {
 		MaxMessageSize: grpcCfg.MaxMessageSize,
 	}
 
-	proxy, err := grpc.NewProxy(cfg)
+	proxy, err := proxygrpc.NewProxy(cfg)
 	if err != nil {
 		return err
 	}
@@ -598,7 +608,7 @@ func (i *Integrator) GetEnhancedBotLayer() *botdetect.EnhancedLayer {
 }
 
 // GetGRPCProxy returns the gRPC proxy for handling gRPC requests.
-func (i *Integrator) GetGRPCProxy() *grpc.Proxy {
+func (i *Integrator) GetGRPCProxy() *proxygrpc.Proxy {
 	return i.grpcProxy
 }
 
@@ -639,6 +649,9 @@ func (i *Integrator) Cleanup() {
 	}
 	if i.websocketLayer != nil {
 		i.websocketLayer.Stop()
+	}
+	if i.grpcLayer != nil {
+		i.grpcLayer.Stop()
 	}
 	log.Println("[v0.4.0] Cleanup complete")
 }
@@ -747,6 +760,8 @@ type Stats struct {
 	RemediationRulesActive  int    `json:"remediation_rules_active"`
 	WebSocketEnabled        bool   `json:"websocket_enabled"`
 	WebSocketConnections    int    `json:"websocket_connections"`
+	GRPCSecurityEnabled     bool   `json:"grpc_security_enabled"`
+	GRPCStreams             int    `json:"grpc_streams"`
 }
 
 // GetStats returns the current integration statistics.
@@ -791,6 +806,11 @@ func (i *Integrator) GetStats() Stats {
 
 	if i.websocketLayer != nil && i.websocketLayer.GetSecurity() != nil {
 		stats.WebSocketConnections = len(i.websocketLayer.GetSecurity().GetAllConnections())
+	}
+
+	if i.grpcLayer != nil && i.grpcLayer.GetSecurity() != nil {
+		stats.GRPCSecurityEnabled = true
+		stats.GRPCStreams = i.grpcLayer.GetSecurity().GetStreamCount()
 	}
 
 	return stats
@@ -1107,5 +1127,42 @@ func (i *Integrator) WebSocketHandler() http.Handler {
 		return nil
 	}
 	return websocket.NewHandler(i.websocketLayer.GetSecurity())
+}
+
+// initGRPCLayer initializes the gRPC security layer.
+func (i *Integrator) initGRPCLayer() error {
+	grpcCfg := i.cfg.WAF.GRPC
+
+	// Use the new gRPC layer
+	layer, err := grpc.NewLayer(&grpcCfg)
+	if err != nil {
+		return err
+	}
+
+	i.grpcLayer = layer
+	log.Printf("[v0.4.0+] gRPC Security enabled (grpc_web=%v, reflection=%v)",
+		grpcCfg.GRPCWebEnabled, grpcCfg.ReflectionEnabled)
+	return nil
+}
+
+// GetGRPCLayer returns the gRPC layer.
+func (i *Integrator) GetGRPCLayer() *grpc.Layer {
+	return i.grpcLayer
+}
+
+// GetGRPCSecurity returns the gRPC security instance.
+func (i *Integrator) GetGRPCSecurity() *grpc.Security {
+	if i.grpcLayer == nil {
+		return nil
+	}
+	return i.grpcLayer.GetSecurity()
+}
+
+// GRPCHandler returns the gRPC HTTP handler.
+func (i *Integrator) GRPCHandler() http.Handler {
+	if i.grpcLayer == nil {
+		return nil
+	}
+	return grpc.NewHandler(i.grpcLayer.GetSecurity())
 }
 

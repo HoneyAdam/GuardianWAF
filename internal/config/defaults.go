@@ -183,10 +183,14 @@ func DefaultConfig() *Config {
 				AllowEndpoints:     []string{"/graphql", "/api/graphql"},
 			},
 			GRPC: GRPCConfig{
-				Enabled:        false,
-				GRPCWebEnabled: true,
-				ValidateProto:  true,
-				MaxMessageSize: 4 * 1024 * 1024, // 4MB
+				Enabled:              true,
+				GRPCWebEnabled:       true,
+				ReflectionEnabled:    true,
+				ValidateProto:        false, // Enable for strict validation
+				MaxMessageSize:       4 * 1024 * 1024, // 4MB
+				MaxStreamDuration:    30 * time.Minute,
+				MaxConcurrentStreams: 100,
+				RequireTLS:           false,
 			},
 			Tenant: TenantConfig{
 				Enabled:    false,
