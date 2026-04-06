@@ -1,7 +1,7 @@
 // Package main is the CLI entry point for GuardianWAF.
 // It supports subcommands: serve, sidecar, check, validate, version, and help.
 
-//go:build http3
+//go:build !http3
 
 package main
 
@@ -29,7 +29,6 @@ import (
 	"github.com/guardianwaf/guardianwaf/internal/engine"
 	"github.com/guardianwaf/guardianwaf/internal/events"
 	"github.com/guardianwaf/guardianwaf/internal/geoip"
-	"github.com/guardianwaf/guardianwaf/internal/http3"
 	"github.com/guardianwaf/guardianwaf/internal/layers/apisecurity"
 	"github.com/guardianwaf/guardianwaf/internal/layers/apivalidation"
 	"github.com/guardianwaf/guardianwaf/internal/layers/ato"
@@ -371,39 +370,6 @@ func cmdServe(args []string) {
 			ReadTimeout:  30 * time.Second,
 			WriteTimeout: 30 * time.Second,
 			IdleTimeout:  120 * time.Second,
-		}
-
-		// Start HTTP/3 server if enabled
-		var h3Server *http3.Server
-		if cfg.TLS.HTTP3.Enabled {
-			h3Config := &http3.Config{
-				Enabled:            cfg.TLS.HTTP3.Enabled,
-				Listen:             cfg.TLS.HTTP3.Listen,
-				MaxHeaderBytes:     cfg.TLS.HTTP3.MaxHeaderBytes,
-				ReadTimeout:        cfg.TLS.HTTP3.ReadTimeout,
-				WriteTimeout:       cfg.TLS.HTTP3.WriteTimeout,
-				IdleTimeout:        cfg.TLS.HTTP3.IdleTimeout,
-				Enable0RTT:         cfg.TLS.HTTP3.Enable0RTT,
-				EnableDatagrams:    cfg.TLS.HTTP3.EnableDatagrams,
-				AltSvcPort:         cfg.TLS.HTTP3.AltSvcPort,
-				AltSvcProtocol:     "h3",
-				MaxRequestBodySize: 10 << 20,
-			}
-			if h3Config.Listen == "" {
-				h3Config.Listen = cfg.TLS.Listen
-			}
-
-			var err error
-			h3Server, err = http3.NewServer(h3Config, handler, certStore.TLSConfig())
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to create HTTP/3 server: %v\n", err)
-			} else {
-				if err := h3Server.Start(); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: failed to start HTTP/3 server: %v\n", err)
-				} else {
-					eng.Logs.Infof("HTTP/3 server started on %s", h3Config.Listen)
-				}
-			}
 		}
 	}
 
