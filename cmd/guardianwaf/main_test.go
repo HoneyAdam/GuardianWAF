@@ -890,7 +890,7 @@ func TestStartDashboard_Endpoints(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.Dashboard.Enabled = true
 	cfg.Dashboard.Listen = "127.0.0.1:0"
-	cfg.Dashboard.APIKey = ""
+	cfg.Dashboard.APIKey = "test-api-key"
 
 	store := events.NewMemoryStore(1000)
 	bus := events.NewEventBus()
@@ -918,7 +918,7 @@ func TestStartDashboard_Endpoints(t *testing.T) {
 	// Wait for server to be ready
 	time.Sleep(100 * time.Millisecond)
 
-	// Test /healthz
+	// Test /healthz (no auth required)
 	r, _ := http.NewRequestWithContext(context.Background(), "GET", fmt.Sprintf("http://%s/api/v1/health", addr), nil)
 	resp, err := http.DefaultClient.Do(r)
 	if err != nil {
@@ -929,8 +929,9 @@ func TestStartDashboard_Endpoints(t *testing.T) {
 		t.Errorf("expected 200 from healthz, got %d", resp.StatusCode)
 	}
 
-	// Test /api/stats
+	// Test /api/stats (with auth)
 	req2, _ := http.NewRequestWithContext(context.Background(), "GET", fmt.Sprintf("http://%s/api/v1/stats", addr), nil)
+	req2.Header.Set("X-API-Key", "test-api-key")
 	resp2, err := http.DefaultClient.Do(req2)
 	if err != nil {
 		t.Fatalf("stats request failed: %v", err)
