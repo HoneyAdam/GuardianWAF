@@ -7,6 +7,7 @@ package main
 
 import (
 	"context"
+	cryptoRand "crypto/rand"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -684,6 +685,23 @@ func generateSecurePassword() string {
 		b[i] = charset[i%len(charset)]
 	}
 	// Use crypto/rand in production, this is a simple fallback
+	return string(b)
+}
+
+// generateDashboardPassword creates a cryptographically secure random password for dashboard.
+func generateDashboardPassword() string {
+	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	b := make([]byte, 24)
+	if _, err := cryptoRand.Read(b); err != nil {
+		// Fallback to simple rand if crypto/rand fails
+		for i := range b {
+			b[i] = charset[time.Now().UnixNano()%int64(len(charset))]
+		}
+	} else {
+		for i := range b {
+			b[i] = charset[int(b[i])%len(charset)]
+		}
+	}
 	return string(b)
 }
 
@@ -2487,6 +2505,13 @@ func startDashboard(cfg *config.Config, eng *engine.Engine) (*http.Server, *dash
 	if !ok {
 		fmt.Fprintf(os.Stderr, "Warning: event store does not support queries; dashboard events disabled\n")
 		eventStore = events.NewMemoryStore(1000)
+	}
+
+	// Require API key for dashboard — generate random if not set
+	if cfg.Dashboard.APIKey == "" {
+		cfg.Dashboard.APIKey = generateDashboardPassword()
+		fmt.Printf("Dashboard API key not set — generated: %s\n", cfg.Dashboard.APIKey)
+		fmt.Printf("Access dashboard at https://%s (user: admin, pass: %s)\n", cfg.Dashboard.Listen, cfg.Dashboard.APIKey)
 	}
 
 	dash := dashboard.New(eng, eventStore, cfg.Dashboard.APIKey)
