@@ -1978,18 +1978,30 @@ func DefaultConfigPath() string {
 }
 
 // loadConfig loads config from path, falling back to defaults if the file is not found.
+// Supports both single file and directory-based config.
 func loadConfig(path string) *config.Config {
 	// Use platform-specific default if no path specified
 	if path == "" {
 		path = DefaultConfigPath()
 	}
 
-	// Check if file exists before trying to load
-	if _, statErr := os.Stat(path); os.IsNotExist(statErr) {
+	// Check if path exists
+	info, statErr := os.Stat(path)
+	if os.IsNotExist(statErr) {
 		return config.DefaultConfig()
 	}
 
-	cfg, err := config.LoadFile(path)
+	var cfg *config.Config
+	var err error
+
+	if info.IsDir() {
+		// Directory-based config
+		cfg, err = config.LoadDir(path)
+	} else {
+		// Single file config (backward compatible)
+		cfg, err = config.LoadFile(path)
+	}
+
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error loading config: %v\n", err)
 		osExit(1)

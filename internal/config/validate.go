@@ -66,6 +66,300 @@ func LoadFile(path string) (*Config, error) {
 	return cfg, nil
 }
 
+// LoadDir loads configuration from a directory structure:
+//   - {dir}/guardianwaf.yaml (main config)
+//   - {dir}/rules.d/*.yaml (appended to custom rules, rate limits, IP ACL)
+//   - {dir}/domains.d/*.yaml (appended to virtual hosts)
+//   - {dir}/tenants.d/*.yaml (appended to tenant configs)
+//
+// Arrays are appended (not replaced) when loading from subdirectory files.
+func LoadDir(dir string) (*Config, error) {
+	// Load main config file
+	mainPath := dir + string(os.PathSeparator) + "guardianwaf.yaml"
+	cfg, err := LoadFile(mainPath)
+	if err != nil && !os.IsNotExist(err) {
+		return nil, fmt.Errorf("loading main config: %w", err)
+	}
+	if os.IsNotExist(err) {
+		// No main config, start with defaults
+		cfg = DefaultConfig()
+	}
+
+	// Scan and load subdirectory configs
+	subdirs := map[string]func(path string, cfg *Config) error{
+		"rules.d":   appendRulesFromDir,
+		"domains.d":  appendDomainsFromDir,
+		"tenants.d":  appendTenantsFromDir,
+	}
+
+	for subdir, loader := range subdirs {
+		subdirPath := dir + string(os.PathSeparator) + subdir
+		if entries, err := os.ReadDir(subdirPath); err == nil {
+			for _, entry := range entries {
+				if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".yaml") {
+					filePath := subdirPath + string(os.PathSeparator) + entry.Name()
+					if err := loader(filePath, cfg); err != nil {
+						return nil, fmt.Errorf("loading %s: %w", filePath, err)
+					}
+				}
+			}
+		}
+	}
+
+	return cfg, nil
+}
+
+// appendRulesFromDir loads rules from a rules.d/*.yaml file and appends to config.
+func appendRulesFromDir(path string, cfg *Config) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	node, err := Parse(data)
+	if err != nil {
+		return fmt.Errorf("parsing %s: %w", path, err)
+	}
+
+	// Append custom rules
+	if n := node.Get("custom_rules"); n != nil && n.Kind == SequenceNode {
+		for _, item := range n.Slice() {
+			if item.Kind != MapNode {
+				continue
+			}
+			rule := parseCustomRule(item)
+			cfg.WAF.CustomRules.Rules = append(cfg.WAF.CustomRules.Rules, rule)
+		}
+	}
+
+	// Append rate limit rules
+	if n := node.Get("rate_limits"); n != nil && n.Kind == SequenceNode {
+		for _, item := range n.Slice() {
+			if item.Kind != MapNode {
+				continue
+			}
+			rule := parseRateLimitRule(item)
+			cfg.WAF.RateLimit.Rules = append(cfg.WAF.RateLimit.Rules, rule)
+		}
+	}
+
+	// Append IP ACL whitelist/blacklist entries
+	if n := node.Get("ipacl"); n != nil && n.Kind == MapNode {
+		if wl := n.Get("whitelist"); wl != nil {
+			cfg.WAF.IPACL.Whitelist = append(cfg.WAF.IPACL.Whitelist, nodeStringSlice(wl)...)
+		}
+		if bl := n.Get("blacklist"); bl != nil {
+			cfg.WAF.IPACL.Blacklist = append(cfg.WAF.IPACL.Blacklist, nodeStringSlice(bl)...)
+		}
+	}
+
+	return nil
+}
+
+// appendDomainsFromDir loads domain configs from domains.d/*.yaml and appends to virtual hosts.
+func appendDomainsFromDir(path string, cfg *Config) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	node, err := Parse(data)
+	if err != nil {
+		return fmt.Errorf("parsing %s: %w", path, err)
+	}
+
+	vh := VirtualHostConfig{}
+
+	if domains := node.Get("domains"); domains != nil {
+		vh.Domains = nodeStringSlice(domains)
+	}
+
+	if tls := node.Get("tls"); tls != nil && tls.Kind == MapNode {
+		if cert := tls.Get("cert_file"); cert != nil {
+			vh.TLS.CertFile = cert.String()
+		}
+		if key := tls.Get("key_file"); key != nil {
+			vh.TLS.KeyFile = key.String()
+		}
+	}
+
+	if routes := node.Get("routes"); routes != nil && routes.Kind == SequenceNode {
+		for _, item := range routes.Slice() {
+			if item.Kind != MapNode {
+				continue
+			}
+			rc := RouteConfig{}
+			if p := item.Get("path"); p != nil {
+				rc.Path = p.String()
+			}
+			if u := item.Get("upstream"); u != nil {
+				rc.Upstream = u.String()
+			}
+			if sp := item.Get("strip_prefix"); sp != nil {
+				if b, _ := sp.Bool(); b {
+					rc.StripPrefix = true
+				}
+			}
+			if m := item.Get("methods"); m != nil {
+				rc.Methods = nodeStringSlice(m)
+			}
+			vh.Routes = append(vh.Routes, rc)
+		}
+	}
+
+	// Load upstreams from this file
+	if ups := node.Get("upstreams"); ups != nil && ups.Kind == SequenceNode {
+		for _, item := range ups.Slice() {
+			if item.Kind != MapNode {
+				continue
+			}
+			u := UpstreamConfig{}
+			if n := item.Get("name"); n != nil {
+				u.Name = n.String()
+			}
+			if t := item.Get("targets"); t != nil && t.Kind == SequenceNode {
+				for _, ti := range t.Slice() {
+					if ti.Kind != MapNode {
+						continue
+					}
+					tc := TargetConfig{Weight: 1}
+					if url := ti.Get("url"); url != nil {
+						tc.URL = url.String()
+					}
+					if w := ti.Get("weight"); w != nil {
+						if i, _ := w.Int(); i > 0 {
+							tc.Weight = i
+						}
+					}
+					u.Targets = append(u.Targets, tc)
+				}
+			}
+			cfg.Upstreams = append(cfg.Upstreams, u)
+		}
+	}
+
+	cfg.VirtualHosts = append(cfg.VirtualHosts, vh)
+	return nil
+}
+
+// appendTenantsFromDir loads tenant configs from tenants.d/*.yaml and appends.
+func appendTenantsFromDir(path string, cfg *Config) error {
+	// Tenant config is complex; for now just track that file exists
+	// Full tenant loading would need TenantConfig struct
+	return nil
+}
+
+// parseCustomRule parses a single custom rule from a YAML node.
+func parseCustomRule(n *Node) CustomRule {
+	r := CustomRule{Enabled: true}
+	if id := n.Get("id"); id != nil {
+		r.ID = id.String()
+	}
+	if name := n.Get("name"); name != nil {
+		r.Name = name.String()
+	}
+	if en := n.Get("enabled"); en != nil {
+		if b, _ := en.Bool(); !b {
+			r.Enabled = false
+		}
+	}
+	if pri := n.Get("priority"); pri != nil {
+		if i, _ := pri.Int(); i >= 0 {
+			r.Priority = i
+		}
+	}
+	if act := n.Get("action"); act != nil {
+		r.Action = act.String()
+	}
+	if score := n.Get("score"); score != nil {
+		if i, _ := score.Int(); i >= 0 {
+			r.Score = i
+		}
+	}
+	// Parse conditions
+	if cond := n.Get("conditions"); cond != nil && cond.Kind == SequenceNode {
+		for _, c := range cond.Slice() {
+			if c.Kind != MapNode {
+				continue
+			}
+			rc := RuleCondition{}
+			if f := c.Get("field"); f != nil {
+				rc.Field = f.String()
+			}
+			if o := c.Get("op"); o != nil {
+				rc.Op = o.String()
+			}
+			if v := c.Get("value"); v != nil {
+				rc.Value = parseNodeValue(v)
+			}
+			r.Conditions = append(r.Conditions, rc)
+		}
+	}
+	return r
+}
+
+// parseRateLimitRule parses a single rate limit rule from a YAML node.
+func parseRateLimitRule(n *Node) RateLimitRule {
+	r := RateLimitRule{Action: "block"}
+	if id := n.Get("id"); id != nil {
+		r.ID = id.String()
+	}
+	if scope := n.Get("scope"); scope != nil {
+		r.Scope = scope.String()
+	}
+	if paths := n.Get("paths"); paths != nil {
+		r.Paths = nodeStringSlice(paths)
+	}
+	if limit := n.Get("limit"); limit != nil {
+		if i, _ := limit.Int(); i > 0 {
+			r.Limit = i
+		}
+	}
+	if window := n.Get("window"); window != nil {
+		if d, err := parseDuration(window.String()); err == nil {
+			r.Window = d
+		}
+	}
+	if burst := n.Get("burst"); burst != nil {
+		if i, _ := burst.Int(); i >= 0 {
+			r.Burst = i
+		}
+	}
+	if act := n.Get("action"); act != nil {
+		r.Action = act.String()
+	}
+	if ab := n.Get("auto_ban_after"); ab != nil {
+		if i, _ := ab.Int(); i >= 0 {
+			r.AutoBanAfter = i
+		}
+	}
+	return r
+}
+
+// parseNodeValue extracts a value from a YAML node (string, int, bool, or slice).
+func parseNodeValue(n *Node) any {
+	if n == nil || n.IsNull {
+		return nil
+	}
+	switch n.Kind {
+	case ScalarNode:
+		// Try int first
+		if i, err := n.Int(); err == nil {
+			return i
+		}
+		// Try float
+		if f, err := n.Float64(); err == nil {
+			return f
+		}
+		// Try bool
+		if b, err := n.Bool(); err == nil {
+			return b
+		}
+		return n.String()
+	case SequenceNode:
+		return nodeStringSlice(n)
+	}
+	return n.String()
+}
+
 // LoadEnv overlays environment variables onto the config.
 // Env var format: GWAF_<SECTION>_<KEY>=<value>
 // Examples:

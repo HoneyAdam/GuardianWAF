@@ -107,6 +107,123 @@ listen: [invalid`
 	}
 }
 
+func TestLoadDir(t *testing.T) {
+	// Create a directory structure with main config and subdirectory configs
+	dir := t.TempDir()
+
+	// Main config
+	mainConfig := `mode: monitor
+listen: ":9090"
+waf:
+  ip_acl:
+    enabled: true
+`
+	if err := os.WriteFile(filepath.Join(dir, "guardianwaf.yaml"), []byte(mainConfig), 0o644); err != nil {
+		t.Fatalf("failed to write main config: %v", err)
+	}
+
+	// Create rules.d directory and add a rules file
+	rulesDir := filepath.Join(dir, "rules.d")
+	if err := os.MkdirAll(rulesDir, 0o755); err != nil {
+		t.Fatalf("failed to create rules.d dir: %v", err)
+	}
+
+	rulesConfig := `custom_rules:
+  - id: "block-scanners"
+    name: "Block Known Scanners"
+    priority: 10
+    action: block
+    score: 80
+    conditions:
+      - field: user_agent
+        op: contains
+        value: "sqlmap"
+rate_limits:
+  - id: "api-global"
+    scope: ip
+    limit: 100
+    window: 1m
+    burst: 20
+    action: block
+ipacl:
+  blacklist:
+    - "1.2.3.4"
+    - "5.6.7.8/24"
+`
+	if err := os.WriteFile(filepath.Join(rulesDir, "security.yaml"), []byte(rulesConfig), 0o644); err != nil {
+		t.Fatalf("failed to write rules.d/security.yaml: %v", err)
+	}
+
+	// Create domains.d directory and add a domain config
+	domainsDir := filepath.Join(dir, "domains.d")
+	if err := os.MkdirAll(domainsDir, 0o755); err != nil {
+		t.Fatalf("failed to create domains.d dir: %v", err)
+	}
+
+	domainConfig := `domains:
+  - "example.com"
+  - "*.example.com"
+routes:
+  - path: /api
+    upstream: example-api
+upstreams:
+  - name: example-api
+    targets:
+      - url: http://localhost:8000
+`
+	if err := os.WriteFile(filepath.Join(domainsDir, "example.com.yaml"), []byte(domainConfig), 0o644); err != nil {
+		t.Fatalf("failed to write domains.d/example.com.yaml: %v", err)
+	}
+
+	// Test LoadDir
+	cfg, err := LoadDir(dir)
+	if err != nil {
+		t.Fatalf("LoadDir() error: %v", err)
+	}
+
+	// Verify main config values are preserved
+	if cfg.Mode != "monitor" {
+		t.Errorf("expected mode 'monitor', got %q", cfg.Mode)
+	}
+	if cfg.Listen != ":9090" {
+		t.Errorf("expected listen ':9090', got %q", cfg.Listen)
+	}
+	if !cfg.WAF.IPACL.Enabled {
+		t.Error("expected IPACL enabled")
+	}
+
+	// Verify rules were appended
+	if len(cfg.WAF.CustomRules.Rules) != 1 {
+		t.Errorf("expected 1 custom rule, got %d", len(cfg.WAF.CustomRules.Rules))
+	}
+	if cfg.WAF.CustomRules.Rules[0].ID != "block-scanners" {
+		t.Errorf("expected rule id 'block-scanners', got %q", cfg.WAF.CustomRules.Rules[0].ID)
+	}
+
+	// Verify rate limit rules were appended (DefaultConfig has 1 rule, we add 1)
+	if len(cfg.WAF.RateLimit.Rules) != 2 {
+		t.Errorf("expected 2 rate limit rules (1 default + 1 appended), got %d", len(cfg.WAF.RateLimit.Rules))
+	}
+
+	// Verify IP ACL blacklist was appended
+	if len(cfg.WAF.IPACL.Blacklist) != 2 {
+		t.Errorf("expected 2 blacklist entries, got %d", len(cfg.WAF.IPACL.Blacklist))
+	}
+
+	// Verify virtual hosts were appended
+	if len(cfg.VirtualHosts) != 1 {
+		t.Errorf("expected 1 virtual host, got %d", len(cfg.VirtualHosts))
+	}
+	if len(cfg.VirtualHosts) > 0 && cfg.VirtualHosts[0].Domains[0] != "example.com" {
+		t.Errorf("expected domain 'example.com', got %q", cfg.VirtualHosts[0].Domains[0])
+	}
+
+	// Verify upstreams were appended
+	if len(cfg.Upstreams) < 1 {
+		t.Error("expected at least 1 upstream")
+	}
+}
+
 func TestLoadEnv(t *testing.T) {
 	cfg := DefaultConfig()
 
