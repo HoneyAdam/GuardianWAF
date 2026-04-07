@@ -137,6 +137,7 @@ type VirtualHostConfig struct {
 	Domains []string       `yaml:"domains"` // e.g., ["api.example.com", "*.api.example.com"]
 	TLS     VHostTLSConfig `yaml:"tls"`
 	Routes  []RouteConfig  `yaml:"routes"`
+	WAF     *WAFConfig     `yaml:"waf,omitempty"` // Per-domain WAF override; nil = use global
 }
 
 // VHostTLSConfig holds per-virtual-host TLS certificate paths.

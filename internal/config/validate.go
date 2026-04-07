@@ -236,8 +236,121 @@ func appendDomainsFromDir(path string, cfg *Config) error {
 		}
 	}
 
+	// Load per-domain WAF override if present
+	waf, err := loadVirtualHostWAF(node)
+	if err != nil {
+		return fmt.Errorf("loading domain waf config: %w", err)
+	}
+	vh.WAF = waf
+
 	cfg.VirtualHosts = append(cfg.VirtualHosts, vh)
 	return nil
+}
+
+// loadVirtualHostWAF loads the optional per-domain WAF override section.
+// If present, returns a pointer to WAFConfig populated from the YAML node.
+// If not present, returns nil (meaning use global WAF config).
+func loadVirtualHostWAF(n *Node) (*WAFConfig, error) {
+	if n == nil || n.Kind != MapNode {
+		return nil, nil
+	}
+	wafNode := n.Get("waf")
+	if wafNode == nil || wafNode.IsNull {
+		return nil, nil
+	}
+	if wafNode.Kind != MapNode {
+		return nil, fmt.Errorf("waf section must be a map")
+	}
+
+	// Start with default WAF config and overlay values from YAML
+	wafDefaults := DefaultWAFConfig()
+	waf := &wafDefaults
+
+	// Parse detection override
+	if det := wafNode.Get("detection"); det != nil && det.Kind == MapNode {
+		if en := det.Get("enabled"); en != nil {
+			if b, _ := en.Bool(); b {
+				waf.Detection.Enabled = true
+			}
+		}
+		if th := det.Get("threshold"); th != nil && th.Kind == MapNode {
+			if block := th.Get("block"); block != nil {
+				if i, _ := block.Int(); i > 0 {
+					waf.Detection.Threshold.Block = i
+				}
+			}
+			if log := th.Get("log"); log != nil {
+				if i, _ := log.Int(); i > 0 {
+					waf.Detection.Threshold.Log = i
+				}
+			}
+		}
+	}
+
+	// Parse rate limit override
+	if rl := wafNode.Get("rate_limit"); rl != nil && rl.Kind == MapNode {
+		if en := rl.Get("enabled"); en != nil {
+			if b, _ := en.Bool(); b {
+				waf.RateLimit.Enabled = true
+			}
+		}
+		if rules := rl.Get("rules"); rules != nil && rules.Kind == SequenceNode {
+			for _, item := range rules.Slice() {
+				if item.Kind != MapNode {
+					continue
+				}
+				rule := parseRateLimitRule(item)
+				waf.RateLimit.Rules = append(waf.RateLimit.Rules, rule)
+			}
+		}
+	}
+
+	// Parse bot detection override
+	if bd := wafNode.Get("bot_detection"); bd != nil && bd.Kind == MapNode {
+		if en := bd.Get("enabled"); en != nil {
+			if b, _ := en.Bool(); b {
+				waf.BotDetection.Enabled = true
+			}
+		}
+		if mode := bd.Get("mode"); mode != nil {
+			waf.BotDetection.Mode = mode.String()
+		}
+	}
+
+	// Parse custom rules override
+	if cr := wafNode.Get("custom_rules"); cr != nil && cr.Kind == MapNode {
+		if rules := cr.Get("rules"); rules != nil && rules.Kind == SequenceNode {
+			for _, item := range rules.Slice() {
+				if item.Kind != MapNode {
+					continue
+				}
+				rule := parseCustomRule(item)
+				waf.CustomRules.Rules = append(waf.CustomRules.Rules, rule)
+			}
+		}
+	}
+
+	return waf, nil
+}
+
+// DefaultWAFConfig returns a default WAFConfig.
+func DefaultWAFConfig() WAFConfig {
+	return WAFConfig{
+		Detection: DetectionConfig{
+			Enabled: true,
+			Threshold: ThresholdConfig{
+				Block: 50,
+				Log:   25,
+			},
+		},
+		RateLimit: RateLimitConfig{
+			Enabled: true,
+		},
+		BotDetection: BotDetectionConfig{
+			Enabled: true,
+			Mode:    "monitor",
+		},
+	}
 }
 
 // appendTenantsFromDir loads tenant configs from tenants.d/*.yaml and appends.
