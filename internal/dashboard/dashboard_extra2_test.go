@@ -1013,7 +1013,7 @@ func TestDistAssets_ServeJS(t *testing.T) {
 	handler := d.Handler()
 
 	// Request the embedded JS asset
-	req := httptest.NewRequest("GET", "/assets/index-7wN0RkPG.js", nil)
+	req := httptest.NewRequest("GET", "/assets/index-CK5zVezV.js", nil)
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 
