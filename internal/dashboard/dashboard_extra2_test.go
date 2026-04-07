@@ -1037,7 +1037,7 @@ func TestDistAssets_ServeCSS(t *testing.T) {
 	d := newTestDashboard(t, "")
 	handler := d.Handler()
 
-	req := httptest.NewRequest("GET", "/assets/index-WFqYnm8y.css", nil)
+	req := httptest.NewRequest("GET", "/assets/index-CX1_M1Es.css", nil)
 	rr := httptest.NewRecorder()
 	handler.ServeHTTP(rr, req)
 
