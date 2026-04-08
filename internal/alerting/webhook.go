@@ -44,6 +44,7 @@ type Alert struct {
 
 // Manager manages webhook and email delivery for security events.
 type Manager struct {
+	mu           sync.RWMutex
 	webhooks     []webhook
 	emailTargets []*EmailTarget
 	httpClient   *http.Client
@@ -108,11 +109,15 @@ func (m *Manager) SetLogger(fn func(level, msg string)) {
 
 // GetStats returns alerting statistics.
 func (m *Manager) GetStats() Stats {
+	m.mu.RLock()
+	wc := len(m.webhooks)
+	ec := len(m.emailTargets)
+	m.mu.RUnlock()
 	return Stats{
 		Sent:         m.sent.Load(),
 		Failed:       m.failed.Load(),
-		WebhookCount: len(m.webhooks),
-		EmailCount:   len(m.emailTargets),
+		WebhookCount: wc,
+		EmailCount:   ec,
 		Email:        GetEmailStats(),
 	}
 }
@@ -138,9 +143,17 @@ func (m *Manager) HandleEvent(event *engine.Event) {
 		UserAgent: event.UserAgent,
 	}
 
+	// Snapshot webhooks and email targets under read lock
+	m.mu.RLock()
+	whooks := make([]webhook, len(m.webhooks))
+	copy(whooks, m.webhooks)
+	emails := make([]*EmailTarget, len(m.emailTargets))
+	copy(emails, m.emailTargets)
+	m.mu.RUnlock()
+
 	// Process webhooks
-	for i := range m.webhooks {
-		wh := &m.webhooks[i]
+	for i := range whooks {
+		wh := &whooks[i]
 
 		// Check if this webhook cares about this event type
 		if !matchesEvent(wh.config.Events, action) {
@@ -167,7 +180,7 @@ func (m *Manager) HandleEvent(event *engine.Event) {
 	}
 
 	// Process email alerts
-	for _, et := range m.emailTargets {
+	for _, et := range emails {
 		cfg := et.config
 
 		// Check if this email target cares about this event type
@@ -379,12 +392,16 @@ func (m *Manager) AddWebhook(target WebhookTarget) {
 	if wh.cooldown <= 0 {
 		wh.cooldown = 30 * time.Second
 	}
+	m.mu.Lock()
 	m.webhooks = append(m.webhooks, wh)
+	m.mu.Unlock()
 	m.logFn("info", fmt.Sprintf("Webhook target added: %s", target.Name))
 }
 
 // RemoveWebhook removes a webhook target by name. Returns true if found and removed.
 func (m *Manager) RemoveWebhook(name string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	for i, wh := range m.webhooks {
 		if wh.config.Name == name {
 			m.webhooks = append(m.webhooks[:i], m.webhooks[i+1:]...)
@@ -398,13 +415,17 @@ func (m *Manager) RemoveWebhook(name string) bool {
 // AddEmailTarget adds a new email target at runtime.
 func (m *Manager) AddEmailTarget(cfg config.EmailConfig) {
 	if cfg.SMTPHost != "" && len(cfg.To) > 0 {
+		m.mu.Lock()
 		m.emailTargets = append(m.emailTargets, NewEmailTarget(cfg))
+		m.mu.Unlock()
 		m.logFn("info", fmt.Sprintf("Email target added: %s", cfg.Name))
 	}
 }
 
 // RemoveEmailTarget removes an email target by name. Returns true if found and removed.
 func (m *Manager) RemoveEmailTarget(name string) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	for i, et := range m.emailTargets {
 		if et.config.Name == name {
 			m.emailTargets = append(m.emailTargets[:i], m.emailTargets[i+1:]...)
@@ -430,9 +451,12 @@ func (m *Manager) TestAlert(targetName string) error {
 	}
 
 	// Try webhooks first
+	m.mu.RLock()
 	for i := range m.webhooks {
 		if m.webhooks[i].config.Name == targetName {
-			m.send(&m.webhooks[i].config, &testAlert)
+			cfg := m.webhooks[i].config
+			m.mu.RUnlock()
+			m.send(&cfg, &testAlert)
 			return nil
 		}
 	}
@@ -454,5 +478,6 @@ func (m *Manager) TestAlert(targetName string) error {
 		}
 	}
 
+	m.mu.RUnlock()
 	return fmt.Errorf("target %s not found", targetName)
 }

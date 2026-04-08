@@ -177,7 +177,10 @@ func (m *Manager) CreateTenant(name, description string, domains []string, quota
 	}
 
 	// Generate tenant ID
-	id := generateTenantID(name)
+	id, err := generateTenantID(name)
+	if err != nil {
+		return nil, err
+	}
 
 	// Check if tenant exists
 	if _, exists := m.tenants[id]; exists {
@@ -192,7 +195,10 @@ func (m *Manager) CreateTenant(name, description string, domains []string, quota
 	}
 
 	// Generate API key
-	apiKey := generateAPIKey()
+	apiKey, err := generateAPIKey()
+	if err != nil {
+		return nil, err
+	}
 	apiKeyHash := hashAPIKey(apiKey)
 
 	// Use default quota if not provided
@@ -437,7 +443,10 @@ func (m *Manager) RegenerateAPIKey(id string) (string, error) {
 		return "", fmt.Errorf("tenant %s not found", id)
 	}
 
-	newKey := generateAPIKey()
+	newKey, err := generateAPIKey()
+	if err != nil {
+		return "", err
+	}
 	tenant.APIKeyHash = hashAPIKey(newKey)
 	tenant.UpdatedAt = time.Now()
 
@@ -659,20 +668,20 @@ type ManagerStats struct {
 
 // Helper functions
 
-func generateTenantID(name string) string {
+func generateTenantID(name string) (string, error) {
 	b := make([]byte, 8)
 	if _, err := rand.Read(b); err != nil {
-		panic("crypto/rand failed: " + err.Error())
+		return "", fmt.Errorf("generating tenant ID: %w", err)
 	}
-	return hex.EncodeToString(b)
+	return hex.EncodeToString(b), nil
 }
 
-func generateAPIKey() string {
+func generateAPIKey() (string, error) {
 	b := make([]byte, 24)
 	if _, err := rand.Read(b); err != nil {
-		panic("crypto/rand failed: " + err.Error())
+		return "", fmt.Errorf("generating API key: %w", err)
 	}
-	return "gwaf_" + hex.EncodeToString(b)
+	return "gwaf_" + hex.EncodeToString(b), nil
 }
 
 func hashAPIKey(apiKey string) string {
@@ -757,8 +766,12 @@ func (m *Manager) AddTenantRule(tenantID string, rule map[string]any) error {
 	}
 
 	// Convert map to Rule
+	ruleID, err := generateTenantID(rule["name"].(string))
+	if err != nil {
+		return err
+	}
 	r := rules.Rule{
-		ID:      generateTenantID(rule["name"].(string)),
+		ID:      ruleID,
 		Enabled: true,
 	}
 	if v, ok := rule["name"].(string); ok {

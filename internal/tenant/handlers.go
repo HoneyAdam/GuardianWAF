@@ -41,9 +41,7 @@ func (h *Handlers) verifyKey(r *http.Request) bool {
 // RegisterRoutes registers tenant management routes.
 func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/tenants", h.handleTenants)
-	mux.HandleFunc("/api/v1/tenants/", h.handleTenantDetail)
-	mux.HandleFunc("/api/v1/tenants/", h.handleTenantDetail)
-	mux.HandleFunc("/api/v1/tenants/", h.handleTenantWAFConfig) // /api/v1/tenants/{id}/waf-config
+	mux.HandleFunc("/api/v1/tenants/", h.handleTenantRoutes) // handles both {id} and {id}/waf-config
 }
 
 // handleTenants handles list and create operations.
@@ -57,6 +55,52 @@ func (h *Handlers) handleTenants(w http.ResponseWriter, r *http.Request) {
 		h.listTenants(w, r)
 	case http.MethodPost:
 		h.createTenant(w, r)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleTenantRoutes dispatches /api/v1/tenants/{id} and /api/v1/tenants/{id}/waf-config.
+func (h *Handlers) handleTenantRoutes(w http.ResponseWriter, r *http.Request) {
+	if !h.verifyKey(r) {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+	// Extract tenant ID from path /api/v1/tenants/{id} or /api/v1/tenants/{id}/waf-config
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/tenants/")
+	if path == "" {
+		http.Error(w, "Tenant ID required", http.StatusBadRequest)
+		return
+	}
+
+	tenantID := strings.Split(path, "/")[0]
+
+	// Check if this is a WAF config sub-path
+	if strings.HasSuffix(path, "/waf-config") {
+		h.handleWAFConfigRoutes(w, r, tenantID)
+		return
+	}
+
+	// Regular tenant CRUD
+	switch r.Method {
+	case http.MethodGet:
+		h.getTenant(w, r, tenantID)
+	case http.MethodPut:
+		h.updateTenant(w, r, tenantID)
+	case http.MethodDelete:
+		h.deleteTenant(w, r, tenantID)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// handleWAFConfigRoutes handles GET/PUT for tenant WAF config.
+func (h *Handlers) handleWAFConfigRoutes(w http.ResponseWriter, r *http.Request, tenantID string) {
+	switch r.Method {
+	case http.MethodGet:
+		h.getTenantWAFConfig(w, r, tenantID)
+	case http.MethodPut:
+		h.updateTenantWAFConfig(w, r, tenantID)
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 	}

@@ -263,7 +263,7 @@ func (r *Recorder) rotateFile() error {
 	r.cleanupOldFiles()
 
 	filename := filepath.Join(r.config.StoragePath, fmt.Sprintf("requests-%s-%03d.log",
-		time.Now().Format("YYYYMMDD"), r.fileIndex))
+		time.Now().Format("20060102"), r.fileIndex))
 
 	f, err := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
@@ -301,7 +301,7 @@ func (r *Recorder) cleanupOldFiles() {
 	// Remove files older than retention
 	cutoff := time.Now().AddDate(0, 0, -r.config.RetentionDays)
 	for date, files := range filesByDate {
-		t, err := time.Parse("YYYYMMDD", date)
+		t, err := time.Parse("20060102", date)
 		if err != nil {
 			continue
 		}

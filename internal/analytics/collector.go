@@ -147,11 +147,11 @@ func (h *Histogram) Record(value float64) {
 	// Find bucket
 	for i, bucket := range h.Buckets {
 		if value <= bucket {
-			h.Counts[i]++
+			atomic.AddInt64(&h.Counts[i], 1)
 			return
 		}
 	}
-	h.Counts[len(h.Buckets)]++ // +Inf bucket
+	atomic.AddInt64(&h.Counts[len(h.Buckets)], 1) // +Inf bucket
 }
 
 // Snapshot returns current histogram statistics.
@@ -481,7 +481,7 @@ func (c *Collector) Flush() error {
 	c.mu.RUnlock()
 
 	filename := filepath.Join(c.config.StoragePath, fmt.Sprintf("metrics-%s.json",
-		time.Now().Format("YYYYMMDD")))
+		time.Now().Format("20060102")))
 
 	file, err := os.Create(filename)
 	if err != nil {

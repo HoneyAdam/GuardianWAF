@@ -804,12 +804,15 @@ func TestFileStore_ChannelFullDrop(t *testing.T) {
 	// Fill the channel completely by sending events without letting writeLoop drain
 	// The channel has fileChannelBufSize capacity
 	now := time.Now()
+	dropped := 0
 	for i := range fileChannelBufSize + 100 {
 		ev := makeEvent("drop-evt-"+intToStr(i), engine.ActionPass, 0, "/", "10.0.0.1", now)
-		// Store should never return an error even when full (drops silently)
 		if err := fs.Store(ev); err != nil {
-			t.Fatalf("Store should not return error, got: %v", err)
+			dropped++
 		}
+	}
+	if dropped == 0 {
+		t.Error("expected some events to be dropped when channel is full")
 	}
 
 	fs.Close()

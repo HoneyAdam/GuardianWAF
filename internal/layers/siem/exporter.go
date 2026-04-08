@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"sync"
 	"time"
@@ -64,6 +65,10 @@ func NewExporter(cfg *Config) *Exporter {
 	}
 
 	formatter := NewFormatter(cfg.Format, "", "", "")
+
+	if cfg.SkipVerify {
+		log.Printf("[siem] WARNING: TLS certificate verification is disabled — SIEM connection is vulnerable to MITM attacks")
+	}
 
 	transport := &http.Transport{
 		TLSClientConfig: &tls.Config{

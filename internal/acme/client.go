@@ -511,7 +511,10 @@ func SplitDomains(s string) []string {
 }
 
 // SerialNumber generates a random serial number for certificates.
-func SerialNumber() *big.Int {
-	n, _ := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
-	return n
+func SerialNumber() (*big.Int, error) {
+	n, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 128))
+	if err != nil {
+		return nil, fmt.Errorf("generating serial number: %w", err)
+	}
+	return n, nil
 }

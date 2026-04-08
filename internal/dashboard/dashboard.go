@@ -703,15 +703,13 @@ func (d *Dashboard) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 		"tls": map[string]any{
 			"enabled":       cfg.TLS.Enabled,
 			"listen":        cfg.TLS.Listen,
-			"cert_file":     cfg.TLS.CertFile,
-			"key_file":      cfg.TLS.KeyFile,
+			"cert_configured": cfg.TLS.CertFile != "",
+			"key_configured": cfg.TLS.KeyFile != "",
 			"http_redirect": cfg.TLS.HTTPRedirect,
 			"acme": map[string]any{
 				"enabled":   cfg.TLS.ACME.Enabled,
-				"email":     cfg.TLS.ACME.Email,
 				"domains":   cfg.TLS.ACME.Domains,
-				"cache_dir": cfg.TLS.ACME.CacheDir,
-			},
+							},
 		},
 		"waf": map[string]any{
 			"ip_acl": map[string]any{

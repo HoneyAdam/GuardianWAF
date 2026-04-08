@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/guardianwaf/guardianwaf/internal/engine"
@@ -29,6 +30,7 @@ type FileStore struct {
 	done     chan struct{}
 	filePath string
 	maxSize  int64 // max file size before rotation
+	dropped  atomic.Int64 // count of dropped events
 }
 
 // NewFileStore creates a new FileStore that writes JSONL to the specified file.
@@ -62,8 +64,8 @@ func (fs *FileStore) Store(event engine.Event) error {
 	case fs.ch <- event:
 		return nil
 	default:
-		// Channel full, drop event to avoid blocking callers
-		return nil
+		fs.dropped.Add(1)
+		return errors.New("event dropped: file store channel full")
 	}
 }
 
@@ -85,6 +87,11 @@ func (fs *FileStore) Recent(_ int) ([]engine.Event, error) {
 // Count is not supported on FileStore.
 func (fs *FileStore) Count(_ EventFilter) (int, error) {
 	return 0, errors.New("query not supported on file store")
+}
+
+// Dropped returns the number of events dropped due to a full channel.
+func (fs *FileStore) Dropped() int64 {
+	return fs.dropped.Load()
 }
 
 // Close stops the background writer, drains remaining events, flushes the buffer, and closes the file.

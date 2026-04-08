@@ -119,8 +119,14 @@ func TestSplitDomains_Whitespace(t *testing.T) {
 }
 
 func TestSerialNumber(t *testing.T) {
-	n1 := SerialNumber()
-	n2 := SerialNumber()
+	n1, err := SerialNumber()
+	if err != nil {
+		t.Fatal(err)
+	}
+	n2, err := SerialNumber()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if n1 == nil || n2 == nil {
 		t.Fatal("expected non-nil serial numbers")
 	}
