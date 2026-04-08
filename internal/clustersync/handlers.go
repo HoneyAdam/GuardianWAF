@@ -46,12 +46,15 @@ func (h *Handler) handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	if err := json.NewEncoder(w).Encode(map[string]any{
 		"status":    "healthy",
 		"node_id":   h.manager.config.NodeID,
 		"node_name": h.manager.config.NodeName,
 		"timestamp": time.Now().Unix(),
-	})
+	}); err != nil {
+		// Client disconnected, error ignored
+		_ = err
+	}
 }
 
 // handleSync receives sync events from other nodes.
@@ -78,7 +81,10 @@ func (h *Handler) handleSync(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok"}); err != nil {
+		// Client disconnected, error ignored
+		_ = err
+	}
 }
 
 // handleEvents returns events since a given time.
@@ -116,7 +122,10 @@ func (h *Handler) handleEvents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(events)
+	if err := json.NewEncoder(w).Encode(events); err != nil {
+		// Client disconnected, error ignored
+		_ = err
+	}
 }
 
 // handleClusters manages cluster configuration.
@@ -153,7 +162,10 @@ func (h *Handler) listClusters(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(result)
+	if err := json.NewEncoder(w).Encode(result); err != nil {
+		// Client disconnected, error ignored
+		_ = err
+	}
 }
 
 func (h *Handler) createCluster(w http.ResponseWriter, r *http.Request) {
@@ -180,14 +192,17 @@ func (h *Handler) createCluster(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(map[string]any{
+	if err := json.NewEncoder(w).Encode(map[string]any{
 		"id":          cluster.ID,
 		"name":        cluster.Name,
 		"description": cluster.Description,
 		"nodes":       cluster.Nodes,
 		"sync_scope":  cluster.SyncScope.String(),
 		"created_at":  cluster.CreatedAt,
-	})
+	}); err != nil {
+		// Client disconnected, error ignored
+		_ = err
+	}
 }
 
 // handleClusterDetail handles single cluster operations.
@@ -230,14 +245,17 @@ func (h *Handler) getCluster(w http.ResponseWriter, r *http.Request, clusterID s
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	if err := json.NewEncoder(w).Encode(map[string]any{
 		"id":          cluster.ID,
 		"name":        cluster.Name,
 		"description": cluster.Description,
 		"nodes":       cluster.Nodes,
 		"sync_scope":  cluster.SyncScope.String(),
 		"created_at":  cluster.CreatedAt,
-	})
+	}); err != nil {
+		// Client disconnected, error ignored
+		_ = err
+	}
 }
 
 func (h *Handler) deleteCluster(w http.ResponseWriter, r *http.Request, clusterID string) {
@@ -276,14 +294,17 @@ func (h *Handler) joinCluster(w http.ResponseWriter, r *http.Request, clusterID 
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	if err := json.NewEncoder(w).Encode(map[string]any{
 		"id":        node.ID,
 		"name":      node.Name,
 		"address":   node.Address,
 		"healthy":   node.Healthy,
 		"version":   node.Version,
 		"last_seen": node.LastSeen,
-	})
+	}); err != nil {
+		// Client disconnected, error ignored
+		_ = err
+	}
 }
 
 func (h *Handler) leaveCluster(w http.ResponseWriter, r *http.Request, clusterID string) {
@@ -321,7 +342,10 @@ func (h *Handler) handleNodes(w http.ResponseWriter, r *http.Request) {
 	nodes := h.manager.GetNodes()
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(nodes)
+	if err := json.NewEncoder(w).Encode(nodes); err != nil {
+		// Client disconnected, error ignored
+		_ = err
+	}
 }
 
 // handleStats returns sync statistics.
@@ -339,7 +363,10 @@ func (h *Handler) handleStats(w http.ResponseWriter, r *http.Request) {
 	stats := h.manager.GetStats()
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(stats)
+	if err := json.NewEncoder(w).Encode(stats); err != nil {
+		// Client disconnected, error ignored
+		_ = err
+	}
 }
 
 // handleReplicationStatus returns replication status for all nodes.
@@ -357,10 +384,13 @@ func (h *Handler) handleReplicationStatus(w http.ResponseWriter, r *http.Request
 	status := h.manager.GetReplicationStatus()
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	if err := json.NewEncoder(w).Encode(map[string]any{
 		"local_node": h.manager.config.NodeID,
 		"nodes":      status,
-	})
+	}); err != nil {
+		// Client disconnected, error ignored
+		_ = err
+	}
 }
 
 func (h *Handler) checkAuth(r *http.Request) bool {

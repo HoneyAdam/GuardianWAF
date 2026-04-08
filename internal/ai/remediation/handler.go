@@ -66,10 +66,13 @@ func (h *Handler) listRules(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]any{
 		"rules": rules,
 		"count": len(rules),
-	})
+	}); err != nil {
+		// Client disconnected - error ignored intentionally
+		_ = err
+	}
 }
 
 // handleRuleDetail handles individual rule operations.
@@ -102,7 +105,10 @@ func (h *Handler) getRule(w http.ResponseWriter, ruleID string) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(rule)
+	if err := json.NewEncoder(w).Encode(rule); err != nil {
+		// Client disconnected - error ignored intentionally
+		_ = err
+	}
 }
 
 // deleteRule deletes a rule.
@@ -125,7 +131,10 @@ func (h *Handler) handleStats(w http.ResponseWriter, r *http.Request) {
 	stats := h.engine.GetStats()
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(stats)
+	if err := json.NewEncoder(w).Encode(stats); err != nil {
+		// Client disconnected - error ignored intentionally
+		_ = err
+	}
 }
 
 // handleApply applies a pending rule.
@@ -155,10 +164,13 @@ func (h *Handler) handleApply(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
+	if err := json.NewEncoder(w).Encode(map[string]string{
 		"status":  "applied",
 		"rule_id": req.RuleID,
-	})
+	}); err != nil {
+		// Client disconnected - error ignored intentionally
+		_ = err
+	}
 }
 
 // handleRevoke revokes an applied rule.
@@ -188,10 +200,13 @@ func (h *Handler) handleRevoke(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
+	if err := json.NewEncoder(w).Encode(map[string]string{
 		"status":  "revoked",
 		"rule_id": req.RuleID,
-	})
+	}); err != nil {
+		// Client disconnected - error ignored intentionally
+		_ = err
+	}
 }
 
 // Layer provides remediation as a WAF layer.

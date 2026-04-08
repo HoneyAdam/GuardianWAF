@@ -644,7 +644,9 @@ func (i *Integrator) Cleanup() {
 		i.siemExporter.Stop()
 	}
 	if i.clusterLayer != nil {
-		i.clusterLayer.Stop()
+		if err := i.clusterLayer.Stop(); err != nil {
+			log.Printf("[v0.4.0] warning: clusterLayer.Stop failed: %v", err)
+		}
 	}
 	if i.remediationLayer != nil {
 		i.remediationLayer.Stop()
@@ -692,7 +694,7 @@ func (i *Integrator) handleDiscoveryExport(w http.ResponseWriter, r *http.Reques
 
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Content-Disposition", "attachment; filename="+filename)
-	w.Write(data)
+	_, _ = w.Write(data) // Client disconnect error ignored
 }
 
 // handleDiscoverySpec handles API discovery spec viewing.
@@ -710,7 +712,7 @@ func (i *Integrator) handleDiscoverySpec(w http.ResponseWriter, r *http.Request)
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	w.Write(data)
+	_, _ = w.Write(data) // Client disconnect error ignored
 }
 
 // handleDiscoveryStats handles API discovery statistics.

@@ -98,7 +98,7 @@ func TestUpstreamSummary_MultipleTargets(t *testing.T) {
 
 func TestLoadConfig_DefaultFallback(t *testing.T) {
 	// When default path doesn't exist, should return defaults silently
-	cfg := loadConfig("guardianwaf.yaml")
+	cfg := loadConfig("guardianwaf.yaml", false)
 	if cfg == nil {
 		t.Fatal("expected non-nil config from default fallback")
 	}
@@ -112,7 +112,7 @@ func TestLoadConfig_FromFile(t *testing.T) {
 	path := filepath.Join(dir, "test.yaml")
 	os.WriteFile(path, []byte("mode: monitor\nlisten: \":9090\"\n"), 0o644)
 
-	cfg := loadConfig(path)
+	cfg := loadConfig(path, true)
 	if cfg.Mode != "monitor" {
 		t.Errorf("expected mode 'monitor', got %q", cfg.Mode)
 	}
@@ -490,7 +490,7 @@ func TestCmdCheck_MissingURL(t *testing.T) {
 	path := filepath.Join(dir, "test.yaml")
 	os.WriteFile(path, []byte("mode: monitor\n"), 0o644)
 
-	cfg := loadConfig(path)
+	cfg := loadConfig(path, true)
 	store := events.NewMemoryStore(1000)
 	bus := events.NewEventBus()
 	eng, err := engine.NewEngine(cfg, store, bus)
@@ -999,7 +999,7 @@ func TestLoadConfig_NonDefaultPathNotFound(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "exists.yaml")
 	os.WriteFile(path, []byte("mode: monitor\n"), 0o644)
-	cfg := loadConfig(path)
+	cfg := loadConfig(path, true)
 	if cfg.Mode != "monitor" {
 		t.Errorf("expected 'monitor', got %q", cfg.Mode)
 	}
@@ -2109,7 +2109,7 @@ func TestLoadConfig_ExistingDefaultPath(t *testing.T) {
 	os.Chdir(dir)
 
 	// loadConfig should load the existing file
-	cfg := loadConfig("guardianwaf.yaml")
+	cfg := loadConfig("guardianwaf.yaml", true)
 	if cfg == nil {
 		t.Fatal("expected non-nil config")
 	}

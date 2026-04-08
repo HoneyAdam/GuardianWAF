@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"sync"
 	"sync/atomic"
@@ -406,7 +407,11 @@ func (c *Cluster) broadcast(msg *Message) {
 		if node.ID == c.localNode.ID {
 			continue
 		}
-		go c.sendMessage(node, msg)
+		go func(n *Node) {
+			if err := c.sendMessage(n, msg); err != nil {
+				log.Printf("[cluster] warning: failed to send message to node %s: %v", n.ID, err)
+			}
+		}(node)
 	}
 }
 
@@ -662,7 +667,11 @@ func (c *Cluster) startHTTPServer() {
 		Handler: mux,
 	}
 
-	go server.ListenAndServe()
+	go func() {
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Printf("[cluster] warning: HTTP server failed: %v", err)
+		}
+	}()
 }
 
 // HTTP handlers
@@ -720,17 +729,23 @@ func (c *Cluster) handleNodesHTTP(w http.ResponseWriter, r *http.Request) {
 
 	nodes := c.GetNodes()
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(nodes)
+	if err := json.NewEncoder(w).Encode(nodes); err != nil {
+		// Client disconnected, error ignored
+		_ = err
+	}
 }
 
 func (c *Cluster) handleHealthHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]any{
 		"status":    c.state,
 		"node_id":   c.localNode.ID,
 		"is_leader": c.IsLeader(),
 		"nodes":     c.GetNodeCount(),
-	})
+	}); err != nil {
+		// Client disconnected, error ignored
+		_ = err
+	}
 }
 
 // registerDefaultHandlers registers default message handlers.
@@ -805,6 +820,9 @@ func (c *Cluster) registerDefaultHandlers() {
 // generateNodeID generates a random node ID.
 func generateNodeID() string {
 	b := make([]byte, 8)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		// Fallback to time-based ID if CSPRNG fails
+		return fmt.Sprintf("node-%d", time.Now().UnixNano())
+	}
 	return hex.EncodeToString(b)
 }

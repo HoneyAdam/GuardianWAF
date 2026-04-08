@@ -105,7 +105,9 @@ func NewEngine(cfg *Config) (*Engine, error) {
 
 	// Ensure storage directory exists
 	if cfg.StoragePath != "" {
-		os.MkdirAll(cfg.StoragePath, 0755)
+		if err := os.MkdirAll(cfg.StoragePath, 0755); err != nil {
+			log.Printf("[remediation] warning: failed to create storage directory %s: %v", cfg.StoragePath, err)
+		}
 	}
 
 	// Start background tasks
@@ -465,7 +467,9 @@ func (e *Engine) Stop() {
 // Helper functions
 func generateRuleID() string {
 	b := make([]byte, 8)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		return fmt.Sprintf("rule-%d", time.Now().UnixNano())
+	}
 	return hex.EncodeToString(b)
 }
 

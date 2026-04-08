@@ -145,8 +145,8 @@ func cmdHealthcheck() {
 // cmdSetup provides interactive first-time setup.
 func cmdSetup(args []string) {
 	fs := flag.NewFlagSet("setup", flag.ExitOnError)
-	configPath := fs.String("config", "guardianwaf.yaml", "Path to config file")
-	fs.StringVar(configPath, "c", "guardianwaf.yaml", "Path to config file (short)")
+	configPath := fs.String("config", DefaultConfigPath(), "Path to config file")
+	fs.StringVar(configPath, "c", DefaultConfigPath(), "Path to config file (short)")
 	force := fs.Bool("force", false, "Overwrite existing config")
 	_ = fs.Parse(args)
 
@@ -225,7 +225,9 @@ tls:
 	}
 
 	n := 1
-	fmt.Sscanf(numBackends, "%d", &n)
+	if _, err := fmt.Sscanf(numBackends, "%d", &n); err != nil {
+		n = 1 // Invalid input, use default
+	}
 	if n < 1 {
 		n = 1
 	}
@@ -532,7 +534,9 @@ docker:
 
 	// Ensure parent directory exists
 	if dirIdx := strings.LastIndex(*configPath, "/"); dirIdx > 0 {
-		os.MkdirAll((*configPath)[:dirIdx], 0755)
+		if err := os.MkdirAll((*configPath)[:dirIdx], 0755); err != nil {
+			fmt.Printf("warning: failed to create directory: %v\n", err)
+		}
 	}
 
 	// Build config string piecewise
@@ -644,7 +648,10 @@ docker:
 // readLine reads a line from stdin with a default value
 func readLine(defaultVal string) string {
 	var input string
-	fmt.Scanln(&input)
+	if _, err := fmt.Scanln(&input); err != nil {
+		// EOF or error - use default
+		return defaultVal
+	}
 	input = strings.TrimSpace(input)
 	if input == "" {
 		return defaultVal
@@ -724,7 +731,8 @@ func cmdServe(args []string) {
 	_ = fs.Parse(args)
 
 	// 1. Load config
-	cfg := loadConfig(*configPath)
+	explicitPath := *configPath != ""
+	cfg := loadConfig(*configPath, explicitPath)
 
 	// 2. Apply environment variable overrides, then CLI overrides
 	config.LoadEnv(cfg)
@@ -912,8 +920,11 @@ func cmdServe(args []string) {
 			} else {
 				// Save account key
 				if keyPEM, err := acmeClient.AccountKeyPEM(); err == nil {
-					_ = os.MkdirAll(cfg.TLS.ACME.CacheDir, 0o700)
-					_ = os.WriteFile(accountKeyPath, keyPEM, 0o600)
+					if err := os.MkdirAll(cfg.TLS.ACME.CacheDir, 0o700); err != nil {
+						fmt.Fprintf(os.Stderr, "Warning: failed to create ACME cache dir: %v\n", err)
+					} else {
+						_ = os.WriteFile(accountKeyPath, keyPEM, 0o600)
+					}
 				}
 				// Register account
 				if err := acmeClient.Register(cfg.TLS.ACME.Email); err != nil {
@@ -1276,7 +1287,12 @@ func cmdServe(args []string) {
 						dash.SetUpstreamsFn(func() any { return rr.AllUpstreamStatus() })
 					}
 				}
-				upstreamHandler.Store(eng.Middleware(newHandler))
+				// Preserve tenant middleware wrapper if present
+				wrappedHandler := eng.Middleware(newHandler)
+				if tenantMiddleware != nil {
+					wrappedHandler = tenantMiddleware.Handler(wrappedHandler)
+				}
+				upstreamHandler.Store(wrappedHandler)
 				eng.Logs.Infof("Docker: proxy rebuilt (%d services discovered)", len(services))
 			})
 			dockerWatcher.Start()
@@ -1447,7 +1463,7 @@ func cmdSidecar(args []string) {
 	// Load config or build from flags
 	var cfg *config.Config
 	if *configPath != "" {
-		cfg = loadConfig(*configPath)
+		cfg = loadConfig(*configPath, true)
 		config.LoadEnv(cfg)
 	} else {
 		cfg = config.DefaultConfig()
@@ -1656,7 +1672,8 @@ func runCheck(opts *CheckOptions) (*CheckResult, error) {
 	}
 
 	// Load config
-	cfg := loadConfig(opts.ConfigPath)
+	explicitPath := opts.ConfigPath != ""
+	cfg := loadConfig(opts.ConfigPath, explicitPath)
 	config.LoadEnv(cfg)
 
 	// Create engine
@@ -1826,7 +1843,7 @@ func cmdValidate(args []string) {
 
 func cmdTestAlert(args []string) {
 	fs := flag.NewFlagSet("test-alert", flag.ExitOnError)
-	configPath := fs.String("config", "guardianwaf.yaml", "Path to config file")
+	configPath := fs.String("config", DefaultConfigPath(), "Path to config file")
 	target := fs.String("target", "", "Target name (webhook or email)")
 	all := fs.Bool("all", false, "Test all configured targets")
 	_ = fs.Parse(args)
@@ -1948,7 +1965,8 @@ func DefaultConfigPath() string {
 
 // loadConfig loads config from path, falling back to defaults if the file is not found.
 // Supports both single file and directory-based config.
-func loadConfig(path string) *config.Config {
+// If explicitPath is true, the path was explicitly provided by user and non-existence is an error.
+func loadConfig(path string, explicitPath bool) *config.Config {
 	// Use platform-specific default if no path specified
 	if path == "" {
 		path = DefaultConfigPath()
@@ -1957,6 +1975,13 @@ func loadConfig(path string) *config.Config {
 	// Check if path exists
 	info, statErr := os.Stat(path)
 	if os.IsNotExist(statErr) {
+		if explicitPath && !isDefaultPath(path) {
+			// User explicitly provided a path that doesn't exist - this is an error
+			fmt.Fprintf(os.Stderr, "Error: config file not found: %s\n", path)
+			osExit(1)
+			return nil
+		}
+		// Default path doesn't exist or relative path doesn't exist - use defaults
 		return config.DefaultConfig()
 	}
 
@@ -1976,6 +2001,16 @@ func loadConfig(path string) *config.Config {
 		osExit(1)
 	}
 	return cfg
+}
+
+// isDefaultPath returns true if path is the platform-specific default config path.
+func isDefaultPath(path string) bool {
+	if os.PathSeparator == '/' {
+		return path == "/etc/guardianwaf/guardianwaf.yaml"
+	}
+	// Windows
+	return path == `C:\ProgramData\GuardianWAF\guardianwaf.yaml` ||
+		path == os.Getenv("PROGRAMDATA")+`\GuardianWAF\guardianwaf.yaml`
 }
 
 // addLayers wires all WAF layers to the engine based on config.

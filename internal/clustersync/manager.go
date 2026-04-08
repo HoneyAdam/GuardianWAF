@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
 	"slices"
 	"sync"
@@ -483,7 +484,9 @@ func (m *Manager) replicateEvent(event *SyncEvent) {
 				continue
 			}
 
-			m.sendEventToNode(node, event)
+			if err := m.sendEventToNode(node, event); err != nil {
+				log.Printf("[clustersync] warning: failed to send event to node %s: %v", nodeID, err)
+			}
 		}
 	}
 }

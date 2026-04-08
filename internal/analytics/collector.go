@@ -258,7 +258,10 @@ func NewCollector(cfg *Config) *Collector {
 
 	// Ensure storage directory exists
 	if cfg.StoragePath != "" {
-		os.MkdirAll(cfg.StoragePath, 0755)
+		if err := os.MkdirAll(cfg.StoragePath, 0755); err != nil {
+			// Log but continue without persistence — metrics still work in-memory
+			fmt.Printf("warning: failed to create storage directory %s: %v\n", cfg.StoragePath, err)
+		}
 	}
 
 	// Start background flush

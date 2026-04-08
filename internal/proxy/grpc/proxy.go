@@ -360,7 +360,7 @@ func writeGRPCError(w http.ResponseWriter, code int, message string) {
 	w.Header().Set("grpc-status", fmt.Sprintf("%d", code))
 	w.Header().Set("grpc-message", message)
 	w.WriteHeader(http.StatusOK) // gRPC always returns 200 OK with trailers
-	w.Write([]byte{})            // Empty body
+	_, _ = w.Write([]byte{})    // Empty body - error ignored (client disconnect)
 }
 
 // recordError records an RPC error.

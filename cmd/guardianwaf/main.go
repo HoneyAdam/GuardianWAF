@@ -146,8 +146,8 @@ func cmdHealthcheck() {
 // cmdSetup provides interactive first-time setup.
 func cmdSetup(args []string) {
 	fs := flag.NewFlagSet("setup", flag.ExitOnError)
-	configPath := fs.String("config", "guardianwaf.yaml", "Path to config file")
-	fs.StringVar(configPath, "c", "guardianwaf.yaml", "Path to config file (short)")
+	configPath := fs.String("config", DefaultConfigPath(), "Path to config file")
+	fs.StringVar(configPath, "c", DefaultConfigPath(), "Path to config file (short)")
 	force := fs.Bool("force", false, "Overwrite existing config")
 	_ = fs.Parse(args)
 
@@ -249,6 +249,9 @@ tls:
 		targets = append(targets, fmt.Sprintf(`      - url: "%s"
         weight: %s`, url, weight))
 	}
+
+	// Build upstream targets string
+	upstreamsTargets := strings.Join(targets, "\n")
 
 	// Load balancing
 	fmt.Print("Load balancing strategy (round_robin/weighted/least_conn/ip_hash) [weighted]: ")
@@ -910,8 +913,11 @@ func cmdServe(args []string) {
 			} else {
 				// Save account key
 				if keyPEM, err := acmeClient.AccountKeyPEM(); err == nil {
-					_ = os.MkdirAll(cfg.TLS.ACME.CacheDir, 0o700)
-					_ = os.WriteFile(accountKeyPath, keyPEM, 0o600)
+					if err := os.MkdirAll(cfg.TLS.ACME.CacheDir, 0o700); err != nil {
+						fmt.Fprintf(os.Stderr, "Warning: failed to create ACME cache dir: %v\n", err)
+					} else {
+						_ = os.WriteFile(accountKeyPath, keyPEM, 0o600)
+					}
 				}
 				// Register account
 				if err := acmeClient.Register(cfg.TLS.ACME.Email); err != nil {
@@ -1857,7 +1863,7 @@ func cmdValidate(args []string) {
 
 func cmdTestAlert(args []string) {
 	fs := flag.NewFlagSet("test-alert", flag.ExitOnError)
-	configPath := fs.String("config", "guardianwaf.yaml", "Path to config file")
+	configPath := fs.String("config", DefaultConfigPath(), "Path to config file")
 	target := fs.String("target", "", "Target name (webhook or email)")
 	all := fs.Bool("all", false, "Test all configured targets")
 	_ = fs.Parse(args)

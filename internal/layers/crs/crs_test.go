@@ -6,6 +6,117 @@ import (
 	"github.com/guardianwaf/guardianwaf/internal/engine"
 )
 
+// testRules returns inline rules for testing.
+func testRules() []*Rule {
+	return []*Rule{
+		{
+			ID:       "911100",
+			Phase:    1,
+			Msg:      "Method is not allowed by policy",
+			Severity: "WARNING",
+			Variables: []RuleVariable{{Name: "REQUEST_METHOD"}},
+			Operator: RuleOperator{Type: "@rx", Argument: "^(?:GET|HEAD|POST|PUT|DELETE|OPTIONS|PATCH)$"},
+			Actions: RuleActions{
+				Action:   "deny",
+				Status:   405,
+				Msg:      "Method is not allowed by policy",
+				Tag:      []string{"method-violation"},
+				Severity: "WARNING",
+			},
+		},
+		{
+			ID:       "920200",
+			Phase:    1,
+			Msg:      "Request URI too long",
+			Severity: "WARNING",
+			Variables: []RuleVariable{{Name: "REQUEST_URI"}},
+			Operator: RuleOperator{Type: "@gt", Argument: "2048"},
+			Actions: RuleActions{
+				Action:   "deny",
+				Status:   414,
+				Msg:      "Request URI too long",
+				Tag:      []string{"protocol-violation"},
+				Severity: "WARNING",
+			},
+		},
+		{
+			ID:       "942100",
+			Phase:    2,
+			Msg:      "SQL Injection Attack",
+			Severity: "CRITICAL",
+			Variables: []RuleVariable{{Name: "QUERY_STRING"}},
+			Operator: RuleOperator{Type: "@rx", Argument: "(?i)(union|select|insert|update|delete|drop|create|alter|exec|execute|script)"},
+			Actions: RuleActions{
+				Action:   "deny",
+				Status:   403,
+				Msg:      "SQL Injection Attack",
+				Tag:      []string{"attack-sqli"},
+				Severity: "CRITICAL",
+			},
+		},
+		{
+			ID:       "941100",
+			Phase:    2,
+			Msg:      "XSS Attack Detected",
+			Severity: "CRITICAL",
+			Variables: []RuleVariable{{Name: "REQUEST_BODY"}},
+			Operator: RuleOperator{Type: "@rx", Argument: "(?i)(<script|javascript:|onerror=|onload=|eval\\()"},
+			Actions: RuleActions{
+				Action:   "deny",
+				Status:   403,
+				Msg:      "XSS Attack Detected",
+				Tag:      []string{"attack-xss"},
+				Severity: "CRITICAL",
+			},
+		},
+		{
+			ID:       "930100",
+			Phase:    1,
+			Msg:      "Path Traversal Attack",
+			Severity: "CRITICAL",
+			Variables: []RuleVariable{{Name: "REQUEST_URI"}},
+			Operator: RuleOperator{Type: "@rx", Argument: "(\\.\\./|\\.\\.\\\\|%2e%2e%2f|%2e%2e/)"},
+			Actions: RuleActions{
+				Action:   "deny",
+				Status:   403,
+				Msg:      "Path Traversal Attack",
+				Tag:      []string{"attack-lfi"},
+				Severity: "CRITICAL",
+			},
+		},
+		{
+			ID:       "932100",
+			Phase:    2,
+			Msg:      "Remote Command Execution",
+			Severity: "CRITICAL",
+			Variables: []RuleVariable{{Name: "REQUEST_BODY"}},
+			Operator: RuleOperator{Type: "@rx", Argument: "(;|\\||`|\\$\\(|\\$\\{|%3B|%7C|%60|%24%28|%24%7B)"},
+			Actions: RuleActions{
+				Action:   "deny",
+				Status:   403,
+				Msg:      "Remote Command Execution",
+				Tag:      []string{"attack-rce"},
+				Severity: "CRITICAL",
+			},
+		},
+		{
+			ID:       "921100",
+			Phase:    2,
+			Msg:      "HTTP Response Splitting",
+			Severity: "ERROR",
+			Variables: []RuleVariable{{Name: "REQUEST_HEADERS"}},
+			Operator: RuleOperator{Type: "@rx", Argument: "[\\r\\n]+(?:\\s|location|refresh|url|status)[\\s]*="},
+			Actions: RuleActions{
+				Action:   "deny",
+				Status:   403,
+				Msg:      "HTTP Response Splitting",
+				Tag:      []string{"attack-injection"},
+				Severity: "ERROR",
+			},
+		},
+	}
+}
+
 func TestNewLayer(t *testing.T) {
 	config := &Config{
 		Enabled:          true,
@@ -24,19 +135,11 @@ func TestNewLayer(t *testing.T) {
 	}
 }
 
-func TestDefaultRules(t *testing.T) {
-	rules := DefaultRules()
-
-	if len(rules) == 0 {
-		t.Error("Expected default rules to be loaded")
-	}
-
-	t.Logf("Loaded %d default rules", len(rules))
-}
-
-func TestLayer_LoadEmbeddedRules(t *testing.T) {
+func TestLayer_LoadRules(t *testing.T) {
 	layer := NewLayer(DefaultConfig())
-	layer.LoadEmbeddedRules()
+	rules := testRules()
+	layer.rules = rules
+	layer.buildRuleMaps()
 
 	stats := layer.Stats()
 
@@ -53,7 +156,8 @@ func TestLayer_Process_SQLi(t *testing.T) {
 		ParanoiaLevel:    1,
 		AnomalyThreshold: 5,
 	})
-	layer.LoadEmbeddedRules()
+	layer.rules = testRules()
+	layer.buildRuleMaps()
 
 	// Test SQL injection detection
 	ctx := &engine.RequestContext{
@@ -81,7 +185,8 @@ func TestLayer_Process_XSS(t *testing.T) {
 		ParanoiaLevel:    1,
 		AnomalyThreshold: 5,
 	})
-	layer.LoadEmbeddedRules()
+	layer.rules = testRules()
+	layer.buildRuleMaps()
 
 	// Test XSS detection
 	ctx := &engine.RequestContext{
@@ -105,7 +210,8 @@ func TestLayer_Process_PathTraversal(t *testing.T) {
 		ParanoiaLevel:    1,
 		AnomalyThreshold: 5,
 	})
-	layer.LoadEmbeddedRules()
+	layer.rules = testRules()
+	layer.buildRuleMaps()
 
 	// Test path traversal detection
 	ctx := &engine.RequestContext{
@@ -148,7 +254,8 @@ func TestLayer_Process_Disabled(t *testing.T) {
 
 func TestLayer_RuleManagement(t *testing.T) {
 	layer := NewLayer(DefaultConfig())
-	layer.LoadEmbeddedRules()
+	layer.rules = testRules()
+	layer.buildRuleMaps()
 
 	// Test disabling a rule
 	layer.DisableRule("911100")
@@ -174,7 +281,8 @@ func TestLayer_RuleManagement(t *testing.T) {
 
 func TestLayer_GetRule(t *testing.T) {
 	layer := NewLayer(DefaultConfig())
-	layer.LoadEmbeddedRules()
+	layer.rules = testRules()
+	layer.buildRuleMaps()
 
 	rule := layer.GetRule("911100")
 

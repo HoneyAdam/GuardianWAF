@@ -65,7 +65,10 @@ func (h *Handler) Dashboard(w http.ResponseWriter, r *http.Request) {
 	data := h.engine.GetDashboardData()
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(data)
+	if err := json.NewEncoder(w).Encode(data); err != nil {
+		// Log but don't expose internal error details
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+	}
 }
 
 // TrafficStats returns traffic statistics.
@@ -79,7 +82,9 @@ func (h *Handler) TrafficStats(w http.ResponseWriter, r *http.Request) {
 	stats := h.engine.GetTrafficStats(from, to)
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(stats)
+	if err := json.NewEncoder(w).Encode(stats); err != nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+	}
 }
 
 // TrendAnalysis returns trend analysis.
@@ -100,7 +105,9 @@ func (h *Handler) TrendAnalysis(w http.ResponseWriter, r *http.Request) {
 	analysis := h.engine.AnalyzeTrend(metric, nil, from, to, interval)
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(analysis)
+	if err := json.NewEncoder(w).Encode(analysis); err != nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+	}
 }
 
 // GeoDistribution returns geographic distribution.
@@ -114,7 +121,9 @@ func (h *Handler) GeoDistribution(w http.ResponseWriter, r *http.Request) {
 	geo := h.engine.GetGeoDistribution(from, to)
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(geo)
+	if err := json.NewEncoder(w).Encode(geo); err != nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+	}
 }
 
 // PeriodComparison compares two time periods.
@@ -151,7 +160,9 @@ func (h *Handler) PeriodComparison(w http.ResponseWriter, r *http.Request) {
 	comparison := h.engine.ComparePeriods(currentFrom, currentTo, previousFrom, previousTo)
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(comparison)
+	if err := json.NewEncoder(w).Encode(comparison); err != nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+	}
 }
 
 // Metrics returns all current metrics.
@@ -164,7 +175,9 @@ func (h *Handler) Metrics(w http.ResponseWriter, r *http.Request) {
 	metrics := h.collector.GetAllMetrics()
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(metrics)
+	if err := json.NewEncoder(w).Encode(metrics); err != nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+	}
 }
 
 // TimeSeries returns time series data for a metric.
@@ -189,7 +202,10 @@ func (h *Handler) TimeSeries(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(ts)
+	if err := json.NewEncoder(w).Encode(ts); err != nil {
+		// Client disconnected - error ignored intentionally
+		_ = err
+	}
 }
 
 // parseTimeRange extracts time range from request.

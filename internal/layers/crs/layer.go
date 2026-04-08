@@ -2,6 +2,7 @@ package crs
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -48,7 +49,9 @@ func NewLayer(config *Config) *Layer {
 
 	// Load rules if path specified
 	if config.RulePath != "" {
-		layer.LoadRules(config.RulePath)
+		if err := layer.LoadRules(config.RulePath); err != nil {
+			log.Printf("[crs] warning: failed to load CRS rules from %s: %v", config.RulePath, err)
+		}
 	}
 
 	return layer
@@ -445,133 +448,6 @@ func min(a, b int) int {
 // RuleSet provides a default set of CRS rules for embedded use.
 type RuleSet struct {
 	Rules []*Rule
-}
-
-// DefaultRules returns a comprehensive set of default CRS rules.
-// This includes 50+ rules covering OWASP Top 10 and common attacks.
-func DefaultRules() []*Rule {
-	return ExpandedRules()
-}
-
-// MinimalRules returns a minimal set of default CRS rules (backward compatibility).
-func MinimalRules() []*Rule {
-	// Embedded default rules defined as structs
-	return []*Rule{
-		{
-			ID:       "911100",
-			Phase:    1,
-			Msg:      "Method is not allowed by policy",
-			Severity: "WARNING",
-			Variables: []RuleVariable{{Name: "REQUEST_METHOD"}},
-			Operator: RuleOperator{Type: "@rx", Argument: "^(?:GET|HEAD|POST|PUT|DELETE|OPTIONS|PATCH)$"},
-			Actions: RuleActions{
-				Action:   "deny",
-				Status:   405,
-				Msg:      "Method is not allowed by policy",
-				Tag:      []string{"method-violation"},
-				Severity: "WARNING",
-			},
-		},
-		{
-			ID:       "920200",
-			Phase:    1,
-			Msg:      "Request URI too long",
-			Severity: "WARNING",
-			Variables: []RuleVariable{{Name: "REQUEST_URI"}},
-			Operator: RuleOperator{Type: "@gt", Argument: "2048"},
-			Actions: RuleActions{
-				Action:   "deny",
-				Status:   414,
-				Msg:      "Request URI too long",
-				Tag:      []string{"protocol-violation"},
-				Severity: "WARNING",
-			},
-		},
-		{
-			ID:       "942100",
-			Phase:    2,
-			Msg:      "SQL Injection Attack",
-			Severity: "CRITICAL",
-			Variables: []RuleVariable{{Name: "QUERY_STRING"}},
-			Operator: RuleOperator{Type: "@rx", Argument: "(?i)(union|select|insert|update|delete|drop|create|alter|exec|execute|script)"},
-			Actions: RuleActions{
-				Action:   "deny",
-				Status:   403,
-				Msg:      "SQL Injection Attack",
-				Tag:      []string{"attack-sqli"},
-				Severity: "CRITICAL",
-			},
-		},
-		{
-			ID:       "941100",
-			Phase:    2,
-			Msg:      "XSS Attack Detected",
-			Severity: "CRITICAL",
-			Variables: []RuleVariable{{Name: "REQUEST_BODY"}},
-			Operator: RuleOperator{Type: "@rx", Argument: "(?i)(<script|javascript:|onerror=|onload=|eval\\()"},
-			Actions: RuleActions{
-				Action:   "deny",
-				Status:   403,
-				Msg:      "XSS Attack Detected",
-				Tag:      []string{"attack-xss"},
-				Severity: "CRITICAL",
-			},
-		},
-		{
-			ID:       "930100",
-			Phase:    1,
-			Msg:      "Path Traversal Attack",
-			Severity: "CRITICAL",
-			Variables: []RuleVariable{{Name: "REQUEST_URI"}},
-			Operator: RuleOperator{Type: "@rx", Argument: "(\\.\\./|\\.\\.\\\\|%2e%2e%2f|%2e%2e/)"},
-			Actions: RuleActions{
-				Action:   "deny",
-				Status:   403,
-				Msg:      "Path Traversal Attack",
-				Tag:      []string{"attack-lfi"},
-				Severity: "CRITICAL",
-			},
-		},
-		{
-			ID:       "932100",
-			Phase:    2,
-			Msg:      "Remote Command Execution",
-			Severity: "CRITICAL",
-			Variables: []RuleVariable{{Name: "REQUEST_BODY"}},
-			Operator: RuleOperator{Type: "@rx", Argument: "(;|\\||`|\\$\\(|\\$\\{|%3B|%7C|%60|%24%28|%24%7B)"},
-			Actions: RuleActions{
-				Action:   "deny",
-				Status:   403,
-				Msg:      "Remote Command Execution",
-				Tag:      []string{"attack-rce"},
-				Severity: "CRITICAL",
-			},
-		},
-		{
-			ID:       "921100",
-			Phase:    2,
-			Msg:      "HTTP Response Splitting",
-			Severity: "ERROR",
-			Variables: []RuleVariable{{Name: "REQUEST_HEADERS"}},
-			Operator: RuleOperator{Type: "@rx", Argument: "[\\r\\n]+(?:\\s|location|refresh|url|status)[\\s]*="},
-			Actions: RuleActions{
-				Action:   "deny",
-				Status:   403,
-				Msg:      "HTTP Response Splitting",
-				Tag:      []string{"attack-injection"},
-				Severity: "ERROR",
-			},
-		},
-	}
-}
-
-// LoadEmbeddedRules loads the embedded default rules.
-func (l *Layer) LoadEmbeddedRules() {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-
-	l.rules = DefaultRules()
-	l.buildRuleMaps()
 }
 
 // Stats returns statistics about loaded rules.

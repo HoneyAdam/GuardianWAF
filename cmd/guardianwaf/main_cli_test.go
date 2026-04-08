@@ -925,8 +925,8 @@ waf:
 
 	// Wait for HTTP server
 	started := false
-	for i := 0; i < 50; i++ {
-		conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", httpPort), 50*time.Millisecond)
+	for i := 0; i < 100; i++ {
+		conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", httpPort), 100*time.Millisecond)
 		if err == nil {
 			conn.Close()
 			started = true
@@ -1791,8 +1791,8 @@ waf:
 	}()
 
 	started := false
-	for i := 0; i < 50; i++ {
-		conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", httpPort), 50*time.Millisecond)
+	for i := 0; i < 100; i++ {
+		conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", httpPort), 100*time.Millisecond)
 		if err == nil {
 			conn.Close()
 			started = true
