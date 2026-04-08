@@ -2,6 +2,7 @@
 package zerotrust
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/hex"
@@ -316,10 +317,9 @@ func calculateDeviceFingerprintFromData(data []byte) string {
 }
 
 func generateSessionID() string {
-	// Generate a random session ID
 	b := make([]byte, 16)
-	for i := range b {
-		b[i] = byte(i) // Simplified - use crypto/rand in production
+	if _, err := rand.Read(b); err != nil {
+		return hex.EncodeToString([]byte(fmt.Sprintf("%d", time.Now().UnixNano())))
 	}
 	return hex.EncodeToString(b)
 }

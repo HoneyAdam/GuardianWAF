@@ -1592,14 +1592,18 @@ func (d *Dashboard) handleDistAssets(w http.ResponseWriter, r *http.Request) {
 
 // SSEBroadcaster manages Server-Sent Events client connections.
 type SSEBroadcaster struct {
-	mu      sync.RWMutex
-	clients map[chan string]struct{}
+	mu       sync.RWMutex
+	clients  map[chan string]struct{}
+	maxClients int
 }
+
+const defaultMaxSSEClients = 1000
 
 // NewSSEBroadcaster creates a new SSEBroadcaster.
 func NewSSEBroadcaster() *SSEBroadcaster {
 	return &SSEBroadcaster{
-		clients: make(map[chan string]struct{}),
+		clients:    make(map[chan string]struct{}),
+		maxClients: defaultMaxSSEClients,
 	}
 }
 
@@ -1614,7 +1618,15 @@ func (b *SSEBroadcaster) HandleSSE(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
+
+	// Check client cap
+	b.mu.RLock()
+	count := len(b.clients)
+	b.mu.RUnlock()
+	if count >= b.maxClients {
+		http.Error(w, "too many SSE connections", http.StatusServiceUnavailable)
+		return
+	}
 
 	ch := make(chan string, 64)
 	b.addClient(ch)

@@ -107,7 +107,7 @@ func (c *Collector) extractBodySample(req *http.Request) []byte {
 	}
 
 	// Read body
-	body, err := io.ReadAll(req.Body)
+	body, err := io.ReadAll(io.LimitReader(req.Body, int64(c.config.BodySampleSize)))
 	if err != nil {
 		return nil
 	}

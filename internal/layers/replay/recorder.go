@@ -146,7 +146,7 @@ func (r *Recorder) Record(req *http.Request, resp *http.Response, duration time.
 
 	// Capture request body
 	if r.config.CaptureRequest && req.Body != nil {
-		body, err := io.ReadAll(req.Body)
+		body, err := io.ReadAll(io.LimitReader(req.Body, 1<<20))
 		if err == nil && len(body) > 0 {
 			record.Body = body
 			// Restore body for further processing
@@ -159,7 +159,7 @@ func (r *Recorder) Record(req *http.Request, resp *http.Response, duration time.
 		record.ResponseStatus = resp.StatusCode
 		record.ResponseHeaders = headersToMap(resp.Header)
 		if resp.Body != nil {
-			body, err := io.ReadAll(resp.Body)
+			body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 			if err == nil && len(body) > 0 {
 				record.ResponseBody = body
 				// Restore body

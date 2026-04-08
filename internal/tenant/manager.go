@@ -3,6 +3,7 @@
 package tenant
 
 import (
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -658,15 +659,19 @@ type ManagerStats struct {
 // Helper functions
 
 func generateTenantID(name string) string {
-	// Generate ID from name + timestamp
-	hash := sha256.Sum256([]byte(name + time.Now().String()))
-	return hex.EncodeToString(hash[:8])
+	b := make([]byte, 8)
+	if _, err := rand.Read(b); err != nil {
+		panic("crypto/rand failed: " + err.Error())
+	}
+	return hex.EncodeToString(b)
 }
 
 func generateAPIKey() string {
-	// Generate random API key
-	hash := sha256.Sum256([]byte(time.Now().String() + "apikey"))
-	return "gwaf_" + hex.EncodeToString(hash[:16])
+	b := make([]byte, 24)
+	if _, err := rand.Read(b); err != nil {
+		panic("crypto/rand failed: " + err.Error())
+	}
+	return "gwaf_" + hex.EncodeToString(b)
 }
 
 func hashAPIKey(apiKey string) string {

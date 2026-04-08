@@ -1,6 +1,7 @@
 package tenant
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"net/http"
 	"strings"
@@ -12,11 +13,29 @@ import (
 // Handlers provides HTTP handlers for tenant management.
 type Handlers struct {
 	manager *Manager
+	apiKey  string
 }
 
 // NewHandlers creates new tenant management handlers.
 func NewHandlers(manager *Manager) *Handlers {
 	return &Handlers{manager: manager}
+}
+
+// SetAPIKey sets the API key for authenticating requests.
+func (h *Handlers) SetAPIKey(key string) {
+	h.apiKey = key
+}
+
+// verifyKey checks the request has a valid API key.
+func (h *Handlers) verifyKey(r *http.Request) bool {
+	if h.apiKey == "" {
+		return true // No key configured, allow all
+	}
+	key := r.Header.Get("X-API-Key")
+	if key == "" {
+		key = r.Header.Get("X-Admin-Key")
+	}
+	return subtle.ConstantTimeCompare([]byte(key), []byte(h.apiKey)) == 1
 }
 
 // RegisterRoutes registers tenant management routes.
@@ -29,6 +48,10 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 
 // handleTenants handles list and create operations.
 func (h *Handlers) handleTenants(w http.ResponseWriter, r *http.Request) {
+	if !h.verifyKey(r) {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
 	switch r.Method {
 	case http.MethodGet:
 		h.listTenants(w, r)
@@ -41,6 +64,10 @@ func (h *Handlers) handleTenants(w http.ResponseWriter, r *http.Request) {
 
 // handleTenantDetail handles get, update, delete operations.
 func (h *Handlers) handleTenantDetail(w http.ResponseWriter, r *http.Request) {
+	if !h.verifyKey(r) {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
 	// Extract tenant ID from path /api/v1/tenants/{id}
 	path := strings.TrimPrefix(r.URL.Path, "/api/v1/tenants/")
 	if path == "" {
@@ -190,6 +217,10 @@ func (h *Handlers) deleteTenant(w http.ResponseWriter, r *http.Request, tenantID
 
 // handleTenantWAFConfig handles GET and PUT for /api/v1/tenants/{id}/waf-config
 func (h *Handlers) handleTenantWAFConfig(w http.ResponseWriter, r *http.Request) {
+	if !h.verifyKey(r) {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
 	// Extract tenant ID and verify path ends with /waf-config
 	path := strings.TrimPrefix(r.URL.Path, "/api/v1/tenants/")
 	if !strings.HasSuffix(path, "/waf-config") {

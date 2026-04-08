@@ -20,6 +20,24 @@ type Store struct {
 	index    map[string]string // tenantID -> filename
 }
 
+// safeTenantID validates that a tenant ID contains only safe characters.
+func safeTenantID(id string) bool {
+	if len(id) == 0 || len(id) > 128 {
+		return false
+	}
+	for _, c := range id {
+		switch {
+		case c >= '0' && c <= '9':
+		case c >= 'a' && c <= 'z':
+		case c >= 'A' && c <= 'Z':
+		case c == '-' || c == '_':
+		default:
+			return false
+		}
+	}
+	return true
+}
+
 // NewStore creates a new tenant store.
 func NewStore(basePath string) *Store {
 	if basePath == "" {
@@ -90,6 +108,10 @@ func (s *Store) SaveTenant(tenant *Tenant) error {
 
 // LoadTenant loads a tenant from disk.
 func (s *Store) LoadTenant(tenantID string) (*Tenant, error) {
+	if !safeTenantID(tenantID) {
+		return nil, fmt.Errorf("invalid tenant ID")
+	}
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -190,6 +212,10 @@ func (s *Store) LoadAllTenants() ([]*Tenant, error) {
 
 // DeleteTenant removes a tenant from disk.
 func (s *Store) DeleteTenant(tenantID string) error {
+	if !safeTenantID(tenantID) {
+		return fmt.Errorf("invalid tenant ID")
+	}
+
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
