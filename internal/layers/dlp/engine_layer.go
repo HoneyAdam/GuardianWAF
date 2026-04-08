@@ -42,7 +42,11 @@ func (el *EngineLayer) Process(ctx *engine.RequestContext) engine.LayerResult {
 		}
 
 		// Scan regular content
-		result := el.scanContent(string(ctx.Body))
+		body := ctx.BodyString
+			if body == "" && len(ctx.Body) > 0 {
+				body = string(ctx.Body)
+			}
+			result := el.scanContent(body)
 		if !result.Safe {
 			return el.handleScanResult(ctx, result, "body")
 		}

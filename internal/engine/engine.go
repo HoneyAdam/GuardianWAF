@@ -248,7 +248,9 @@ func (e *Engine) Check(r *http.Request) *Event {
 	}
 
 	// Store and publish event
-	_ = e.eventStore.Store(event)
+	if err := e.eventStore.Store(event); err != nil {
+			e.Logs.Add("error", fmt.Sprintf("event store write failed: %v", err))
+		}
 	e.eventBus.Publish(event)
 
 	return &event
@@ -352,7 +354,9 @@ func (e *Engine) Middleware(next http.Handler) http.Handler {
 		}
 
 		// Store and publish event
-		_ = e.eventStore.Store(event)
+		if err := e.eventStore.Store(event); err != nil {
+			e.Logs.Add("error", fmt.Sprintf("event store write failed: %v", err))
+		}
 		e.eventBus.Publish(event)
 
 		// Structured access log

@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/guardianwaf/guardianwaf/internal/config"
 	"github.com/guardianwaf/guardianwaf/internal/engine"
@@ -203,8 +204,9 @@ func (m *Middleware) RequireAdmin(next http.Handler) http.Handler {
 
 // TenantAwareRouter routes requests based on tenant.
 type TenantAwareRouter struct {
-	manager *Manager
-	routes  map[string]http.Handler // key: tenant ID
+	mu             sync.RWMutex
+	manager        *Manager
+	routes         map[string]http.Handler // key: tenant ID
 	defaultHandler http.Handler
 }
 
@@ -218,12 +220,16 @@ func NewTenantAwareRouter(manager *Manager) *TenantAwareRouter {
 
 // Register registers a handler for a tenant.
 func (r *TenantAwareRouter) Register(tenantID string, handler http.Handler) {
+	r.mu.Lock()
 	r.routes[tenantID] = handler
+	r.mu.Unlock()
 }
 
 // SetDefault sets the default handler for unmatched tenants.
 func (r *TenantAwareRouter) SetDefault(handler http.Handler) {
+	r.mu.Lock()
 	r.defaultHandler = handler
+	r.mu.Unlock()
 }
 
 // ServeHTTP implements http.Handler.
@@ -235,10 +241,13 @@ func (r *TenantAwareRouter) ServeHTTP(w http.ResponseWriter, req *http.Request) 
 	}
 
 	// Find handler for tenant
+	r.mu.RLock()
 	handler, exists := r.routes[tenant.ID]
 	if !exists {
 		handler = r.defaultHandler
 	}
+	r.mu.RUnlock()
+
 	if handler == nil {
 		http.Error(w, "No handler for tenant", http.StatusNotFound)
 		return

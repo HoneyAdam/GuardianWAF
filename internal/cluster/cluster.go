@@ -3,6 +3,7 @@ package cluster
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
@@ -100,6 +101,9 @@ type Cluster struct {
 
 	// HTTP client
 	httpClient *http.Client
+
+	// HTTP server for cluster API
+	httpServer *http.Server
 }
 
 // Event represents a cluster event.
@@ -257,6 +261,13 @@ func (c *Cluster) Stop() error {
 		From:      c.localNode.ID,
 		Timestamp: time.Now(),
 	})
+
+	// Shutdown HTTP server gracefully
+	if c.httpServer != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = c.httpServer.Shutdown(ctx)
+	}
 
 	return nil
 }
@@ -662,13 +673,13 @@ func (c *Cluster) startHTTPServer() {
 	mux.HandleFunc("/cluster/health", c.handleHealthHTTP)
 
 	addr := fmt.Sprintf("%s:%d", c.config.BindAddr, c.config.BindPort)
-	server := &http.Server{
+	c.httpServer = &http.Server{
 		Addr:    addr,
 		Handler: mux,
 	}
 
 	go func() {
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := c.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Printf("[cluster] warning: HTTP server failed: %v", err)
 		}
 	}()

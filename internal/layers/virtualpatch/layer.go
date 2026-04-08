@@ -399,6 +399,9 @@ func (l *Layer) getValueByType(ctx *engine.RequestContext, typ, key string) stri
 		}
 		return ""
 	case "body":
+		if ctx.BodyString != "" {
+			return ctx.BodyString
+		}
 		if ctx.Body != nil {
 			return string(ctx.Body)
 		}
