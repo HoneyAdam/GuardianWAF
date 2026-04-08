@@ -8,6 +8,13 @@ import (
 	"time"
 )
 
+// timingMapPool reuses map[string]time.Duration across requests.
+var timingMapPool = sync.Pool{
+	New: func() any {
+		return make(map[string]time.Duration, 16)
+	},
+}
+
 // PipelineResult holds the outcome of running all layers.
 type PipelineResult struct {
 	Action      Action
@@ -60,9 +67,13 @@ func (p *Pipeline) Execute(ctx *RequestContext) PipelineResult {
 	p.mu.RUnlock()
 
 	start := time.Now()
+	timing := timingMapPool.Get().(map[string]time.Duration)
+	for k := range timing {
+		delete(timing, k)
+	}
 	result := PipelineResult{
 		Action:      ActionPass,
-		LayerTiming: make(map[string]time.Duration, len(layers)),
+		LayerTiming: timing,
 	}
 
 	for _, ol := range layers {

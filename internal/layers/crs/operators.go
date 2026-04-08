@@ -6,7 +6,23 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 )
+
+// regexCache caches compiled regex patterns to avoid recompilation per request.
+var regexCache sync.Map // string → *regexp.Regexp
+
+func getCachedRegex(pattern string) (*regexp.Regexp, error) {
+	if cached, ok := regexCache.Load(pattern); ok {
+		return cached.(*regexp.Regexp), nil
+	}
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return nil, err
+	}
+	actual, _ := regexCache.LoadOrStore(pattern, re)
+	return actual.(*regexp.Regexp), nil
+}
 
 // OperatorEvaluator evaluates SecRule operators against values.
 type OperatorEvaluator struct {
@@ -84,7 +100,7 @@ func (oe *OperatorEvaluator) evaluateOperator(opType, argument, value string) (b
 
 // evaluateRx evaluates the @rx (regex) operator.
 func (oe *OperatorEvaluator) evaluateRx(pattern, value string) (bool, error) {
-	re, err := regexp.Compile(pattern)
+	re, err := getCachedRegex(pattern)
 	if err != nil {
 		return false, fmt.Errorf("invalid regex pattern: %w", err)
 	}

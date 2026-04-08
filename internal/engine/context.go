@@ -266,13 +266,20 @@ func extractClientIP(r *http.Request) net.IP {
 // generateRequestID creates a unique request identifier formatted as a UUID-like string.
 // Uses crypto/rand for cryptographically secure random bytes.
 func generateRequestID() string {
-	b := make([]byte, 16)
-	_, err := randReader(b)
+	var b [16]byte
+	_, err := randReader(b[:])
 	if err != nil {
-		// Fallback: return a zero-filled ID (extremely unlikely path)
 		return "00000000-0000-0000-0000-000000000000"
 	}
-	h := hex.EncodeToString(b)
-	// Format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-	return h[0:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:32]
+	var buf [36]byte
+	hex.Encode(buf[:8], b[:4])
+	buf[8] = '-'
+	hex.Encode(buf[9:13], b[4:6])
+	buf[13] = '-'
+	hex.Encode(buf[14:18], b[6:8])
+	buf[18] = '-'
+	hex.Encode(buf[19:23], b[8:10])
+	buf[23] = '-'
+	hex.Encode(buf[24:36], b[10:16])
+	return string(buf[:])
 }
