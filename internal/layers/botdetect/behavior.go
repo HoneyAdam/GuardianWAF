@@ -187,16 +187,18 @@ func timingStdDev(timings []time.Duration) float64 {
 
 // BehaviorManager manages per-IP behavior trackers.
 type BehaviorManager struct {
-	mu       sync.RWMutex
-	trackers map[string]*BehaviorTracker
-	config   BehaviorConfig
+	mu         sync.RWMutex
+	trackers   map[string]*BehaviorTracker
+	config     BehaviorConfig
+	maxEntries int // max tracker entries (0 = unlimited)
 }
 
 // NewBehaviorManager creates a new BehaviorManager with the given configuration.
 func NewBehaviorManager(cfg BehaviorConfig) *BehaviorManager {
 	return &BehaviorManager{
-		trackers: make(map[string]*BehaviorTracker),
-		config:   cfg,
+		trackers:   make(map[string]*BehaviorTracker),
+		config:     cfg,
+		maxEntries: 100000, // Cap at 100K IPs to prevent OOM
 	}
 }
 
@@ -215,6 +217,10 @@ func (bm *BehaviorManager) getOrCreate(ip string) *BehaviorTracker {
 	if tracker, ok = bm.trackers[ip]; ok {
 		return tracker
 	}
+	// Enforce map size cap
+	if bm.maxEntries > 0 && len(bm.trackers) >= bm.maxEntries {
+		return nil // Map full, skip tracking for new IPs
+	}
 	tracker = newBehaviorTracker(bm.config.Window)
 	bm.trackers[ip] = tracker
 	return tracker
@@ -223,6 +229,9 @@ func (bm *BehaviorManager) getOrCreate(ip string) *BehaviorTracker {
 // Record records a request for the given IP.
 func (bm *BehaviorManager) Record(ip, path string, isError bool, latency time.Duration) {
 	tracker := bm.getOrCreate(ip)
+	if tracker == nil {
+		return // Map full, skip recording
+	}
 	tracker.record(path, isError, latency)
 }
 

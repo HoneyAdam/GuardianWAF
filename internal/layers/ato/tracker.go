@@ -18,6 +18,7 @@ type AttemptTracker struct {
 	ipToEmails     map[string]map[string]bool // IP -> set of emails tried
 	emailToIPs     map[string]map[string]bool // Email -> set of IPs used
 	passwordHashes map[string]*PasswordRecord // Password hash -> record
+	maxEntries     int                        // max entries per map (0 = unlimited)
 }
 
 // AttemptRecord tracks failed login attempts.
@@ -63,6 +64,7 @@ func NewAttemptTracker() *AttemptTracker {
 		ipToEmails:     make(map[string]map[string]bool),
 		emailToIPs:     make(map[string]map[string]bool),
 		passwordHashes: make(map[string]*PasswordRecord),
+		maxEntries:     100000, // Cap at 100K entries per map to prevent OOM
 	}
 }
 
@@ -72,6 +74,13 @@ func (t *AttemptTracker) RecordAttempt(attempt *LoginAttempt) {
 	defer t.mu.Unlock()
 
 	ip := attempt.IP.String()
+
+	// Enforce map size cap — reject new entries if over limit
+	if t.maxEntries > 0 {
+		if _, exists := t.ipAttempts[ip]; !exists && len(t.ipAttempts) >= t.maxEntries {
+			return // Map full, silently drop to prevent OOM
+		}
+	}
 	now := attempt.Time
 	if now.IsZero() {
 		now = time.Now()

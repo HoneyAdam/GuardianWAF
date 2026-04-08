@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -12,10 +13,11 @@ import (
 )
 
 const (
-	defaultMaxSize     = 100 * 1024 * 1024 // 100MB
-	fileChannelBufSize = 1024
-	flushInterval      = time.Second
-	flushEventCount    = 100
+	defaultMaxSize       = 100 * 1024 * 1024 // 100MB
+	defaultMaxRotated    = 10                // Keep last 10 rotated files
+	fileChannelBufSize   = 1024
+	flushInterval        = time.Second
+	flushEventCount      = 100
 )
 
 // FileStore writes events as JSONL (one JSON object per line) to a file.
@@ -209,6 +211,46 @@ func (fs *FileStore) checkRotation() {
 	}
 	fs.file = f
 	fs.writer = bufio.NewWriterSize(f, 32*1024)
+
+	// Clean up old rotated files
+	fs.cleanupRotated(base, ext)
+}
+
+// cleanupRotated removes old rotated files, keeping only the most recent ones.
+// Must be called with fs.mu held.
+func (fs *FileStore) cleanupRotated(base, ext string) {
+	dir := "."
+	if idx := strings.LastIndex(base, "/"); idx >= 0 {
+		dir = base[:idx]
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+
+	prefix := base[strings.LastIndex(base, "/")+1:] + "-"
+	var rotated []string
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		if strings.HasPrefix(e.Name(), prefix) && strings.HasSuffix(e.Name(), ext) {
+			rotated = append(rotated, e.Name())
+		}
+	}
+
+	// Sort descending (newest first)
+	sort.Sort(sort.Reverse(sort.StringSlice(rotated)))
+
+	// Remove files beyond retention limit
+	dirPrefix := ""
+	if dir != "." {
+		dirPrefix = dir + "/"
+	}
+	for i := defaultMaxRotated; i < len(rotated); i++ {
+		_ = os.Remove(dirPrefix + rotated[i])
+	}
 }
 
 // marshalEventJSON manually builds a JSON string for an Event without encoding/json.
