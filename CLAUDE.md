@@ -58,7 +58,7 @@ All WAF processing flows through a **layer pipeline** (`internal/engine/pipeline
 
 1. Iterates layers in order (lowest Order first)
 2. Skips `Detector` layers if the path matches an exclusion
-3. Checks for `TenantAwareLayer` and injects per-tenant WAF config
+3. Layers read `ctx.TenantWAFConfig` directly for per-tenant config overrides (race-free, per-request)
 4. Accumulates `Finding` scores via `ScoreAccumulator`
 5. **Short-circuits on `ActionBlock`** — immediately returns without running remaining layers
 6. `ActionChallenge` only applies if current action is `ActionPass` (block takes priority)
@@ -113,7 +113,7 @@ Defined in `internal/engine/layer.go`:
 ### Multi-Tenancy
 
 `internal/tenant/` provides full tenant isolation:
-- Per-tenant WAF config overrides (via `TenantAwareLayer` interface)
+- Per-tenant WAF config overrides via `RequestContext.TenantWAFConfig` (read directly by each layer, race-free)
 - Tenant middleware sets `TenantContext` in request context
 - Separate rate tracking, rules, alerts, and billing per tenant
 - Domain-based tenant resolution via virtual hosts

@@ -140,24 +140,6 @@ func (l *Layer) Process(ctx *engine.RequestContext) engine.LayerResult {
 	}
 }
 
-func (l *Layer) isExcluded(detectorName, path string) bool {
-	l.mu.RLock()
-	exclusions := make([]Exclusion, len(l.config.Exclusions))
-	copy(exclusions, l.config.Exclusions)
-	l.mu.RUnlock()
-
-	for _, exc := range exclusions {
-		if strings.HasPrefix(path, exc.PathPrefix) {
-			for _, d := range exc.Detectors {
-				if d == detectorName {
-					return true
-				}
-			}
-		}
-	}
-	return false
-}
-
 // getExclusions returns merged global and tenant-specific exclusions.
 func (l *Layer) getExclusions(tenantDet *config.DetectionConfig) []Exclusion {
 	l.mu.RLock()

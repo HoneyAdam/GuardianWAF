@@ -48,6 +48,9 @@ func (l *Layer) Process(ctx *engine.RequestContext) engine.LayerResult {
 	if !l.config.Enabled || l.security == nil {
 		return result
 	}
+	if ctx.TenantWAFConfig != nil && !ctx.TenantWAFConfig.WebSocket.Enabled {
+		return result
+	}
 
 	// Check if this is a WebSocket upgrade request
 	if !isWebSocketUpgrade(ctx.Request) {

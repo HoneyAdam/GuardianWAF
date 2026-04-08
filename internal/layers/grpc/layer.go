@@ -50,6 +50,9 @@ func (l *Layer) Process(ctx *engine.RequestContext) engine.LayerResult {
 	if !l.config.Enabled || l.security == nil {
 		return result
 	}
+	if ctx.TenantWAFConfig != nil && !ctx.TenantWAFConfig.GRPC.Enabled {
+		return result
+	}
 
 	// Check if this is a gRPC request
 	if !IsGRPCRequest(ctx.Request) {

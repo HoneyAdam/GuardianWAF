@@ -26,6 +26,9 @@ func (el *EngineLayer) Process(ctx *engine.RequestContext) engine.LayerResult {
 	if !el.config.Enabled {
 		return engine.LayerResult{Action: engine.ActionPass}
 	}
+	if ctx.TenantWAFConfig != nil && !ctx.TenantWAFConfig.DLP.Enabled {
+		return engine.LayerResult{Action: engine.ActionPass}
+	}
 
 	// Scan request body if present
 	if len(ctx.Body) > 0 && el.scanRequest {
