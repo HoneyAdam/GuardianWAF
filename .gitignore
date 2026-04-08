@@ -17,6 +17,7 @@
 /dist/
 /bin/
 /out/
+internal/dashboard/dist/
 
 # Test output
 *.test
@@ -100,6 +101,9 @@ temp/
 # Website
 website/node_modules/
 website/dist/
+
+# Playwright MCP
+.playwright-mcp/
 
 # Claude Code
 .claude/
