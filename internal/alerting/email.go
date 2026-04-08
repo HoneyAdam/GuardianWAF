@@ -80,7 +80,7 @@ func (m *Manager) SendEmail(target *EmailTarget, event *engine.Event) {
 
 // sendTLS sends email with TLS encryption.
 func (m *Manager) sendTLS(addr string, auth smtp.Auth, from string, to []string, msg []byte) error {
-	conn, err := tls.Dial("tcp", addr, &tls.Config{InsecureSkipVerify: true})
+	conn, err := tls.Dial("tcp", addr, &tls.Config{ServerName: addr[:strings.LastIndex(addr, ":")]})
 	if err != nil {
 		return fmt.Errorf("TLS dial failed: %w", err)
 	}

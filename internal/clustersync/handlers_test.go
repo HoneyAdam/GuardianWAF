@@ -336,10 +336,10 @@ func TestHandler_CheckAuth_BearerToken(t *testing.T) {
 	req := httptest.NewRequest("GET", "/", nil)
 	req.Header.Set("Authorization", "Bearer some-token")
 
-	// Bearer token falls through to session check which returns true
+	// Bearer token is NOT accepted — only X-Cluster-Auth header is valid
 	got := h.checkAuth(req)
-	if !got {
-		t.Error("expected true for bearer token")
+	if got {
+		t.Error("expected false for bearer token — only X-Cluster-Auth is accepted")
 	}
 }
 

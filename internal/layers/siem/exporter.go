@@ -117,7 +117,8 @@ func (e *Exporter) Export(event *Event) {
 	select {
 	case e.eventChan <- event:
 	default:
-		// Channel full, drop event
+		// Channel full, drop event and log
+		e.logFn("warn", "SIEM event channel full, dropping event for %s %s", event.Method, event.Path)
 	}
 }
 

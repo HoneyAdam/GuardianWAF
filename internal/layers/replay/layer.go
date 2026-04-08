@@ -61,6 +61,11 @@ func (l *Layer) Process(ctx *engine.RequestContext) engine.LayerResult {
 		return engine.LayerResult{Action: engine.ActionPass}
 	}
 
+	// Tenant-level override
+	if ctx.TenantWAFConfig != nil && !ctx.TenantWAFConfig.Replay.Enabled {
+		return engine.LayerResult{Action: engine.ActionPass}
+	}
+
 	// Store request for async recording
 	// Actual recording happens in response phase via RecordResponse
 	return engine.LayerResult{Action: engine.ActionPass}

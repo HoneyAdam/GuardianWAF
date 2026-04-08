@@ -286,8 +286,11 @@ func (c *Collector) Counter(name string, labels map[string]string, value int64) 
 
 	if !exists {
 		c.mu.Lock()
-		counter = &atomic.Int64{}
-		c.counters[key] = counter
+		// Double-check after acquiring write lock
+		if counter, exists = c.counters[key]; !exists {
+			counter = &atomic.Int64{}
+			c.counters[key] = counter
+		}
 		c.mu.Unlock()
 	}
 
@@ -313,8 +316,10 @@ func (c *Collector) Gauge(name string, labels map[string]string, value float64) 
 
 	if !exists {
 		c.mu.Lock()
-		gauge = &GaugeValue{}
-		c.gauges[key] = gauge
+		if gauge, exists = c.gauges[key]; !exists {
+			gauge = &GaugeValue{}
+			c.gauges[key] = gauge
+		}
 		c.mu.Unlock()
 	}
 
@@ -339,8 +344,10 @@ func (c *Collector) Histogram(name string, labels map[string]string, value float
 
 	if !exists {
 		c.mu.Lock()
-		hist = NewHistogram(name, nil)
-		c.histograms[key] = hist
+		if hist, exists = c.histograms[key]; !exists {
+			hist = NewHistogram(name, nil)
+			c.histograms[key] = hist
+		}
 		c.mu.Unlock()
 	}
 
@@ -355,8 +362,10 @@ func (c *Collector) addToSeries(key string, value float64) {
 
 	if !exists {
 		c.mu.Lock()
-		ts = NewTimeSeriesBuffer(key, nil, c.config.MaxDataPoints)
-		c.series[key] = ts
+		if ts, exists = c.series[key]; !exists {
+			ts = NewTimeSeriesBuffer(key, nil, c.config.MaxDataPoints)
+			c.series[key] = ts
+		}
 		c.mu.Unlock()
 	}
 

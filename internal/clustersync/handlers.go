@@ -2,6 +2,7 @@
 package clustersync
 
 import (
+	"crypto/subtle"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -394,16 +395,9 @@ func (h *Handler) handleReplicationStatus(w http.ResponseWriter, r *http.Request
 }
 
 func (h *Handler) checkAuth(r *http.Request) bool {
-	// Check shared secret auth
+	// Check shared secret auth using constant-time comparison
 	authHeader := r.Header.Get("X-Cluster-Auth")
-	if authHeader != "" && authHeader == h.manager.config.SharedSecret {
-		return true
-	}
-
-	// Also accept session auth for dashboard requests
-	token := r.Header.Get("Authorization")
-	if token != "" {
-		// Delegate to session manager (would be injected)
+	if authHeader != "" && subtle.ConstantTimeCompare([]byte(authHeader), []byte(h.manager.config.SharedSecret)) == 1 {
 		return true
 	}
 
