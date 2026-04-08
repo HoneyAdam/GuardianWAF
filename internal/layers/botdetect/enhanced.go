@@ -111,6 +111,7 @@ type EnhancedLayer struct {
 	sessions     map[string]*biometric.Session
 	sessionsMu   sync.RWMutex
 	sessionTTL   time.Duration
+	maxSessions  int // cap to prevent OOM
 }
 
 // NewEnhancedLayer creates a new enhanced bot detection layer.
@@ -127,10 +128,11 @@ func NewEnhancedLayer(cfg *EnhancedConfig) *EnhancedLayer {
 	}
 
 	l := &EnhancedLayer{
-		config:     *cfg,
-		behavior:   bm,
-		sessions:   make(map[string]*biometric.Session),
-		sessionTTL: 30 * time.Minute,
+		config:      *cfg,
+		behavior:    bm,
+		sessions:    make(map[string]*biometric.Session),
+		sessionTTL:  30 * time.Minute,
+		maxSessions: 100000, // Cap at 100K sessions to prevent OOM
 	}
 
 	// Initialize challenge provider
@@ -305,6 +307,10 @@ func (l *EnhancedLayer) RecordBiometricEvent(sessionID string, event any) {
 
 	session, exists := l.sessions[sessionID]
 	if !exists {
+		// Enforce session cap to prevent OOM
+		if l.maxSessions > 0 && len(l.sessions) >= l.maxSessions {
+			return
+		}
 		session = &biometric.Session{
 			ID:        sessionID,
 			CreatedAt: time.Now(),

@@ -1,7 +1,7 @@
 package dashboard
 
 import (
-	"encoding/json"
+	"crypto/subtle"
 	"net/http"
 	"strings"
 	"time"
@@ -91,7 +91,7 @@ func (h *TenantAdminHandler) verifyAdminKey(r *http.Request) bool {
 	if adminKey == "" {
 		adminKey = r.Header.Get("X-API-Key")
 	}
-	return adminKey == h.dashboard.apiKey
+	return subtle.ConstantTimeCompare([]byte(adminKey), []byte(h.dashboard.apiKey)) == 1
 }
 
 func (h *TenantAdminHandler) listTenants(w http.ResponseWriter, r *http.Request) {
@@ -124,8 +124,7 @@ func (h *TenantAdminHandler) createTenant(w http.ResponseWriter, r *http.Request
 		Quota       any      `json:"quota,omitempty"`
 	}
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON"})
+	if !limitedDecodeJSON(w, r, &req) {
 		return
 	}
 
@@ -182,10 +181,22 @@ func (h *TenantAdminHandler) updateTenant(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	var update any
-	if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON"})
+	var update map[string]any
+	if !limitedDecodeJSON(w, r, &update) {
 		return
+	}
+
+	// Validate that update contains only known fields
+	allowedKeys := map[string]bool{
+		"name": true, "description": true, "domains": true,
+		"enabled": true, "billing_plan": true, "quota": true,
+		"waf_config": true, "rate_limits": true,
+	}
+	for k := range update {
+		if !allowedKeys[k] {
+			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "unknown field: " + k})
+			return
+		}
 	}
 
 	if err := h.manager.UpdateTenant(tenantID, update); err != nil {
@@ -470,8 +481,7 @@ func (h *TenantAdminHandler) handleTenantRules(w http.ResponseWriter, r *http.Re
 			TenantID string         `json:"tenant_id"`
 			Rule     map[string]any `json:"rule"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON"})
+		if !limitedDecodeJSON(w, r, &req) {
 			return
 		}
 		if req.TenantID == "" {
@@ -526,8 +536,7 @@ func (h *TenantAdminHandler) handleTenantRuleDetail(w http.ResponseWriter, r *ht
 		writeJSON(w, http.StatusOK, rule)
 	case http.MethodPut:
 		var rule map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&rule); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON"})
+		if !limitedDecodeJSON(w, r, &rule) {
 			return
 		}
 		if err := h.manager.UpdateTenantRule(tenantID, rule); err != nil {
@@ -546,8 +555,7 @@ func (h *TenantAdminHandler) handleTenantRuleDetail(w http.ResponseWriter, r *ht
 		var req struct {
 			Enabled bool `json:"enabled"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON"})
+		if !limitedDecodeJSON(w, r, &req) {
 			return
 		}
 		if err := h.manager.ToggleTenantRule(tenantID, ruleID, req.Enabled); err != nil {

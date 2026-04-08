@@ -8,6 +8,7 @@ import (
 	"embed"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -519,8 +520,7 @@ func (d *Dashboard) handleUpdateRouting(w http.ResponseWriter, r *http.Request) 
 		VirtualHosts []map[string]any `json:"virtual_hosts"`
 		Routes       []map[string]any `json:"routes"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON: " + err.Error()})
+	if !limitedDecodeJSON(w, r, &body) {
 		return
 	}
 
@@ -866,8 +866,7 @@ func (d *Dashboard) handleGetConfig(w http.ResponseWriter, r *http.Request) {
 
 func (d *Dashboard) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 	var patch map[string]any
-	if err := json.NewDecoder(r.Body).Decode(&patch); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON: " + err.Error()})
+	if !limitedDecodeJSON(w, r, &patch) {
 		return
 	}
 
@@ -1015,8 +1014,7 @@ func (d *Dashboard) handleAddIPACL(w http.ResponseWriter, r *http.Request) {
 		List string `json:"list"` // "whitelist" or "blacklist"
 		IP   string `json:"ip"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON"})
+	if !limitedDecodeJSON(w, r, &body) {
 		return
 	}
 	if body.IP == "" {
@@ -1052,8 +1050,7 @@ func (d *Dashboard) handleRemoveIPACL(w http.ResponseWriter, r *http.Request) {
 		List string `json:"list"`
 		IP   string `json:"ip"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON"})
+	if !limitedDecodeJSON(w, r, &body) {
 		return
 	}
 	if body.IP == "" {
@@ -1111,8 +1108,7 @@ func (d *Dashboard) handleAddBan(w http.ResponseWriter, r *http.Request) {
 		Reason   string `json:"reason"`
 		Duration string `json:"duration"` // e.g. "30m", "1h", "24h"
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON"})
+	if !limitedDecodeJSON(w, r, &body) {
 		return
 	}
 	if body.IP == "" {
@@ -1139,7 +1135,7 @@ func (d *Dashboard) handleRemoveBan(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		IP string `json:"ip"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.IP == "" {
+	if !limitedDecodeJSON(w, r, &body) || body.IP == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "ip is required"})
 		return
 	}
@@ -1167,10 +1163,10 @@ func applyWAFPatch(cfg *config.Config, waf map[string]any) {
 		}
 		if th, ok := det["threshold"].(map[string]any); ok {
 			if v, ok := th["block"].(float64); ok {
-				cfg.WAF.Detection.Threshold.Block = int(v)
+				cfg.WAF.Detection.Threshold.Block = clampInt(int(v), 1, 1000)
 			}
 			if v, ok := th["log"].(float64); ok {
-				cfg.WAF.Detection.Threshold.Log = int(v)
+				cfg.WAF.Detection.Threshold.Log = clampInt(int(v), 0, 1000)
 			}
 		}
 		if detectors, ok := det["detectors"].(map[string]any); ok {
@@ -1184,7 +1180,7 @@ func applyWAFPatch(cfg *config.Config, waf map[string]any) {
 					dc.Enabled = v
 				}
 				if v, ok := d["multiplier"].(float64); ok {
-					dc.Multiplier = v
+					dc.Multiplier = clampFloat(v, 0.1, 10.0)
 				}
 				cfg.WAF.Detection.Detectors[name] = dc
 			}
@@ -1202,10 +1198,10 @@ func applyWAFPatch(cfg *config.Config, waf map[string]any) {
 			cfg.WAF.Sanitizer.Enabled = v
 		}
 		if v, ok := san["max_body_size"].(float64); ok {
-			cfg.WAF.Sanitizer.MaxBodySize = int64(v)
+			cfg.WAF.Sanitizer.MaxBodySize = clampInt64(int64(v), 0, 100<<20)
 		}
 		if v, ok := san["max_url_length"].(float64); ok {
-			cfg.WAF.Sanitizer.MaxURLLength = int(v)
+			cfg.WAF.Sanitizer.MaxURLLength = clampInt(int(v), 64, 65535)
 		}
 	}
 
@@ -1226,10 +1222,10 @@ func applyWAFPatch(cfg *config.Config, waf map[string]any) {
 		}
 		if beh, ok := bd["behavior"].(map[string]any); ok {
 			if v, ok := beh["rps_threshold"].(float64); ok {
-				cfg.WAF.BotDetection.Behavior.RPSThreshold = int(v)
+				cfg.WAF.BotDetection.Behavior.RPSThreshold = clampInt(int(v), 1, 100000)
 			}
 			if v, ok := beh["error_rate_threshold"].(float64); ok {
-				cfg.WAF.BotDetection.Behavior.ErrorRateThreshold = int(v)
+				cfg.WAF.BotDetection.Behavior.ErrorRateThreshold = clampInt(int(v), 1, 100)
 			}
 		}
 	}
@@ -1239,7 +1235,7 @@ func applyWAFPatch(cfg *config.Config, waf map[string]any) {
 			cfg.WAF.Challenge.Enabled = v
 		}
 		if v, ok := ch["difficulty"].(float64); ok {
-			cfg.WAF.Challenge.Difficulty = int(v)
+			cfg.WAF.Challenge.Difficulty = clampInt(int(v), 1, 5)
 		}
 	}
 
@@ -1305,7 +1301,7 @@ func applyWAFPatch(cfg *config.Config, waf map[string]any) {
 				cfg.WAF.ThreatIntel.IPReputation.BlockMalicious = v
 			}
 			if v, ok := ipr["score_threshold"].(float64); ok {
-				cfg.WAF.ThreatIntel.IPReputation.ScoreThreshold = int(v)
+				cfg.WAF.ThreatIntel.IPReputation.ScoreThreshold = clampInt(int(v), 0, 100)
 			}
 		}
 		if dr, ok := ti["domain_reputation"].(map[string]any); ok {
@@ -1328,10 +1324,10 @@ func applyWAFPatch(cfg *config.Config, waf map[string]any) {
 				cfg.WAF.ATOProtection.BruteForce.Enabled = v
 			}
 			if v, ok := bf["max_attempts_per_ip"].(float64); ok {
-				cfg.WAF.ATOProtection.BruteForce.MaxAttemptsPerIP = int(v)
+				cfg.WAF.ATOProtection.BruteForce.MaxAttemptsPerIP = clampInt(int(v), 1, 10000)
 			}
 			if v, ok := bf["max_attempts_per_email"].(float64); ok {
-				cfg.WAF.ATOProtection.BruteForce.MaxAttemptsPerEmail = int(v)
+				cfg.WAF.ATOProtection.BruteForce.MaxAttemptsPerEmail = clampInt(int(v), 1, 10000)
 			}
 		}
 		if cs, ok := ato["credential_stuffing"].(map[string]any); ok {
@@ -1339,7 +1335,7 @@ func applyWAFPatch(cfg *config.Config, waf map[string]any) {
 				cfg.WAF.ATOProtection.CredStuffing.Enabled = v
 			}
 			if v, ok := cs["distributed_threshold"].(float64); ok {
-				cfg.WAF.ATOProtection.CredStuffing.DistributedThreshold = int(v)
+				cfg.WAF.ATOProtection.CredStuffing.DistributedThreshold = clampInt(int(v), 1, 10000)
 			}
 		}
 		if tr, ok := ato["impossible_travel"].(map[string]any); ok {
@@ -1347,7 +1343,7 @@ func applyWAFPatch(cfg *config.Config, waf map[string]any) {
 				cfg.WAF.ATOProtection.Travel.Enabled = v
 			}
 			if v, ok := tr["max_distance_km"].(float64); ok {
-				cfg.WAF.ATOProtection.Travel.MaxDistanceKm = v
+				cfg.WAF.ATOProtection.Travel.MaxDistanceKm = clampFloat(v, 0, 20000)
 			}
 		}
 	}
@@ -1422,8 +1418,7 @@ func (d *Dashboard) handleAddRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var rule map[string]any
-	if err := json.NewDecoder(r.Body).Decode(&rule); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON"})
+	if !limitedDecodeJSON(w, r, &rule) {
 		return
 	}
 	if err := d.addRuleFn(rule); err != nil {
@@ -1440,8 +1435,7 @@ func (d *Dashboard) handleUpdateRule(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var rule map[string]any
-	if err := json.NewDecoder(r.Body).Decode(&rule); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON"})
+	if !limitedDecodeJSON(w, r, &rule) {
 		return
 	}
 	if err := d.updateRuleFn(id, rule); err != nil {
@@ -1464,6 +1458,11 @@ func (d *Dashboard) handleGeoIPLookup(w http.ResponseWriter, r *http.Request) {
 	ip := r.URL.Query().Get("ip")
 	if ip == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "ip parameter required"})
+		return
+	}
+	// Validate that the input looks like an IP address
+	if net.ParseIP(ip) == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid ip address"})
 		return
 	}
 	if d.geoLookupFn == nil {
@@ -1556,7 +1555,12 @@ func (d *Dashboard) handleSPA(w http.ResponseWriter, r *http.Request) {
 // handleDistAssets serves Vite-built assets (JS/CSS with content hashes).
 // These are immutable and can be cached forever.
 func (d *Dashboard) handleDistAssets(w http.ResponseWriter, r *http.Request) {
-	// Serve from dist/ filesystem
+	// Prevent path traversal
+	cleanPath := strings.TrimPrefix(r.URL.Path, "/assets/")
+	if strings.Contains(cleanPath, "..") {
+		http.NotFound(w, r)
+		return
+	}
 	filePath := "dist" + r.URL.Path
 	data, err := distFS.ReadFile(filePath)
 	if err != nil {
@@ -1669,7 +1673,6 @@ func (b *SSEBroadcaster) removeClient(ch chan string) {
 // --- Helpers ---
 
 func handleCORS(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.Header().Set("Access-Control-Allow-Methods", "GET, PUT, POST, DELETE, OPTIONS")
 	w.Header().Set("Access-Control-Allow-Headers", "Content-Type, X-API-Key")
 	w.WriteHeader(http.StatusNoContent)
@@ -1677,9 +1680,20 @@ func handleCORS(w http.ResponseWriter, r *http.Request) {
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
-	w.Header().Set("Access-Control-Allow-Origin", "*")
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(v)
+}
+
+const maxRequestBody = 1 << 20 // 1MB max request body for API endpoints
+
+// decodeJSON limits the request body size and decodes JSON.
+func limitedDecodeJSON(w http.ResponseWriter, r *http.Request, v any) bool {
+	r.Body = http.MaxBytesReader(w, r.Body, maxRequestBody)
+	if err := json.NewDecoder(r.Body).Decode(v); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON"})
+		return false
+	}
+	return true
 }
 
 func formatFindings(findings []engine.Finding) []map[string]any {
@@ -1696,6 +1710,39 @@ func formatFindings(findings []engine.Finding) []map[string]any {
 		}
 	}
 	return result
+}
+
+// clampInt clamps v to [lo, hi].
+func clampInt(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}
+
+// clampInt64 clamps v to [lo, hi].
+func clampInt64(v, lo, hi int64) int64 {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}
+
+// clampFloat clamps v to [lo, hi].
+func clampFloat(v, lo, hi float64) float64 {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
 }
 
 // --- Alerting Handlers ---
@@ -1773,8 +1820,7 @@ func (d *Dashboard) handleAddWebhook(w http.ResponseWriter, r *http.Request) {
 		Cooldown string            `json:"cooldown"`
 		Headers  map[string]string `json:"headers"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON"})
+	if !limitedDecodeJSON(w, r, &body) {
 		return
 	}
 	if body.Name == "" || body.URL == "" {
@@ -1875,8 +1921,7 @@ func (d *Dashboard) handleAddEmail(w http.ResponseWriter, r *http.Request) {
 		Subject  string   `json:"subject"`
 		Template string   `json:"template"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON"})
+	if !limitedDecodeJSON(w, r, &body) {
 		return
 	}
 	if body.Name == "" || body.SMTPHost == "" || body.From == "" || len(body.To) == 0 {
@@ -1951,7 +1996,7 @@ func (d *Dashboard) handleTestAlert(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Target string `json:"target"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Target == "" {
+	if !limitedDecodeJSON(w, r, &body) || body.Target == "" {
 		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "target is required"})
 		return
 	}

@@ -1,7 +1,6 @@
 package dashboard
 
 import (
-	"encoding/json"
 	"net/http"
 	"strconv"
 )
@@ -117,8 +116,7 @@ func (h *DLPHandler) handleAddPattern(w http.ResponseWriter, r *http.Request) {
 		Action      string `json:"action"`
 		Score       int    `json:"score"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	if !limitedDecodeJSON(w, r, &req) {
 		return
 	}
 
@@ -214,8 +212,7 @@ func (h *DLPHandler) handleTestPattern(w http.ResponseWriter, r *http.Request) {
 		Pattern  string `json:"pattern"`
 		TestData string `json:"test_data"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	if !limitedDecodeJSON(w, r, &req) {
 		return
 	}
 

@@ -1,7 +1,6 @@
 package dashboard
 
 import (
-	"encoding/json"
 	"net/http"
 	"strings"
 )
@@ -105,8 +104,7 @@ func (h *VirtualPatchHandler) handleAddPatch(w http.ResponseWriter, r *http.Requ
 		Severity     string `json:"severity"`
 		Score        int    `json:"score"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	if !limitedDecodeJSON(w, r, &req) {
 		return
 	}
 
@@ -179,8 +177,7 @@ func (h *VirtualPatchHandler) handlePatchDetail(w http.ResponseWriter, r *http.R
 		var req struct {
 			Enabled bool `json:"enabled"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+		if !limitedDecodeJSON(w, r, &req) {
 			return
 		}
 

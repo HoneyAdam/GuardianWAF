@@ -1,7 +1,6 @@
 package dashboard
 
 import (
-	"encoding/json"
 	"net/http"
 	"strconv"
 )
@@ -72,8 +71,7 @@ func (h *ClientSideHandler) handleConfig(w http.ResponseWriter, r *http.Request)
 			AgentInjection    *bool   `json:"agent_injection"`
 			CSPEnabled        *bool   `json:"csp_enabled"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+		if !limitedDecodeJSON(w, r, &req) {
 			return
 		}
 
@@ -131,8 +129,7 @@ func (h *ClientSideHandler) handleSkimmingDomains(w http.ResponseWriter, r *http
 		var req struct {
 			Domain string `json:"domain"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+		if !limitedDecodeJSON(w, r, &req) {
 			return
 		}
 

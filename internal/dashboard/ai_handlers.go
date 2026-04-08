@@ -1,7 +1,6 @@
 package dashboard
 
 import (
-	"encoding/json"
 	"net/http"
 	"strconv"
 
@@ -101,8 +100,7 @@ func (d *Dashboard) handleAISetConfig(w http.ResponseWriter, r *http.Request) {
 		APIKey       string `json:"api_key"`
 		BaseURL      string `json:"base_url"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid JSON: " + err.Error()})
+	if !limitedDecodeJSON(w, r, &body) {
 		return
 	}
 

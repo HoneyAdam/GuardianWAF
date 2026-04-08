@@ -515,8 +515,8 @@ func TestCORSHandler(t *testing.T) {
 	if w.Code != http.StatusNoContent {
 		t.Errorf("expected 204, got %d", w.Code)
 	}
-	if w.Header().Get("Access-Control-Allow-Origin") != "*" {
-		t.Error("expected CORS header")
+	if w.Header().Get("Access-Control-Allow-Methods") == "" {
+		t.Error("expected CORS methods header")
 	}
 }
 

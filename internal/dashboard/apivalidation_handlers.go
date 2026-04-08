@@ -1,7 +1,6 @@
 package dashboard
 
 import (
-	"encoding/json"
 	"net/http"
 )
 
@@ -79,8 +78,7 @@ func (h *APIValidationHandler) handleUploadSchema(w http.ResponseWriter, r *http
 		Format     string `json:"format"`
 		StrictMode bool   `json:"strict_mode"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	if !limitedDecodeJSON(w, r, &req) {
 		return
 	}
 
@@ -186,8 +184,7 @@ func (h *APIValidationHandler) handleValidationConfig(w http.ResponseWriter, r *
 			StrictMode        *bool `json:"strict_mode"`
 			BlockOnViolation  *bool `json:"block_on_violation"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+		if !limitedDecodeJSON(w, r, &req) {
 			return
 		}
 
@@ -243,8 +240,7 @@ func (h *APIValidationHandler) handleTestValidation(w http.ResponseWriter, r *ht
 		Path   string          `json:"path"`
 		Body   string          `json:"body"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	if !limitedDecodeJSON(w, r, &req) {
 		return
 	}
 

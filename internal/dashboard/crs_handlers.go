@@ -1,7 +1,6 @@
 package dashboard
 
 import (
-	"encoding/json"
 	"net/http"
 	"strconv"
 )
@@ -105,8 +104,7 @@ func (h *CRSHandler) handleRuleDetail(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			Enabled bool `json:"enabled"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+		if !limitedDecodeJSON(w, r, &req) {
 			return
 		}
 
@@ -164,8 +162,7 @@ func (h *CRSHandler) handleConfig(w http.ResponseWriter, r *http.Request) {
 			AnomalyThreshold int      `json:"anomaly_threshold"`
 			Exclusions       []string `json:"exclusions"`
 		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
+		if !limitedDecodeJSON(w, r, &req) {
 			return
 		}
 
@@ -235,8 +232,7 @@ func (h *CRSHandler) handleTest(w http.ResponseWriter, r *http.Request) {
 		Headers map[string]string `json:"headers"`
 		Body    string            `json:"body"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+	if !limitedDecodeJSON(w, r, &req) {
 		return
 	}
 
