@@ -326,6 +326,14 @@ func (e *Engine) Middleware(next http.Handler) http.Handler {
 		// Apply security headers from response layer hook
 		applyResponseHook(w, ctx.Metadata)
 
+		// Extract masking function before releasing context
+		var maskFn func(string) string
+		if fn, ok := ctx.Metadata["response_mask_fn"]; ok {
+			if f, ok := fn.(func(string) string); ok {
+				maskFn = f
+			}
+		}
+
 		// Release context back to pool
 		ReleaseContext(ctx)
 
@@ -386,7 +394,13 @@ func (e *Engine) Middleware(next http.Handler) http.Handler {
 			return
 		}
 
-		next.ServeHTTP(w, r)
+		if maskFn != nil {
+			mwr := newMaskingResponseWriter(w, maskFn)
+			next.ServeHTTP(mwr, r)
+			mwr.FlushMasked()
+		} else {
+			next.ServeHTTP(w, r)
+		}
 	})
 }
 

@@ -71,6 +71,14 @@ func (l *Layer) Process(ctx *engine.RequestContext) engine.LayerResult {
 	// Store the config in context metadata for use by the response writer
 	ctx.Metadata["response_config"] = cfg
 
+	// Register a masking function for the engine to apply to response bodies.
+	// Uses func(string) string to avoid circular imports between engine and response.
+	if cfg.DataMaskingEnabled {
+		ctx.Metadata["response_mask_fn"] = func(body string) string {
+			return l.applyMasking(body)
+		}
+	}
+
 	// Register a hook that the engine middleware will call to apply headers.
 	// This avoids circular imports: the engine calls the hook via func type,
 	// without importing the response package.
@@ -93,9 +101,12 @@ func (l *Layer) ApplyToResponse(body string) string {
 	if !l.config.DataMaskingEnabled {
 		return body
 	}
+	return l.applyMasking(body)
+}
 
+// applyMasking applies all enabled masking patterns to the body.
+func (l *Layer) applyMasking(body string) string {
 	result := body
-
 	if l.config.MaskCreditCards {
 		result = MaskCreditCards(result)
 	}
@@ -108,7 +119,6 @@ func (l *Layer) ApplyToResponse(body string) string {
 	if l.config.StripStackTraces {
 		result = StripStackTraces(result)
 	}
-
 	return result
 }
 
