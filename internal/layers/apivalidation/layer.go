@@ -343,6 +343,9 @@ func (l *Layer) Process(ctx *engine.RequestContext) engine.LayerResult {
 	if !l.enabled || !l.config.ValidateRequest {
 		return engine.LayerResult{Action: engine.ActionPass}
 	}
+	if ctx.TenantWAFConfig != nil && !ctx.TenantWAFConfig.APIValidation.Enabled {
+		return engine.LayerResult{Action: engine.ActionPass}
+	}
 
 	l.mu.RLock()
 	specs := l.specs

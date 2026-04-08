@@ -126,6 +126,9 @@ func (l *Layer) Process(ctx *engine.RequestContext) engine.LayerResult {
 	if !l.config.Enabled {
 		return engine.LayerResult{Action: engine.ActionPass}
 	}
+	if ctx.TenantWAFConfig != nil && !ctx.TenantWAFConfig.DLP.Enabled {
+		return engine.LayerResult{Action: engine.ActionPass}
+	}
 
 	result := engine.LayerResult{
 		Action: engine.ActionPass,

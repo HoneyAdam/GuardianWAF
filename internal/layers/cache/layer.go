@@ -96,6 +96,9 @@ func (l *Layer) Process(ctx *engine.RequestContext) engine.LayerResult {
 	if !l.config.Enabled || !l.cache.IsEnabled() {
 		return engine.LayerResult{Action: engine.ActionPass}
 	}
+	if ctx.TenantWAFConfig != nil && !ctx.TenantWAFConfig.Cache.Enabled {
+		return engine.LayerResult{Action: engine.ActionPass}
+	}
 
 	// Check if request is cacheable
 	if !l.isCacheable(ctx) {

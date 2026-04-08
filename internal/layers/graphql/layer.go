@@ -303,6 +303,9 @@ func (l *Layer) Process(ctx *engine.RequestContext) engine.LayerResult {
 	if !l.Enabled() {
 		return engine.LayerResult{Action: engine.ActionPass}
 	}
+	if ctx.TenantWAFConfig != nil && !ctx.TenantWAFConfig.GraphQL.Enabled {
+		return engine.LayerResult{Action: engine.ActionPass}
+	}
 
 	start := time.Now()
 

@@ -59,6 +59,9 @@ func (l *Layer) Process(ctx *engine.RequestContext) engine.LayerResult {
 	if !l.enabled {
 		return engine.LayerResult{Action: engine.ActionPass}
 	}
+	if ctx.TenantWAFConfig != nil && !ctx.TenantWAFConfig.ClientSide.Enabled {
+		return engine.LayerResult{Action: engine.ActionPass}
+	}
 
 	// Check exclusions
 	for _, path := range l.config.Exclusions {

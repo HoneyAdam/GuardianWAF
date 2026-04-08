@@ -58,6 +58,9 @@ func (l *Layer) Process(ctx *engine.RequestContext) engine.LayerResult {
 	if !l.config.Enabled || l.canary == nil {
 		return engine.LayerResult{Action: engine.ActionPass}
 	}
+	if ctx.TenantWAFConfig != nil && !ctx.TenantWAFConfig.Canary.Enabled {
+		return engine.LayerResult{Action: engine.ActionPass}
+	}
 
 	// Mark request for canary routing
 	if l.canary.ShouldRouteToCanary(ctx.Request) {

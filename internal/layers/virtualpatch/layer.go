@@ -251,6 +251,9 @@ func (l *Layer) Process(ctx *engine.RequestContext) engine.LayerResult {
 	if !l.config.Enabled {
 		return engine.LayerResult{Action: engine.ActionPass}
 	}
+	if ctx.TenantWAFConfig != nil && !ctx.TenantWAFConfig.VirtualPatch.Enabled {
+		return engine.LayerResult{Action: engine.ActionPass}
+	}
 
 	// Get all active patches
 	patches := l.database.GetActivePatches()

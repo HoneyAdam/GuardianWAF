@@ -150,6 +150,9 @@ func (l *Layer) Process(ctx *engine.RequestContext) engine.LayerResult {
 	if !l.config.Enabled {
 		return engine.LayerResult{Action: engine.ActionPass}
 	}
+	if ctx.TenantWAFConfig != nil && !ctx.TenantWAFConfig.CRS.Enabled {
+		return engine.LayerResult{Action: engine.ActionPass}
+	}
 
 	// Create transaction from context
 	tx := l.createTransaction(ctx)
@@ -368,7 +371,7 @@ func (l *Layer) evaluateRule(rule *Rule, tx *Transaction) (bool, int, *engine.Fi
 }
 
 // shouldBlock determines if rule actions should cause immediate blocking.
-func (l *Layer) shouldBlock(rule *Rule, anomalyScore, blockingScore int) bool {
+func (l *Layer) shouldBlock(rule *Rule, anomalyScore, _ int) bool {
 	// Check for explicit block action
 	switch rule.Actions.Action {
 	case "block", "deny", "drop":
@@ -435,14 +438,6 @@ func (l *Layer) IsRuleEnabled(id string) bool {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 	return !l.disabledRules[id]
-}
-
-// min returns the minimum of two integers.
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 // RuleSet provides a default set of CRS rules for embedded use.
