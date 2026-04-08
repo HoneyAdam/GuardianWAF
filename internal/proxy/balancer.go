@@ -66,11 +66,6 @@ func (b *Balancer) Targets() []*Target {
 	return out
 }
 
-// HealthyCount returns how many targets are currently healthy.
-func (b *Balancer) HealthyCount() int {
-	return len(b.healthyTargets())
-}
-
 // Strategy returns the strategy name.
 func (b *Balancer) Strategy() string {
 	return b.strategy

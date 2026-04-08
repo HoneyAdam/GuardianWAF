@@ -224,8 +224,8 @@ func TestBalancerHealthyCount(t *testing.T) {
 	targets[1].SetHealthy(false)
 
 	lb := NewBalancer(targets, StrategyRoundRobin)
-	if lb.HealthyCount() != 2 {
-		t.Errorf("expected 2 healthy, got %d", lb.HealthyCount())
+	if len(lb.healthyTargets()) != 2 {
+		t.Errorf("expected 2 healthy, got %d", len(lb.healthyTargets()))
 	}
 }
 
