@@ -181,7 +181,8 @@ func (oe *OperatorEvaluator) evaluateByteRange(argument, value string) (bool, er
 	ranges := parseByteRanges(argument)
 
 	// Check each byte in value
-	for _, b := range []byte(value) {
+	for i := 0; i < len(value); i++ {
+		b := value[i]
 		valid := false
 		for _, r := range ranges {
 			if int(b) >= r.min && int(b) <= r.max {

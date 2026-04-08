@@ -6,11 +6,13 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sync"
 	"time"
 )
 
 // NVDClient is a client for the National Vulnerability Database API.
 type NVDClient struct {
+	mu         sync.RWMutex
 	baseURL    string
 	apiKey     string
 	httpClient *http.Client
@@ -29,6 +31,8 @@ func NewNVDClient(apiKey string) *NVDClient {
 
 // SetBaseURL sets a custom base URL for the NVD API.
 func (c *NVDClient) SetBaseURL(baseURL string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.baseURL = baseURL
 }
 
@@ -174,7 +178,13 @@ type SearchOptions struct {
 
 // Search searches for CVEs in the NVD.
 func (c *NVDClient) Search(opts SearchOptions) (*NVDResponse, error) {
-	u, err := url.Parse(c.baseURL)
+	c.mu.RLock()
+	baseURL := c.baseURL
+	apiKey := c.apiKey
+	client := c.httpClient
+	c.mu.RUnlock()
+
+	u, err := url.Parse(baseURL)
 	if err != nil {
 		return nil, fmt.Errorf("parsing base URL: %w", err)
 	}
@@ -212,11 +222,11 @@ func (c *NVDClient) Search(opts SearchOptions) (*NVDResponse, error) {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
 
-	if c.apiKey != "" {
-		req.Header.Set("apiKey", c.apiKey)
+	if apiKey != "" {
+		req.Header.Set("apiKey", apiKey)
 	}
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("executing request: %w", err)
 	}
@@ -236,7 +246,13 @@ func (c *NVDClient) Search(opts SearchOptions) (*NVDResponse, error) {
 
 // GetCVE retrieves a specific CVE by ID.
 func (c *NVDClient) GetCVE(cveID string) (*CVEEntry, error) {
-	u, err := url.Parse(c.baseURL)
+	c.mu.RLock()
+	baseURL := c.baseURL
+	apiKey := c.apiKey
+	client := c.httpClient
+	c.mu.RUnlock()
+
+	u, err := url.Parse(baseURL)
 	if err != nil {
 		return nil, fmt.Errorf("parsing base URL: %w", err)
 	}
@@ -250,11 +266,11 @@ func (c *NVDClient) GetCVE(cveID string) (*CVEEntry, error) {
 		return nil, fmt.Errorf("creating request: %w", err)
 	}
 
-	if c.apiKey != "" {
-		req.Header.Set("apiKey", c.apiKey)
+	if apiKey != "" {
+		req.Header.Set("apiKey", apiKey)
 	}
 
-	resp, err := c.httpClient.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("executing request: %w", err)
 	}

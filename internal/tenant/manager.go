@@ -95,6 +95,7 @@ type Manager struct {
 
 	// Cluster sync for multi-node replication
 	clusterSync ClusterSync
+	clusterSyncMu sync.RWMutex
 }
 
 // NewManager creates a new tenant manager.
@@ -700,17 +701,19 @@ type ClusterSync interface {
 
 // SetClusterSync sets the cluster sync manager.
 func (m *Manager) SetClusterSync(cs ClusterSync) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
+	m.clusterSyncMu.Lock()
 	m.clusterSync = cs
+	m.clusterSyncMu.Unlock()
 }
 
 // broadcast sends an event to the cluster if cluster sync is enabled.
 func (m *Manager) broadcast(entityType, entityID, action string, data map[string]any) {
-	if m.clusterSync != nil {
-		// Fire and forget - don't block on cluster sync
+	m.clusterSyncMu.RLock()
+	cs := m.clusterSync
+	m.clusterSyncMu.RUnlock()
+	if cs != nil {
 		go func() {
-			if err := m.clusterSync.BroadcastEvent(entityType, entityID, action, data); err != nil {
+			if err := cs.BroadcastEvent(entityType, entityID, action, data); err != nil {
 				log.Printf("[tenant] warning: failed to broadcast event: %v", err)
 			}
 		}()

@@ -50,17 +50,26 @@ type AlertManager struct {
 	cooldowns   map[string]time.Time // key: alert cooldown key
 	cooldownDur time.Duration
 	maxAlerts   int // per tenant
+
+	// Bounded dispatch channel
+	dispatchCh chan *Alert
+	stopCh     chan struct{}
 }
 
 // NewAlertManager creates a new alert manager.
 func NewAlertManager() *AlertManager {
-	return &AlertManager{
+	am := &AlertManager{
 		alerts:      make(map[string][]Alert),
 		handlers:    make([]AlertHandler, 0),
 		cooldowns:   make(map[string]time.Time),
 		cooldownDur: 5 * time.Minute,
 		maxAlerts:   100,
+		dispatchCh:  make(chan *Alert, 256),
+		stopCh:      make(chan struct{}),
 	}
+	// Start bounded dispatch workers
+	go am.dispatchLoop()
+	return am
 }
 
 // RegisterHandler registers an alert handler.
@@ -106,9 +115,11 @@ func (am *AlertManager) TriggerAlert(tenantID string, alertType AlertType, sever
 	copy(handlers, am.handlers)
 	am.mu.Unlock()
 
-	// Dispatch to handlers (outside lock)
-	for _, handler := range handlers {
-		go handler(alert)
+	// Dispatch to handlers via bounded channel
+	select {
+	case am.dispatchCh <- alert:
+	default:
+		// Channel full — drop alert dispatch to prevent backpressure
 	}
 
 	return alert
@@ -259,6 +270,30 @@ func (am *AlertManager) Cleanup(maxAge time.Duration) {
 			delete(am.cooldowns, key)
 		}
 	}
+}
+
+// dispatchLoop runs a bounded dispatch worker that calls handlers sequentially.
+func (am *AlertManager) dispatchLoop() {
+	for {
+		select {
+		case alert := <-am.dispatchCh:
+			am.mu.RLock()
+			handlers := make([]AlertHandler, len(am.handlers))
+			copy(handlers, am.handlers)
+			am.mu.RUnlock()
+
+			for _, handler := range handlers {
+				handler(alert)
+			}
+		case <-am.stopCh:
+			return
+		}
+	}
+}
+
+// Close stops the dispatch loop.
+func (am *AlertManager) Close() {
+	close(am.stopCh)
 }
 
 func generateAlertID() string {

@@ -480,8 +480,6 @@ func (c *Cluster) joinViaSeed(seed string) error {
 // handleJoin handles a node join request.
 func (c *Cluster) handleJoin(node *Node) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	existing, exists := c.nodes[node.ID]
 	if exists {
 		existing.State = StateActive
@@ -500,18 +498,23 @@ func (c *Cluster) handleJoin(node *Node) {
 	}
 
 	// If no leader exists, start election
+	var msg *Message
 	if c.getLeaderUnlocked() == nil {
-		c.startLeaderElection()
+		msg = c.startLeaderElection()
+	}
+	c.mu.Unlock()
+
+	if msg != nil {
+		c.broadcast(msg)
 	}
 }
 
 // handleLeave handles a node leave.
 func (c *Cluster) handleLeave(nodeID string) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
 	node, exists := c.nodes[nodeID]
 	if !exists {
+		c.mu.Unlock()
 		return
 	}
 
@@ -525,14 +528,21 @@ func (c *Cluster) handleLeave(nodeID string) {
 	delete(c.nodes, nodeID)
 
 	// If leader left, start election
+	var msg *Message
 	if node.IsLeader {
-		c.startLeaderElection()
+		msg = c.startLeaderElection()
+	}
+	c.mu.Unlock()
+
+	if msg != nil {
+		c.broadcast(msg)
 	}
 }
 
-// startLeaderElection starts a leader election.
-// Caller must hold c.mu lock when calling from within other locked methods.
-func (c *Cluster) startLeaderElection() {
+// startLeaderElection performs leader election state mutation.
+// Caller must hold c.mu lock. Returns a message to broadcast if this node
+// became leader, or nil. The caller should broadcast OUTSIDE the lock.
+func (c *Cluster) startLeaderElection() *Message {
 	// Simple leader election: lowest node ID wins
 	var leader *Node
 	for _, node := range c.nodes {
@@ -543,31 +553,19 @@ func (c *Cluster) startLeaderElection() {
 		}
 	}
 
-	if leader != nil && leader.ID == c.localNode.ID {
-		// Set leader state while holding lock
-		c.isLeader.Store(true)
-		c.localNode.IsLeader = true
-		c.state = StateLeader
-		// Release lock before broadcasting to avoid deadlock
-		c.mu.Unlock()
-		c.broadcast(&Message{
-			Type:      MsgLeaderElection,
-			From:      c.localNode.ID,
-			Timestamp: time.Now(),
-		})
-		c.mu.Lock() // Re-acquire lock for caller
+	if leader == nil || leader.ID != c.localNode.ID {
+		return nil
 	}
-}
 
-// becomeLeader makes this node the leader.
-// Note: This method should NOT be called while holding c.mu lock
-// as it calls broadcast() which needs to acquire the lock.
-// Use startLeaderElection() instead which handles lock correctly.
-func (c *Cluster) becomeLeader() {
 	c.isLeader.Store(true)
 	c.localNode.IsLeader = true
 	c.state = StateLeader
-	// Note: broadcast is now handled by the caller to avoid deadlock
+
+	return &Message{
+		Type:      MsgLeaderElection,
+		From:      c.localNode.ID,
+		Timestamp: time.Now(),
+	}
 }
 
 // heartbeatLoop sends periodic heartbeats.
@@ -607,8 +605,7 @@ func (c *Cluster) failureDetector() {
 // checkFailedNodes checks for and marks failed nodes.
 func (c *Cluster) checkFailedNodes() {
 	c.mu.Lock()
-	defer c.mu.Unlock()
-
+	var msg *Message
 	for _, node := range c.nodes {
 		if node.ID == c.localNode.ID {
 			continue
@@ -625,9 +622,14 @@ func (c *Cluster) checkFailedNodes() {
 
 			// If leader failed, start election
 			if node.IsLeader {
-				c.startLeaderElection()
+				msg = c.startLeaderElection()
 			}
 		}
+	}
+	c.mu.Unlock()
+
+	if msg != nil {
+		c.broadcast(msg)
 	}
 }
 

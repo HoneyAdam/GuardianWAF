@@ -3,6 +3,7 @@
 package crs
 
 import (
+	"sync"
 	"time"
 )
 
@@ -138,6 +139,12 @@ type Transaction struct {
 
 	// Matched rules
 	MatchedRules  []*Rule
+
+	// Cached string conversions of body byte slices
+	requestBodyStr string
+	requestBodyOnce sync.Once
+	responseBodyStr string
+	responseBodyOnce sync.Once
 }
 
 // NewTransaction creates a new transaction for rule evaluation.
@@ -151,6 +158,22 @@ func NewTransaction() *Transaction {
 		MatchedRules:    []*Rule{},
 		Timestamp:       time.Now(),
 	}
+}
+
+// RequestBodyString returns the request body as a string, cached after first conversion.
+func (tx *Transaction) RequestBodyString() string {
+	tx.requestBodyOnce.Do(func() {
+		tx.requestBodyStr = string(tx.RequestBody)
+	})
+	return tx.requestBodyStr
+}
+
+// ResponseBodyString returns the response body as a string, cached after first conversion.
+func (tx *Transaction) ResponseBodyString() string {
+	tx.responseBodyOnce.Do(func() {
+		tx.responseBodyStr = string(tx.ResponseBody)
+	})
+	return tx.responseBodyStr
 }
 
 // SetVar sets a transaction variable.

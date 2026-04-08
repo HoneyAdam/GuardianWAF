@@ -62,7 +62,7 @@ func (vr *VariableResolver) Resolve(rv RuleVariable) ([]string, error) {
 
 	// Body variables
 	case "REQUEST_BODY":
-		return []string{string(vr.transaction.RequestBody)}, nil
+		return []string{vr.transaction.RequestBodyString()}, nil
 	case "REQUEST_BODY_LENGTH":
 		return []string{strconv.Itoa(len(vr.transaction.RequestBody))}, nil
 
@@ -78,7 +78,7 @@ func (vr *VariableResolver) Resolve(rv RuleVariable) ([]string, error) {
 	case "RESPONSE_HEADERS":
 		return vr.resolveHeaders(rv.Key, rv.KeyRegex, vr.transaction.ResponseHeaders, rv.Count)
 	case "RESPONSE_BODY":
-		return []string{string(vr.transaction.ResponseBody)}, nil
+		return []string{vr.transaction.ResponseBodyString()}, nil
 
 	// Server variables
 	case "SERVER_NAME":
@@ -140,7 +140,7 @@ func (vr *VariableResolver) Resolve(rv RuleVariable) ([]string, error) {
 			}
 		}
 		sb.WriteString("\r\n")
-		sb.WriteString(string(vr.transaction.RequestBody))
+		sb.WriteString(vr.transaction.RequestBodyString())
 		return []string{sb.String()}, nil
 	case "FULL_REQUEST_LENGTH":
 		return []string{strconv.Itoa(len(vr.transaction.RequestBody) + 1024)}, nil // Approximate
