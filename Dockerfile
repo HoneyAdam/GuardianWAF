@@ -11,7 +11,7 @@ COPY internal/dashboard/ui/ .
 RUN npm run build
 
 # Stage 2: Build Go binary
-FROM --platform=$BUILDPLATFORM golang:1.23-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.25-alpine AS builder
 
 ARG TARGETOS
 ARG TARGETARCH
