@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/guardianwaf/guardianwaf/internal/config"
 )
 
 // randReader allows tests to inject failures for generateRequestID.
@@ -66,6 +68,10 @@ type RequestContext struct {
 	JA4Protocol string   // "t" (TLS), "q" (QUIC), or "d" (DTLS)
 	JA4SNI      bool     // Whether SNI extension exists
 	JA4Ver      uint16   // Highest TLS version from supported_versions extension
+
+	// Tenant info (set by engine middleware for multi-tenant)
+	TenantID       string         // Tenant identifier (empty = global/default)
+	TenantWAFConfig *config.WAFConfig // Per-tenant WAF config override (nil = use global)
 
 	// Internal
 	bodyRead bool
@@ -207,6 +213,9 @@ func ReleaseContext(ctx *RequestContext) {
 	ctx.TLSVersion = 0
 	ctx.TLSCipherSuite = 0
 	ctx.ServerName = ""
+
+	ctx.TenantID = ""
+	ctx.TenantWAFConfig = nil
 
 	ctx.bodyRead = false
 

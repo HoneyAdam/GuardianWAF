@@ -3,7 +3,10 @@
 // The yaml struct tags are documentary — actual loading uses the YAML parser's Node tree.
 package config
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // Config is the top-level configuration for GuardianWAF.
 type Config struct {
@@ -922,4 +925,35 @@ type SchemaSourceConfig struct {
 	Path      string `yaml:"path"`
 	Type      string `yaml:"type"`
 	AutoLearn bool   `yaml:"auto_learn"`
+}
+
+// FindVirtualHost finds a virtual host configuration by domain.
+// It checks exact match first, then wildcard patterns (e.g., *.example.com).
+// Returns nil if no match is found.
+func FindVirtualHost(vhosts []VirtualHostConfig, host string) *VirtualHostConfig {
+	if host == "" || len(vhosts) == 0 {
+		return nil
+	}
+
+	// Remove port from host if present
+	if idx := strings.Index(host, ":"); idx != -1 {
+		host = host[:idx]
+	}
+
+	for i := range vhosts {
+		vh := &vhosts[i]
+		for _, domain := range vh.Domains {
+			if domain == host {
+				return vh
+			}
+			// Check wildcard match
+			if len(domain) > 0 && domain[0] == '*' {
+				suffix := domain[1:] // Remove leading *
+				if len(host) > len(suffix) && strings.HasSuffix(host, suffix) {
+					return vh
+				}
+			}
+		}
+	}
+	return nil
 }

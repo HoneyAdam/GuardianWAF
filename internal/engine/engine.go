@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"net/http"
@@ -58,6 +59,33 @@ type AccessLogEntry struct {
 	Duration   string `json:"duration_us"`
 	UserAgent  string `json:"user_agent"`
 	Findings   int    `json:"findings"`
+}
+
+// TenantContext holds tenant information for request isolation.
+// This type exists to avoid importing the tenant package in engine (which would
+// create a circular dependency). The tenant middleware sets this in context.
+type TenantContext struct {
+	ID            string                  // Tenant ID
+	WAFConfig    *config.WAFConfig       // Tenant's global WAF config
+	VirtualHosts []config.VirtualHostConfig // Tenant's virtual hosts (for domain override lookup)
+}
+
+// tenantContextKey is the context key for tenant context.
+type tenantContextKeyType struct{}
+
+var tenantContextKey = tenantContextKeyType{}
+
+// WithTenantContext adds tenant context to a context.Context.
+func WithTenantContext(ctx context.Context, tc *TenantContext) context.Context {
+	return context.WithValue(ctx, tenantContextKey, tc)
+}
+
+// GetTenantContext retrieves tenant context from a context.Context.
+func GetTenantContext(ctx context.Context) *TenantContext {
+	if tc, ok := ctx.Value(tenantContextKey).(*TenantContext); ok {
+		return tc
+	}
+	return nil
 }
 
 // Engine is the core WAF engine that processes requests through the detection pipeline.
@@ -244,6 +272,19 @@ func (e *Engine) Middleware(next http.Handler) http.Handler {
 		// Acquire context and run pipeline (inline, not via Check,
 		// so we can access metadata before the context is released)
 		ctx := AcquireContext(r, e.paranoiaLevel, e.maxBodySize)
+
+		// Set tenant info from context if available (set by caller via SetTenantContext)
+		// This avoids importing tenant package to break circular dependency
+		if tenantCtx := GetTenantContext(r.Context()); tenantCtx != nil {
+			ctx.TenantID = tenantCtx.ID
+			if tenantCtx.WAFConfig != nil {
+				if vh := config.FindVirtualHost(tenantCtx.VirtualHosts, r.Host); vh != nil && vh.WAF != nil {
+					ctx.TenantWAFConfig = vh.WAF
+				} else {
+					ctx.TenantWAFConfig = tenantCtx.WAFConfig
+				}
+			}
+		}
 
 		result := e.currentPipeline().Execute(ctx)
 

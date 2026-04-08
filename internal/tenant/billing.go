@@ -3,6 +3,7 @@ package tenant
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -128,7 +129,9 @@ func NewBillingManager(storePath string) *BillingManager {
 	bm.pricing[PlanEnterprise] = DefaultPlanPricing(PlanEnterprise)
 
 	// Load persisted data
-	bm.load()
+	if err := bm.load(); err != nil {
+		log.Printf("[billing] warning: failed to load billing data: %v", err)
+	}
 
 	return bm
 }
@@ -226,7 +229,9 @@ func (bm *BillingManager) GenerateInvoice(tenantID, tenantName string, plan Bill
 	}
 
 	// Persist
-	bm.save()
+	if err := bm.save(); err != nil {
+		log.Printf("[billing] warning: failed to save billing data: %v", err)
+	}
 
 	return invoice, nil
 }
@@ -266,7 +271,9 @@ func (bm *BillingManager) UpdateInvoiceStatus(invoiceID, status string) bool {
 		for i := range invoices {
 			if invoices[i].ID == invoiceID {
 				bm.invoices[tenantID][i].Status = status
-				bm.save()
+				if err := bm.save(); err != nil {
+					log.Printf("[billing] warning: failed to save billing data: %v", err)
+				}
 				return true
 			}
 		}

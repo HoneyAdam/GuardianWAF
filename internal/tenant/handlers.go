@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/guardianwaf/guardianwaf/internal/config"
 )
 
 // Handlers provides HTTP handlers for tenant management.
@@ -22,6 +24,7 @@ func (h *Handlers) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/v1/tenants", h.handleTenants)
 	mux.HandleFunc("/api/v1/tenants/", h.handleTenantDetail)
 	mux.HandleFunc("/api/v1/tenants/", h.handleTenantDetail)
+	mux.HandleFunc("/api/v1/tenants/", h.handleTenantWAFConfig) // /api/v1/tenants/{id}/waf-config
 }
 
 // handleTenants handles list and create operations.
@@ -101,20 +104,26 @@ func (h *Handlers) createTenant(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	json.NewEncoder(w).Encode(CreateTenantResponse{
+	if err := json.NewEncoder(w).Encode(CreateTenantResponse{
 		Tenant: tenant,
 		APIKey: apiKey,
-	})
+	}); err != nil {
+		// Client disconnected, nothing we can do
+		_ = err
+	}
 }
 
 func (h *Handlers) listTenants(w http.ResponseWriter, r *http.Request) {
 	tenants := h.manager.ListTenants()
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	if err := json.NewEncoder(w).Encode(map[string]any{
 		"tenants": tenants,
 		"count":   len(tenants),
-	})
+	}); err != nil {
+		// Client disconnected
+		_ = err
+	}
 }
 
 func (h *Handlers) getTenant(w http.ResponseWriter, r *http.Request, tenantID string) {
@@ -125,16 +134,20 @@ func (h *Handlers) getTenant(w http.ResponseWriter, r *http.Request, tenantID st
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(tenant)
+	if err := json.NewEncoder(w).Encode(tenant); err != nil {
+		// Client disconnected
+		_ = err
+	}
 }
 
 // UpdateTenantRequest represents an update tenant request.
 type UpdateTenantRequest struct {
-	Name        string        `json:"name,omitempty"`
-	Description string        `json:"description,omitempty"`
-	Active      *bool         `json:"active,omitempty"`
-	Domains     []string      `json:"domains,omitempty"`
-	Quota       *ResourceQuota `json:"quota,omitempty"`
+	Name        string           `json:"name,omitempty"`
+	Description string           `json:"description,omitempty"`
+	Active      *bool            `json:"active,omitempty"`
+	Domains     []string         `json:"domains,omitempty"`
+	Quota       *ResourceQuota   `json:"quota,omitempty"`
+	Config      *config.Config   `json:"config,omitempty"` // Full tenant config (including WAF)
 }
 
 func (h *Handlers) updateTenant(w http.ResponseWriter, r *http.Request, tenantID string) {
@@ -150,6 +163,7 @@ func (h *Handlers) updateTenant(w http.ResponseWriter, r *http.Request, tenantID
 		Active:      req.Active,
 		Domains:     req.Domains,
 		Quota:       req.Quota,
+		Config:      req.Config,
 	}
 
 	if err := h.manager.UpdateTenant(tenantID, update); err != nil {
@@ -159,7 +173,10 @@ func (h *Handlers) updateTenant(w http.ResponseWriter, r *http.Request, tenantID
 
 	tenant := h.manager.GetTenant(tenantID)
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(tenant)
+	if err := json.NewEncoder(w).Encode(tenant); err != nil {
+		// Client disconnected
+		_ = err
+	}
 }
 
 func (h *Handlers) deleteTenant(w http.ResponseWriter, r *http.Request, tenantID string) {
@@ -169,6 +186,83 @@ func (h *Handlers) deleteTenant(w http.ResponseWriter, r *http.Request, tenantID
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// handleTenantWAFConfig handles GET and PUT for /api/v1/tenants/{id}/waf-config
+func (h *Handlers) handleTenantWAFConfig(w http.ResponseWriter, r *http.Request) {
+	// Extract tenant ID and verify path ends with /waf-config
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/tenants/")
+	if !strings.HasSuffix(path, "/waf-config") {
+		return // Not our route, let handleTenantDetail process
+	}
+
+	tenantID := strings.TrimSuffix(path, "/waf-config")
+	if tenantID == "" {
+		http.Error(w, "Tenant ID required", http.StatusBadRequest)
+		return
+	}
+
+	switch r.Method {
+	case http.MethodGet:
+		h.getTenantWAFConfig(w, r, tenantID)
+	case http.MethodPut:
+		h.updateTenantWAFConfig(w, r, tenantID)
+	default:
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+	}
+}
+
+// getTenantWAFConfig returns the WAF config for a tenant.
+func (h *Handlers) getTenantWAFConfig(w http.ResponseWriter, r *http.Request, tenantID string) {
+	tenant := h.manager.GetTenant(tenantID)
+	if tenant == nil {
+		http.Error(w, "Tenant not found", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(tenant.Config); err != nil {
+		// Client disconnected
+		_ = err
+	}
+}
+
+// updateTenantWAFConfig updates only the WAF config for a tenant (partial update).
+func (h *Handlers) updateTenantWAFConfig(w http.ResponseWriter, r *http.Request, tenantID string) {
+	var wafCfg config.WAFConfig
+	if err := json.NewDecoder(r.Body).Decode(&wafCfg); err != nil {
+		http.Error(w, "Invalid JSON", http.StatusBadRequest)
+		return
+	}
+
+	tenant := h.manager.GetTenant(tenantID)
+	if tenant == nil {
+		http.Error(w, "Tenant not found", http.StatusNotFound)
+		return
+	}
+
+	// Merge with existing config - only update WAF section
+	updatedConfig := tenant.Config
+	if updatedConfig == nil {
+		updatedConfig = &config.Config{}
+	}
+	updatedConfig.WAF = wafCfg
+
+	update := &TenantUpdate{
+		Config: updatedConfig,
+	}
+
+	if err := h.manager.UpdateTenant(tenantID, update); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	tenant = h.manager.GetTenant(tenantID)
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(tenant); err != nil {
+		// Client disconnected, error ignored
+		_ = err
+	}
 }
 
 // RegenerateAPIKeyHandler regenerates API key for a tenant.
@@ -195,9 +289,12 @@ func (h *Handlers) RegenerateAPIKeyHandler(w http.ResponseWriter, r *http.Reques
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
+	if err := json.NewEncoder(w).Encode(map[string]string{
 		"api_key": apiKey,
-	})
+	}); err != nil {
+		// Client disconnected, error ignored
+		_ = err
+	}
 }
 
 // StatsHandler returns tenant statistics.
@@ -209,7 +306,10 @@ func (h *Handlers) StatsHandler(w http.ResponseWriter, r *http.Request) {
 
 	stats := h.manager.Stats()
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(stats)
+	if err := json.NewEncoder(w).Encode(stats); err != nil {
+		// Client disconnected, error ignored
+		_ = err
+	}
 }
 
 // UsageStats represents real-time usage statistics for a tenant.
@@ -281,7 +381,10 @@ func (h *Handlers) GetTenantUsage(w http.ResponseWriter, r *http.Request, tenant
 	tenant.mu.RUnlock()
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(stats)
+	if err := json.NewEncoder(w).Encode(stats); err != nil {
+		// Client disconnected, error ignored
+		_ = err
+	}
 }
 
 // GetAllUsage returns usage for all tenants.
@@ -330,8 +433,11 @@ func (h *Handlers) GetAllUsage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	if err := json.NewEncoder(w).Encode(map[string]any{
 		"tenants": usageStats,
 		"count":   len(usageStats),
-	})
+	}); err != nil {
+		// Client disconnected, error ignored
+		_ = err
+	}
 }

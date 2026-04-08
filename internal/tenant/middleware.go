@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/guardianwaf/guardianwaf/internal/config"
+	"github.com/guardianwaf/guardianwaf/internal/engine"
 )
 
 // ContextKey is the key type for tenant context values.
@@ -55,6 +56,14 @@ func (m *Middleware) Handler(next http.Handler) http.Handler {
 
 		// Add tenant to context
 		ctx := WithTenant(r.Context(), tenant)
+
+		// Also add engine tenant context for WAF (breaks import cycle by using interface)
+		tenantCtx := &engine.TenantContext{
+			ID:            tenant.ID,
+			WAFConfig:     &tenant.Config.WAF,
+			VirtualHosts:  tenant.Config.VirtualHosts,
+		}
+		ctx = engine.WithTenantContext(ctx, tenantCtx)
 
 		// Wrap response writer to capture stats
 		wrapped := &tenantResponseWriter{

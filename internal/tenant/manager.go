@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"net/http"
 	"sync"
 	"time"
@@ -553,6 +554,7 @@ func (m *Manager) SetBillingStorePath(path string) {
 	if m.billingManager != nil {
 		// Note: This won't change the path for existing billing manager
 		// Should be set before first use
+		_ = path // unused - billing path is set at initialization
 	}
 }
 
@@ -702,7 +704,11 @@ func (m *Manager) SetClusterSync(cs ClusterSync) {
 func (m *Manager) broadcast(entityType, entityID, action string, data map[string]any) {
 	if m.clusterSync != nil {
 		// Fire and forget - don't block on cluster sync
-		go m.clusterSync.BroadcastEvent(entityType, entityID, action, data)
+		go func() {
+			if err := m.clusterSync.BroadcastEvent(entityType, entityID, action, data); err != nil {
+				log.Printf("[tenant] warning: failed to broadcast event: %v", err)
+			}
+		}()
 	}
 }
 
