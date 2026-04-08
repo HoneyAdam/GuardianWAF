@@ -45,6 +45,9 @@ type Proxy struct {
 	// gRPC-Web support
 	grpcWebEnabled bool
 
+	// Maximum message size in bytes
+	maxMsgSize int
+
 	// Method-level access control
 	methodACL map[string]bool // method name -> allowed
 
@@ -96,6 +99,7 @@ func NewProxy(cfg *Config) (*Proxy, error) {
 
 	p := &Proxy{
 		grpcWebEnabled: cfg.GRPCWebEnabled,
+		maxMsgSize:     cfg.MaxMessageSize,
 		methodACL:      make(map[string]bool),
 	}
 
@@ -224,8 +228,18 @@ func (p *Proxy) validateGRPCRequest(r *http.Request) error {
 		return nil
 	}
 
-	// Read and parse gRPC frames
-	body, err := io.ReadAll(r.Body)
+	// Read and parse gRPC frames (capped at MaxMessageSize)
+	maxSize := 4 * 1024 * 1024
+	if p.maxMsgSize > 0 {
+		maxSize = p.maxMsgSize
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, int64(maxSize)+1))
+	if err != nil {
+		return fmt.Errorf("failed to read body: %w", err)
+	}
+	if len(body) > maxSize {
+		return fmt.Errorf("request body exceeds maximum size (%d bytes)", maxSize)
+	}
 	if err != nil {
 		return fmt.Errorf("failed to read body: %w", err)
 	}
@@ -254,10 +268,17 @@ func (p *Proxy) validateGRPCRequest(r *http.Request) error {
 
 // buildUpstreamRequest creates the upstream gRPC request.
 func (p *Proxy) buildUpstreamRequest(r *http.Request, targetURL string) (*http.Request, error) {
-	// Clone request
-	body, err := io.ReadAll(r.Body)
+	// Clone request (capped at max message size)
+	maxSize := 4 * 1024 * 1024
+	if p.maxMsgSize > 0 {
+		maxSize = p.maxMsgSize
+	}
+	body, err := io.ReadAll(io.LimitReader(r.Body, int64(maxSize)+1))
 	if err != nil {
 		return nil, err
+	}
+	if len(body) > maxSize {
+		return nil, fmt.Errorf("request body exceeds maximum size (%d bytes)", maxSize)
 	}
 	r.Body.Close()
 	r.Body = io.NopCloser(bytes.NewReader(body))

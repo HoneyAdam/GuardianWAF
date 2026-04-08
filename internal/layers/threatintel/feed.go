@@ -122,6 +122,11 @@ func (f *FeedManager) loadFile() ([]ThreatEntry, error) {
 }
 
 func (f *FeedManager) loadURL(ctx context.Context) ([]ThreatEntry, error) {
+	// Warn on non-HTTPS feed URLs — threat feed data controls WAF blocking decisions
+	if strings.HasPrefix(f.config.URL, "http://") {
+		fmt.Printf("WARNING: threat intel feed URL is not HTTPS: %s (data may be tampered with in transit)\n", f.config.URL)
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, f.config.URL, http.NoBody)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
@@ -137,7 +142,8 @@ func (f *FeedManager) loadURL(ctx context.Context) ([]ThreatEntry, error) {
 		return nil, fmt.Errorf("feed returned status %d", resp.StatusCode)
 	}
 
-	return f.parseReader(resp.Body)
+	// Cap response body to prevent memory exhaustion from malicious feeds
+	return f.parseReader(io.LimitReader(resp.Body, 100*1024*1024)) // 100MB max
 }
 
 func (f *FeedManager) parseReader(r io.Reader) ([]ThreatEntry, error) {

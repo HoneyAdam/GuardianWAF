@@ -196,6 +196,10 @@ func (c *Client) ListContainers(labelPrefix string) ([]Container, error) {
 
 // InspectContainer returns detailed info about a container.
 func (c *Client) InspectContainer(id string) (*ContainerDetail, error) {
+	if !isSafeContainerRef(id) {
+		return nil, fmt.Errorf("invalid container reference: %s", id)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -301,4 +305,24 @@ func NewHTTPClient(socketPath string) *http.Client {
 		},
 		Timeout: 30 * time.Second,
 	}
+}
+
+// isSafeContainerRef checks that a container ID or name is safe to pass as a
+// CLI argument. Allows hex chars (container IDs), plus alphanumeric, dash,
+// underscore, dot (container names). Rejects shell metacharacters.
+func isSafeContainerRef(id string) bool {
+	if len(id) == 0 || len(id) > 128 {
+		return false
+	}
+	for _, c := range id {
+		switch {
+		case c >= '0' && c <= '9':
+		case c >= 'a' && c <= 'z':
+		case c >= 'A' && c <= 'Z':
+		case c == '-' || c == '_' || c == '.':
+		default:
+			return false
+		}
+	}
+	return true
 }
