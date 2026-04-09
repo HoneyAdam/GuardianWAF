@@ -72,13 +72,16 @@ func (m *maskingResponseWriter) FlushMasked() {
 		return
 	}
 
-	body := m.buf.String()
+	data := m.buf.Bytes()
 	m.buf.Reset()
 
 	if m.maskFn != nil {
-		body = m.maskFn(body)
+		// maskFn operates on string, convert once
+		masked := m.maskFn(string(data))
+		_, _ = m.ResponseWriter.Write([]byte(masked))
+	} else {
+		_, _ = m.ResponseWriter.Write(data)
 	}
-	_, _ = m.ResponseWriter.Write([]byte(body))
 }
 
 // shouldCapture determines whether to buffer the response body based on

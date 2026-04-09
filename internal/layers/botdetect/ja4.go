@@ -130,9 +130,11 @@ func formatHexList(vals []uint16) string {
 	if len(vals) == 0 {
 		return ""
 	}
+	var buf [4]byte
 	parts := make([]string, len(vals))
 	for i, v := range vals {
-		parts[i] = strings.ToLower(hex.EncodeToString([]byte{byte(v >> 8), byte(v)}))
+		hex.Encode(buf[:], []byte{byte(v >> 8), byte(v & 0xff)})
+		parts[i] = string(buf[:])
 	}
 	return strings.Join(parts, ",")
 }

@@ -1,6 +1,7 @@
 package botdetect
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -67,7 +68,9 @@ func TestJoinUint16(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		got := joinUint16(tc.input)
+		var b strings.Builder
+		joinUint16(&b, tc.input)
+		got := b.String()
 		if got != tc.expected {
 			t.Errorf("joinUint16(%v) = %q, want %q", tc.input, got, tc.expected)
 		}
@@ -85,7 +88,9 @@ func TestJoinUint8(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		got := joinUint8(tc.input)
+		var b strings.Builder
+		joinUint8(&b, tc.input)
+		got := b.String()
 		if got != tc.expected {
 			t.Errorf("joinUint8(%v) = %q, want %q", tc.input, got, tc.expected)
 		}

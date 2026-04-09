@@ -3,7 +3,7 @@ package botdetect
 import (
 	"crypto/md5"
 	"encoding/hex"
-	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -17,14 +17,19 @@ type JA3Fingerprint struct {
 // Format: SSLVersion,Ciphers,Extensions,EllipticCurves,ECPointFormats
 // Each group is a dash-separated list of decimal values; groups are separated by commas.
 func ComputeJA3(tlsVersion uint16, cipherSuites, extensions, curves []uint16, points []uint8) JA3Fingerprint {
-	parts := make([]string, 5)
-	parts[0] = fmt.Sprintf("%d", tlsVersion)
-	parts[1] = joinUint16(cipherSuites)
-	parts[2] = joinUint16(extensions)
-	parts[3] = joinUint16(curves)
-	parts[4] = joinUint8(points)
+	var b strings.Builder
+	b.Grow(128)
+	b.WriteString(strconv.FormatUint(uint64(tlsVersion), 10))
+	b.WriteByte(',')
+	joinUint16(&b, cipherSuites)
+	b.WriteByte(',')
+	joinUint16(&b, extensions)
+	b.WriteByte(',')
+	joinUint16(&b, curves)
+	b.WriteByte(',')
+	joinUint8(&b, points)
 
-	raw := strings.Join(parts, ",")
+	raw := b.String()
 	hash := md5.Sum([]byte(raw))
 
 	return JA3Fingerprint{
@@ -33,26 +38,22 @@ func ComputeJA3(tlsVersion uint16, cipherSuites, extensions, curves []uint16, po
 	}
 }
 
-// joinUint16 joins a slice of uint16 values into a dash-separated string.
-func joinUint16(vals []uint16) string {
-	if len(vals) == 0 {
-		return ""
-	}
-	parts := make([]string, len(vals))
+// joinUint16 appends dash-separated uint16 values to the builder.
+func joinUint16(b *strings.Builder, vals []uint16) {
 	for i, v := range vals {
-		parts[i] = fmt.Sprintf("%d", v)
+		if i > 0 {
+			b.WriteByte('-')
+		}
+		b.WriteString(strconv.FormatUint(uint64(v), 10))
 	}
-	return strings.Join(parts, "-")
 }
 
-// joinUint8 joins a slice of uint8 values into a dash-separated string.
-func joinUint8(vals []uint8) string {
-	if len(vals) == 0 {
-		return ""
-	}
-	parts := make([]string, len(vals))
+// joinUint8 appends dash-separated uint8 values to the builder.
+func joinUint8(b *strings.Builder, vals []uint8) {
 	for i, v := range vals {
-		parts[i] = fmt.Sprintf("%d", v)
+		if i > 0 {
+			b.WriteByte('-')
+		}
+		b.WriteString(strconv.FormatUint(uint64(v), 10))
 	}
-	return strings.Join(parts, "-")
 }

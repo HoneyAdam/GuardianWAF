@@ -1,7 +1,7 @@
 package engine
 
 import (
-	"fmt"
+	"strconv"
 	"sync"
 	"time"
 )
@@ -224,7 +224,11 @@ func computePartialJA3(version, cipher uint16) string {
 	// Simple hash of version + cipher for basic fingerprinting
 	// Full JA3 would require complete ClientHello data
 	h := uint32(version)<<16 | uint32(cipher)
-	return fmt.Sprintf("%08x", h)
+	s := strconv.FormatUint(uint64(h), 16)
+		for len(s) < 8 {
+			s = "0" + s
+		}
+		return s
 }
 
 // computeJA4FromContext computes JA4 fingerprint from RequestContext.
@@ -284,5 +288,18 @@ func computeJA4FromContext(ctx *RequestContext) string {
 	}
 
 	// Return partial JA4 (without hashes since we need crypto package)
-	return fmt.Sprintf("%s%s%s%02d%02d%s", protocol, version, sni, cipherCount, extCount, alpnCode)
+	return protocol + version + sni +
+		padInt2(cipherCount) + padInt2(extCount) + alpnCode
+}
+
+// padInt2 zero-pads an int to 2 digits.
+func padInt2(n int) string {
+	if n < 0 {
+		n = 0
+	}
+	if n > 99 {
+		n = 99
+	}
+	b := [2]byte{byte('0' + n/10), byte('0' + n%10)}
+	return string(b[:])
 }
