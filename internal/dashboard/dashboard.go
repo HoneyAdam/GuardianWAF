@@ -1681,7 +1681,10 @@ func (b *SSEBroadcaster) HandleSSE(w http.ResponseWriter, r *http.Request) {
 // BroadcastEvent serializes and broadcasts a WAF event to all SSE clients.
 // Uses json.Marshal on the Event struct directly (which has json tags).
 func (b *SSEBroadcaster) BroadcastEvent(event engine.Event) {
-	data, _ := json.Marshal(event)
+	data, err := json.Marshal(event)
+	if err != nil {
+		return
+	}
 
 	b.mu.RLock()
 	defer b.mu.RUnlock()
