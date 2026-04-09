@@ -9,6 +9,10 @@ import (
 	"testing"
 )
 
+func init() {
+	allowPrivateTargets = true
+}
+
 func TestWeightedRoundRobin_ZeroTotalWeight(t *testing.T) {
 	t1, _ := NewTarget("http://a:3000", 1)
 	t2, _ := NewTarget("http://b:3000", 1)

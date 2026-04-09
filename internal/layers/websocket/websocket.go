@@ -3,7 +3,7 @@ package websocket
 
 import (
 	"bufio"
-	"crypto/sha256"
+	"crypto/sha1"
 	"encoding/base64"
 	"encoding/binary"
 	"fmt"
@@ -11,6 +11,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -55,7 +56,7 @@ func DefaultConfig() *Config {
 		MaxFrameSize:        1 * 1024 * 1024,  // 1MB
 		RateLimitPerSecond:  100,
 		RateLimitBurst:      50,
-		AllowedOrigins:      []string{}, // Empty = allow all (checked by CORS)
+		AllowedOrigins:      []string{}, // Empty = same-origin policy (cross-origin requires explicit config)
 		BlockedExtensions:   []string{},
 		BlockEmptyMessages:  false,
 		BlockBinaryMessages: false,
@@ -184,7 +185,7 @@ func (s *Security) ValidateHandshake(r *http.Request) error {
 	// Check origin if allowed origins configured
 	if len(s.config.AllowedOrigins) > 0 {
 		origin := r.Header.Get("Origin")
-		if !s.isAllowedOrigin(origin) {
+		if !s.isAllowedOrigin(origin, r) {
 			return fmt.Errorf("origin not allowed: %s", origin)
 		}
 	}
@@ -219,9 +220,18 @@ func isWebSocketUpgrade(r *http.Request) bool {
 }
 
 // isAllowedOrigin checks if the origin is in the allowed list.
-func (s *Security) isAllowedOrigin(origin string) bool {
+// When no allowed origins are configured, defaults to same-origin policy.
+func (s *Security) isAllowedOrigin(origin string, r *http.Request) bool {
 	if len(s.config.AllowedOrigins) == 0 {
-		return true
+		// Default to same-origin policy: reject cross-origin entirely
+		if origin == "" {
+			return true // No Origin header (same-origin browser request)
+		}
+		u, err := url.Parse(origin)
+		if err != nil {
+			return false
+		}
+		return u.Host == r.Host
 	}
 
 	for _, allowed := range s.config.AllowedOrigins {
@@ -470,6 +480,12 @@ func ParseFrame(r io.Reader) (*Frame, error) {
 
 	frame.PayloadLen = payloadLen
 
+	// Guard against OOM: reject frames claiming payloads larger than 16MB
+	const maxFramePayload = 16 * 1024 * 1024
+	if payloadLen > maxFramePayload {
+		return nil, fmt.Errorf("frame payload too large: %d bytes (max %d)", payloadLen, maxFramePayload)
+	}
+
 	// Read mask key if present
 	if frame.Masked {
 		if _, err := io.ReadFull(br, frame.MaskKey[:]); err != nil {
@@ -495,9 +511,10 @@ func ParseFrame(r io.Reader) (*Frame, error) {
 	return frame, nil
 }
 
-// GenerateAcceptKey generates the Sec-WebSocket-Accept key.
+// GenerateAcceptKey generates the Sec-WebSocket-Accept key per RFC 6455 Section 4.2.2.
+// Uses SHA-1 as mandated by the WebSocket protocol specification.
 func GenerateAcceptKey(key string) string {
-	h := sha256.New()
+	h := sha1.New()
 	h.Write([]byte(key + websocketGUID))
 	return base64.StdEncoding.EncodeToString(h.Sum(nil))
 }
@@ -573,22 +590,11 @@ type Stats struct {
 // Helper functions
 
 func getClientIP(r *http.Request) string {
-	// Check X-Forwarded-For header
-	xff := r.Header.Get("X-Forwarded-For")
-	if xff != "" {
-		parts := strings.Split(xff, ",")
-		if len(parts) > 0 {
-			return strings.TrimSpace(parts[0])
-		}
-	}
-
-	// Check X-Real-IP header
-	xri := r.Header.Get("X-Real-Ip")
-	if xri != "" {
-		return xri
-	}
-
-	// Fall back to RemoteAddr
+	// NOTE: We intentionally do NOT trust X-Forwarded-For or X-Real-Ip here
+	// because this layer has no access to the trusted proxy configuration.
+	// Trusting unvalidated proxy headers allows trivial IP spoofing for
+	// MaxConcurrentPerIP bypass. If deployed behind a trusted proxy, the
+	// proxy should set a fixed header (e.g. X-Client-IP) with the real IP.
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr

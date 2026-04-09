@@ -3,6 +3,7 @@ package mcp
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // RegisterAllTools registers all GuardianWAF MCP tool handlers on the server.
@@ -367,6 +368,10 @@ func (s *Server) handleAddWebhook(params json.RawMessage) (any, error) {
 	}
 	if p.URL == "" {
 		return nil, fmt.Errorf("url is required")
+	}
+	// Validate URL scheme to prevent SSRF via gopher://, file://, etc.
+	if !strings.HasPrefix(p.URL, "https://") && !strings.HasPrefix(p.URL, "http://") {
+		return nil, fmt.Errorf("url must use http:// or https:// scheme")
 	}
 	if p.Type == "" {
 		return nil, fmt.Errorf("type is required")

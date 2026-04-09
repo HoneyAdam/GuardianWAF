@@ -8,6 +8,10 @@ import (
 	"time"
 )
 
+func init() {
+	allowPrivateTargets = true
+}
+
 // --- NewHealthChecker ---
 
 func TestNewHealthChecker_Defaults(t *testing.T) {
@@ -448,48 +452,39 @@ func TestWeightedRoundRobin_ZeroWeightFailsafe(t *testing.T) {
 
 // --- extractClientIPForHash ---
 
-func TestExtractClientIPForHash_XForwardedForMultiple(t *testing.T) {
+func TestExtractClientIPForHash_XForwardedForIgnored(t *testing.T) {
+	// XFF headers are no longer trusted by extractClientIPForHash — uses RemoteAddr only
 	req := httptest.NewRequest("GET", "/", nil)
 	req.Header.Set("X-Forwarded-For", "203.0.113.50, 70.41.3.18, 192.168.1.1")
 	req.RemoteAddr = "10.0.0.1:1234"
 
 	ip := extractClientIPForHash(req)
-	if ip != "203.0.113.50" {
-		t.Errorf("expected first XFF IP '203.0.113.50', got %q", ip)
+	if ip != "10.0.0.1" {
+		t.Errorf("expected RemoteAddr '10.0.0.1', got %q", ip)
 	}
 }
 
-func TestExtractClientIPForHash_XForwardedForSingleIP(t *testing.T) {
-	req := httptest.NewRequest("GET", "/", nil)
-	req.Header.Set("X-Forwarded-For", "203.0.113.50")
-	req.RemoteAddr = "10.0.0.1:1234"
-
-	ip := extractClientIPForHash(req)
-	if ip != "203.0.113.50" {
-		t.Errorf("expected '203.0.113.50', got %q", ip)
-	}
-}
-
-func TestExtractClientIPForHash_XRealIP(t *testing.T) {
+func TestExtractClientIPForHash_XRealIPIgnored(t *testing.T) {
+	// X-Real-IP is no longer trusted — uses RemoteAddr only
 	req := httptest.NewRequest("GET", "/", nil)
 	req.Header.Set("X-Real-IP", "203.0.113.99")
 	req.RemoteAddr = "10.0.0.1:1234"
 
 	ip := extractClientIPForHash(req)
-	if ip != "203.0.113.99" {
-		t.Errorf("expected '203.0.113.99', got %q", ip)
+	if ip != "10.0.0.1" {
+		t.Errorf("expected RemoteAddr '10.0.0.1', got %q", ip)
 	}
 }
 
-func TestExtractClientIPForHash_XForwardedForTakesPrecedence(t *testing.T) {
+func TestExtractClientIPForHash_RemoteAddrAlwaysUsed(t *testing.T) {
 	req := httptest.NewRequest("GET", "/", nil)
 	req.Header.Set("X-Forwarded-For", "203.0.113.50")
 	req.Header.Set("X-Real-IP", "10.0.0.1")
 	req.RemoteAddr = "192.168.1.1:1234"
 
 	ip := extractClientIPForHash(req)
-	if ip != "203.0.113.50" {
-		t.Errorf("XFF should take precedence, got %q", ip)
+	if ip != "192.168.1.1" {
+		t.Errorf("expected RemoteAddr '192.168.1.1', got %q", ip)
 	}
 }
 

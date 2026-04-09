@@ -215,20 +215,44 @@ func TestDetectionLayer_XXE(t *testing.T) {
 	}
 }
 
-// 8. TestDetectionLayer_XXE_NonXML - XXE patterns in non-XML body produces no xxe findings
+// 8. TestDetectionLayer_XXE_NonXML - non-XML body with non-XML content-type produces no xxe findings
 func TestDetectionLayer_XXE_NonXML(t *testing.T) {
 	layer := NewLayer(defaultConfig())
 
-	xmlBody := `<!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>`
-	ctx := makeContext("/api/data", "", xmlBody, "application/json")
+	// Body that does NOT look like XML — should not trigger XXE scanning
+	jsonBody := `{"user": "admin", "query": "SELECT * FROM users"}`
+	ctx := makeContext("/api/data", "", jsonBody, "application/json")
 	defer engine.ReleaseContext(ctx)
 
 	result := layer.Process(ctx)
 
 	for _, f := range result.Findings {
 		if f.DetectorName == "xxe" {
-			t.Errorf("expected no xxe findings for non-XML content-type, but found: %s", f.Description)
+			t.Errorf("expected no xxe findings for non-XML body, but found: %s", f.Description)
 		}
+	}
+}
+
+// 8b. TestDetectionLayer_XXE_XMLBodyNonXMLContentType - XML body with non-XML content-type IS detected
+func TestDetectionLayer_XXE_XMLBodyNonXMLContentType(t *testing.T) {
+	layer := NewLayer(defaultConfig())
+
+	// Body starts with <!DOCTYPE — should be scanned even with application/json content-type
+	xmlBody := `<!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>`
+	ctx := makeContext("/api/data", "", xmlBody, "application/json")
+	defer engine.ReleaseContext(ctx)
+
+	result := layer.Process(ctx)
+
+	hasXXE := false
+	for _, f := range result.Findings {
+		if f.DetectorName == "xxe" {
+			hasXXE = true
+			break
+		}
+	}
+	if !hasXXE {
+		t.Error("expected xxe findings for XML body with non-XML content-type (bypass detection)")
 	}
 }
 

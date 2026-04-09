@@ -6,6 +6,11 @@ import (
 	"testing"
 )
 
+func init() {
+	// Allow private/reserved IPs in tests (httptest.NewServer uses 127.0.0.1).
+	allowPrivateTargets = true
+}
+
 func TestCircuitState_String(t *testing.T) {
 	tests := []struct {
 		state    CircuitState
@@ -138,11 +143,12 @@ func TestExtractClientIPForHash_NoPort(t *testing.T) {
 }
 
 func TestExtractClientIPForHash_XForwardedFor(t *testing.T) {
+	// XFF is no longer trusted — uses RemoteAddr only
 	req := httptest.NewRequest("GET", "/", nil)
 	req.RemoteAddr = "10.0.0.1:1234"
 	req.Header.Set("X-Forwarded-For", "203.0.113.50, 70.41.3.18")
 	ip := extractClientIPForHash(req)
-	if ip != "203.0.113.50" {
-		t.Errorf("expected '203.0.113.50', got %q", ip)
+	if ip != "10.0.0.1" {
+		t.Errorf("expected RemoteAddr '10.0.0.1', got %q", ip)
 	}
 }

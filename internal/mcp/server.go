@@ -4,7 +4,6 @@ package mcp
 
 import (
 	"bufio"
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -326,7 +325,7 @@ func (s *Server) writeResponse(resp JSONRPCResponse) {
 }
 
 // HandleRequestJSON processes a JSON-RPC request and returns the response.
-// Thread-safe, does not use the server's writer.
+// Thread-safe — uses a per-request buffer instead of swapping the server writer.
 func (s *Server) HandleRequestJSON(reqData []byte) ([]byte, error) {
 	var req JSONRPCRequest
 	if err := json.Unmarshal(reqData, &req); err != nil {
@@ -338,18 +337,84 @@ func (s *Server) HandleRequestJSON(reqData []byte) ([]byte, error) {
 		return json.Marshal(resp)
 	}
 
-	// Capture response via buffer
-	var buf bytes.Buffer
+	resp := s.processRequest(req)
+	data, err := json.Marshal(resp)
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
+// processRequest handles a JSON-RPC request and returns the response directly.
+// Used by HandleRequestJSON for thread-safe per-request response handling.
+func (s *Server) processRequest(req JSONRPCRequest) JSONRPCResponse {
+	switch req.Method {
+	case "initialize":
+		s.mu.Lock()
+		name := s.serverName
+		ver := s.serverVersion
+		s.mu.Unlock()
+		return JSONRPCResponse{
+			JSONRPC: "2.0",
+			ID:      req.ID,
+			Result: map[string]any{
+				"protocolVersion": "2024-11-05",
+				"capabilities":   map[string]any{"tools": map[string]any{}},
+				"serverInfo":     map[string]any{"name": name, "version": ver},
+			},
+		}
+	case "notifications/initialized":
+		return JSONRPCResponse{JSONRPC: "2.0", ID: req.ID}
+	case "tools/list":
+		return JSONRPCResponse{
+			JSONRPC: "2.0",
+			ID:      req.ID,
+			Result:  map[string]any{"tools": AllTools()},
+		}
+	case "tools/call":
+		return s.processToolsCall(req)
+	default:
+		return JSONRPCResponse{
+			JSONRPC: "2.0",
+			ID:      req.ID,
+			Error:   &RPCError{Code: ErrCodeMethodNotFound, Message: fmt.Sprintf("Method not found: %s", req.Method)},
+		}
+	}
+}
+
+// processToolsCall handles a tools/call request and returns a response directly.
+func (s *Server) processToolsCall(req JSONRPCRequest) JSONRPCResponse {
+	var params toolsCallParams
+	if err := json.Unmarshal(req.Params, &params); err != nil {
+		return JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Error: &RPCError{Code: ErrCodeInvalidParams, Message: "Invalid params for tools/call"}}
+	}
+
 	s.mu.Lock()
-	origWriter := s.writer
-	s.writer = &buf
+	handler, ok := s.tools[params.Name]
 	s.mu.Unlock()
 
-	s.handleRequest(req)
+	if !ok {
+		return JSONRPCResponse{JSONRPC: "2.0", ID: req.ID, Error: &RPCError{Code: ErrCodeInvalidParams, Message: fmt.Sprintf("Unknown tool: %s", params.Name)}}
+	}
 
-	s.mu.Lock()
-	s.writer = origWriter
-	s.mu.Unlock()
+	result, err := handler(params.Arguments)
+	if err != nil {
+		return JSONRPCResponse{
+			JSONRPC: "2.0",
+			ID:      req.ID,
+			Result: map[string]any{
+				"content": []map[string]any{{"type": "text", "text": fmt.Sprintf("Error: %v", err)}},
+				"isError": true,
+			},
+		}
+	}
 
-	return bytes.TrimSpace(buf.Bytes()), nil
+	resultJSON, _ := json.Marshal(result)
+	return JSONRPCResponse{
+		JSONRPC: "2.0",
+		ID:      req.ID,
+		Result: map[string]any{
+			"content": []map[string]any{{"type": "text", "text": string(resultJSON)}},
+		},
+	}
 }

@@ -242,7 +242,7 @@ func (r *PatternRegistry) Scan(text string) []Match {
 			match := Match{
 				Type:     pattern.Type,
 				Severity: pattern.Severity,
-				Value:    value,
+				Value:    "", // Cleared — only Masked retained to prevent raw data exposure
 				Masked:   r.maskValue(value, pattern),
 				Position: loc[0],
 				Length:   loc[1] - loc[0],
@@ -262,7 +262,7 @@ func (r *PatternRegistry) Scan(text string) []Match {
 			match := Match{
 				Type:     pattern.Type,
 				Severity: pattern.Severity,
-				Value:    value,
+				Value:    "", // Cleared — only Masked retained to prevent raw data exposure
 				Masked:   r.maskValue(value, pattern),
 				Position: loc[0],
 				Length:   loc[1] - loc[0],

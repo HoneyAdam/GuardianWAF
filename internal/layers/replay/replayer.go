@@ -162,6 +162,19 @@ func (r *Replayer) ReplayFile(ctx context.Context, filePath string, filter Repla
 // ReplayRecording replays from storage path.
 func (r *Replayer) ReplayRecording(ctx context.Context, storagePath, filename string, filter ReplayFilter) (*ReplayStats, error) {
 	filePath := filepath.Join(storagePath, filename)
+	// Path traversal prevention: canonicalize and verify the resolved path
+	// stays within the intended storage directory.
+	abs, err := filepath.Abs(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("invalid recording path: %w", err)
+	}
+	absBase, err := filepath.Abs(storagePath)
+	if err != nil {
+		return nil, fmt.Errorf("invalid storage path: %w", err)
+	}
+	if !strings.HasPrefix(abs, absBase+string(filepath.Separator)) && abs != absBase {
+		return nil, fmt.Errorf("recording %q escapes storage directory", filename)
+	}
 	return r.ReplayFile(ctx, filePath, filter)
 }
 

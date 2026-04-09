@@ -9,6 +9,10 @@ import (
 	"time"
 )
 
+func init() {
+	allowPrivateTargets = true
+}
+
 // --- Target ---
 
 func TestNewTarget(t *testing.T) {

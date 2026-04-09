@@ -74,13 +74,26 @@ func (l *Layer) LoadRules(path string) error {
 	}
 
 	if info.IsDir() {
-		// Load all .conf files from directory
-		err = filepath.Walk(path, func(p string, info os.FileInfo, err error) error {
+		// Resolve the root path to detect symlink escapes
+		rootAbs, absErr := filepath.Abs(path)
+		if absErr != nil {
+			return fmt.Errorf("resolving rule path: %w", absErr)
+		}
+		// Load all .conf files from directory, skipping symlinks
+		err = filepath.WalkDir(path, func(p string, d os.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
-
-			if !info.IsDir() && strings.HasSuffix(p, ".conf") {
+			// Skip symlinks to prevent following links outside intended directory
+			if d.Type()&os.ModeSymlink != 0 {
+				return nil
+			}
+			// Verify path stays within root directory
+			pAbs, absErr := filepath.Abs(p)
+			if absErr != nil || !strings.HasPrefix(pAbs, rootAbs) {
+				return nil
+			}
+			if !d.IsDir() && strings.HasSuffix(p, ".conf") {
 				if err := l.loadRuleFile(p); err != nil {
 					// Log error but continue loading other files
 					return fmt.Errorf("loading %s: %w", p, err)

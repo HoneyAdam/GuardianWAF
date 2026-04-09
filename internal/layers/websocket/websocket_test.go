@@ -2,7 +2,7 @@ package websocket
 
 import (
 	"bytes"
-	"crypto/sha256"
+	"crypto/sha1"
 	"encoding/base64"
 	"encoding/binary"
 	"net/http"
@@ -134,7 +134,9 @@ func TestIsAllowedOrigin(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		result := security.isAllowedOrigin(tt.origin)
+		req, _ := http.NewRequest(http.MethodGet, "/", nil)
+		req.Host = "example.com"
+		result := security.isAllowedOrigin(tt.origin, req)
 		if result != tt.expected {
 			t.Errorf("isAllowedOrigin(%s) = %v, want %v", tt.origin, result, tt.expected)
 		}
@@ -143,13 +145,21 @@ func TestIsAllowedOrigin(t *testing.T) {
 
 func TestIsAllowedOrigin_AllowAll(t *testing.T) {
 	cfg := &Config{
-		AllowedOrigins: []string{}, // Empty = allow all
+		AllowedOrigins: []string{}, // Empty = same-origin policy
 	}
 
 	security := &Security{config: cfg}
 
-	if !security.isAllowedOrigin("https://any-origin.com") {
-		t.Error("empty allowed_origins should allow all")
+	// Same-origin (no Origin header) should be allowed
+	req, _ := http.NewRequest(http.MethodGet, "/", nil)
+	req.Host = "example.com"
+	if !security.isAllowedOrigin("", req) {
+		t.Error("empty origin (same-origin request) should be allowed")
+	}
+
+	// Cross-origin should be rejected
+	if security.isAllowedOrigin("https://any-origin.com", req) {
+		t.Error("cross-origin should be rejected with same-origin policy")
 	}
 }
 
@@ -181,14 +191,20 @@ func TestIsBlockedExtension(t *testing.T) {
 }
 
 func TestGenerateAcceptKey(t *testing.T) {
-	// Test with known WebSocket key
+	// Test with known WebSocket key per RFC 6455 Section 4.2.2
 	key := "dGhlIHNhbXBsZSBub25jZQ=="
-	hash := sha256.Sum256([]byte(key + websocketGUID))
+	hash := sha1.Sum([]byte(key + websocketGUID))
 	expected := base64.StdEncoding.EncodeToString(hash[:])
 
 	result := GenerateAcceptKey(key)
 	if result != expected {
-		t.Errorf("GenerateAcceptKey returned unexpected result")
+		t.Errorf("GenerateAcceptKey returned unexpected result: got %s, want %s", result, expected)
+	}
+
+	// RFC 6455 specifies the accept key from the example above is:
+	// s3pPLMBiTxaQ9kYGzzhZRbK+xOo=
+	if result != "s3pPLMBiTxaQ9kYGzzhZRbK+xOo=" {
+		t.Errorf("RFC 6455 example mismatch: got %s, want s3pPLMBiTxaQ9kYGzzhZRbK+xOo=", result)
 	}
 
 	// Verify it's base64
@@ -197,8 +213,8 @@ func TestGenerateAcceptKey(t *testing.T) {
 		t.Error("result should be valid base64")
 	}
 
-	if len(decoded) != 32 { // SHA-256 is 32 bytes
-		t.Errorf("decoded length = %d, want 32", len(decoded))
+	if len(decoded) != 20 { // SHA-1 is 20 bytes per RFC 6455
+		t.Errorf("decoded length = %d, want 20", len(decoded))
 	}
 }
 
@@ -504,16 +520,16 @@ func TestGetClientIP(t *testing.T) {
 		expected   string
 	}{
 		{
-			name:       "X-Forwarded-For",
+			name:       "X-Forwarded-For ignored (untrusted proxy)",
 			xff:        "203.0.113.195, 70.41.3.18, 150.172.238.178",
 			remoteAddr: "192.168.1.1:1234",
-			expected:   "203.0.113.195",
+			expected:   "192.168.1.1", // Spoofable headers ignored — falls back to RemoteAddr
 		},
 		{
-			name:       "X-Real-Ip",
+			name:       "X-Real-Ip ignored (untrusted proxy)",
 			xri:        "203.0.113.195",
 			remoteAddr: "192.168.1.1:1234",
-			expected:   "203.0.113.195",
+			expected:   "192.168.1.1", // Spoofable header ignored
 		},
 		{
 			name:       "RemoteAddr only",

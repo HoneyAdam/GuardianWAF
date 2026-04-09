@@ -5,7 +5,6 @@ import (
 	"math"
 	"net"
 	"net/http"
-	"strings"
 	"sync"
 	"sync/atomic"
 )
@@ -134,16 +133,11 @@ func (b *Balancer) ipHash(healthy []*Target, r *http.Request) *Target {
 }
 
 // extractClientIPForHash gets the client IP for consistent hashing.
+// Uses RemoteAddr only — proxy headers are not trusted here since they can be
+// spoofed. The engine's extractClientIP (with trusted proxy support) should be
+// used for security decisions. For load balancing hash stability, RemoteAddr is
+// sufficient when behind a known proxy.
 func extractClientIPForHash(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		parts := strings.Split(xff, ",")
-		if len(parts) > 0 {
-			return strings.TrimSpace(parts[0])
-		}
-	}
-	if xri := r.Header.Get("X-Real-IP"); xri != "" {
-		return strings.TrimSpace(xri)
-	}
 	host, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr

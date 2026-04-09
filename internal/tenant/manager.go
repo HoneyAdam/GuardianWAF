@@ -77,6 +77,10 @@ type Manager struct {
 	// Default tenant for unauthenticated requests
 	defaultTenantID string
 
+	// RejectUnmatched causes ResolveTenant to return nil when no tenant
+	// matches the request, instead of falling back to the default tenant.
+	RejectUnmatched bool
+
 	// Global limits
 	maxTenants int
 
@@ -318,7 +322,7 @@ func (m *Manager) GetTenantByAPIKey(apiKey string) *Tenant {
 }
 
 // ResolveTenant determines the tenant for an incoming request.
-// Priority: API Key header > Domain > Default tenant
+// Priority: API Key header > Domain > Default tenant (or reject if RejectUnmatched)
 func (m *Manager) ResolveTenant(r *http.Request) *Tenant {
 	// 1. Try API key
 	apiKey := r.Header.Get("X-GuardianWAF-Tenant-Key")
@@ -336,7 +340,10 @@ func (m *Manager) ResolveTenant(r *http.Request) *Tenant {
 		}
 	}
 
-	// 3. Return default tenant
+	// 3. Reject unmatched or return default tenant
+	if m.RejectUnmatched {
+		return nil
+	}
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	return m.tenants[m.defaultTenantID]

@@ -268,7 +268,7 @@ func (r *Recorder) rotateFile() error {
 	filename := filepath.Join(r.config.StoragePath, fmt.Sprintf("requests-%s-%03d.log",
 		time.Now().Format("20060102"), r.fileIndex))
 
-	f, err := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	f, err := os.OpenFile(filename, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
 	if err != nil {
 		return err
 	}

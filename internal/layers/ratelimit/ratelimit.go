@@ -1,6 +1,7 @@
 package ratelimit
 
 import (
+	"net"
 	"path"
 	"strconv"
 	"strings"
@@ -160,11 +161,20 @@ func (l *Layer) Process(ctx *engine.RequestContext) engine.LayerResult {
 
 // bucketKey generates a unique key for the token bucket based on rule scope.
 func (l *Layer) bucketKey(rule *Rule, ip, reqPath string) string {
+	// Normalize IP: convert IPv4-mapped IPv6 addresses (e.g. ::ffff:192.168.1.1)
+	// to their IPv4 representation to prevent dual-stack bypass.
+	normalizedIP := ip
+	if parsed := net.ParseIP(ip); parsed != nil {
+		normalizedIP = parsed.String()
+	}
+
 	switch rule.Scope {
 	case "ip+path":
-		return rule.ID + ":" + ip + ":" + reqPath
+		// Normalize path: strip query strings and resolve ".." sequences
+		normalized := path.Clean(reqPath)
+		return rule.ID + ":" + normalizedIP + ":" + normalized
 	default: // "ip" or anything else
-		return rule.ID + ":" + ip
+		return rule.ID + ":" + normalizedIP
 	}
 }
 
@@ -240,7 +250,7 @@ func (l *Layer) trackViolation(ip string, rule *Rule) {
 	}
 }
 
-// CleanupExpired removes stale token buckets that haven't been accessed recently.
+// CleanupExpired removes stale token buckets and violation counters that haven't been accessed recently.
 // staleDuration defines how old a bucket must be to be removed.
 func (l *Layer) CleanupExpired(staleDuration time.Duration) {
 	cutoff := time.Now().Add(-staleDuration)
@@ -249,6 +259,21 @@ func (l *Layer) CleanupExpired(staleDuration time.Duration) {
 		bucket := value.(*TokenBucket)
 		if bucket.LastAccess().Before(cutoff) {
 			l.buckets.Delete(key)
+		}
+		return true
+	})
+
+	// Also clean up violation counters for IPs whose buckets were evicted.
+	// A violation key has the form "violation:<ruleID>:<ip>", and the corresponding
+	// bucket key is "<ruleID>:<ip>". If the bucket is gone, the violation counter is stale.
+	l.violations.Range(func(key, _ any) bool {
+		k := key.(string)
+		// Strip "violation:" prefix to get the bucket key
+		if len(k) > 10 && k[:10] == "violation:" {
+			bucketKey := k[10:]
+			if _, exists := l.buckets.Load(bucketKey); !exists {
+				l.violations.Delete(key)
+			}
 		}
 		return true
 	})

@@ -191,8 +191,8 @@ func (bm *BillingManager) GenerateInvoice(tenantID, tenantName string, plan Bill
 	}
 
 	// Bandwidth costs (overage)
-	bandwidthGB := usage.BytesTransferred / (1024 * 1024 * 1024)
-	bandwidthOverage := bandwidthGB - pricing.IncludedBandwidthGB
+	bandwidthGB := float64(usage.BytesTransferred) / (1024 * 1024 * 1024)
+	bandwidthOverage := bandwidthGB - float64(pricing.IncludedBandwidthGB)
 	var bandwidthCost float64
 	if bandwidthOverage > 0 {
 		bandwidthCost = float64(bandwidthOverage) * pricing.PerGBBandwidthCost * pricing.OverageRate
@@ -364,5 +364,6 @@ func generateInvoiceID(tenantID string) string {
 	if len(prefix) > 8 {
 		prefix = prefix[:8]
 	}
-	return fmt.Sprintf("INV-%s-%d", prefix, time.Now().Unix())
+	now := time.Now()
+	return fmt.Sprintf("INV-%s-%d%03d", prefix, now.Unix(), now.Nanosecond()/1e6)
 }

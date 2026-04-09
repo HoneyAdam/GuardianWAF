@@ -211,9 +211,11 @@ func (v *JWTValidator) isAlgorithmAllowed(alg string) bool {
 	}
 
 	if len(v.config.Algorithms) == 0 {
-		// Default allowed algorithms.
+		// Default allowed algorithms — restricted to prevent algorithm confusion.
+		// Only RS256 and ES256 are allowed by default.
+		// Set `algorithms` in JWT config to enable additional algorithms.
 		switch alg {
-		case "RS256", "RS384", "RS512", "PS256", "PS384", "PS512", "ES256", "ES384", "ES512", "HS256", "HS384", "HS512":
+		case "RS256", "ES256":
 			return true
 		}
 		return false

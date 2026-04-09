@@ -3,6 +3,7 @@ package threatintel
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -49,10 +50,15 @@ type ThreatInfo struct {
 
 // NewFeedManager creates a new feed manager.
 func NewFeedManager(config *FeedConfig) *FeedManager {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	if config.SkipSSLVerify {
+		transport.TLSClientConfig = &tls.Config{InsecureSkipVerify: true} //nolint:gosec // user-configured per-feed option
+	}
 	return &FeedManager{
 		config: *config,
 		client: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout:   30 * time.Second,
+			Transport: transport,
 		},
 		stopCh: make(chan struct{}),
 	}

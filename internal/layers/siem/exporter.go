@@ -6,7 +6,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 )
@@ -66,13 +69,22 @@ func NewExporter(cfg *Config) *Exporter {
 
 	formatter := NewFormatter(cfg.Format, "", "", "")
 
+	// Validate endpoint URL to prevent SSRF
+	if cfg.Endpoint != "" {
+		if err := validateSIEMEndpoint(cfg.Endpoint); err != nil {
+			log.Printf("[siem] WARNING: endpoint URL validation: %v", err)
+		}
+	}
+
+	// TLS certificate verification is always enforced for SIEM connections.
+	// The SkipVerify config field is ignored to prevent MITM attacks.
 	if cfg.SkipVerify {
-		log.Printf("[siem] WARNING: TLS certificate verification is disabled — SIEM connection is vulnerable to MITM attacks")
+		log.Printf("[siem] WARNING: SkipVerify config option is ignored — TLS verification is always enforced")
 	}
 
 	transport := &http.Transport{
 		TLSClientConfig: &tls.Config{
-			InsecureSkipVerify: cfg.SkipVerify,
+			InsecureSkipVerify: false, // Always enforce TLS verification
 		},
 	}
 
@@ -295,6 +307,28 @@ func (e *Exporter) formatTextBatch(events []*Event) []byte {
 	}
 
 	return buf.Bytes()
+}
+
+// validateSIEMEndpoint checks that the SIEM endpoint URL is safe (not targeting internal networks).
+func validateSIEMEndpoint(rawURL string) error {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid URL: %w", err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("URL scheme must be http or https, got %q", u.Scheme)
+	}
+	host := u.Hostname()
+	if strings.EqualFold(host, "localhost") || strings.HasSuffix(host, ".internal") {
+		return fmt.Errorf("SIEM endpoint must not target localhost or internal hosts")
+	}
+	ip := net.ParseIP(host)
+	if ip != nil {
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() {
+			return fmt.Errorf("SIEM endpoint must not target private/loopback addresses")
+		}
+	}
+	return nil
 }
 
 // Name returns the exporter name.

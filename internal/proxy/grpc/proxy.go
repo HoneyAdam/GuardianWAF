@@ -356,19 +356,43 @@ func parseGRPCFrames(data []byte) ([][]byte, error) {
 	return messages, nil
 }
 
-// decompressGzip decompresses gzip data.
+// decompressGzip decompresses gzip data with a size limit to prevent decompression bombs.
 func decompressGzip(data []byte) ([]byte, error) {
 	reader, err := gzip.NewReader(bytes.NewReader(data))
 	if err != nil {
 		return nil, err
 	}
 	defer reader.Close()
-	return io.ReadAll(reader)
+	const maxDecompressedSize = 16 * 1024 * 1024 // 16MB limit
+	limited := io.LimitReader(reader, maxDecompressedSize+1)
+	result, err := io.ReadAll(limited)
+	if err != nil {
+		return nil, err
+	}
+	if len(result) > maxDecompressedSize {
+		return nil, fmt.Errorf("decompressed gRPC message exceeds %d bytes", maxDecompressedSize)
+	}
+	return result, nil
 }
 
-// copyHeaders copies headers from src to dst.
+// hopByHopHeaders are headers that should not be forwarded by proxies (RFC 7230 Section 6.1).
+var hopByHopHeaders = map[string]bool{
+	"Connection":          true,
+	"Keep-Alive":          true,
+	"Proxy-Authenticate":  true,
+	"Proxy-Authorization": true,
+	"Te":                  true,
+	"Trailer":             true,
+	"Transfer-Encoding":   true,
+	"Upgrade":             true,
+}
+
+// copyHeaders copies headers from src to dst, skipping hop-by-hop headers.
 func copyHeaders(dst, src http.Header) {
 	for k, vv := range src {
+		if hopByHopHeaders[k] {
+			continue
+		}
 		for _, v := range vv {
 			dst.Add(k, v)
 		}

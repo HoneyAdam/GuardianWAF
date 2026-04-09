@@ -3,6 +3,8 @@
 package proxy
 
 import (
+	"fmt"
+	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
@@ -22,7 +24,64 @@ type Target struct {
 	lastCheck   atomic.Value // stores time.Time
 }
 
-// NewTarget creates a target from a URL string and weight.
+// isPrivateOrReservedIP checks if a host resolves to a private, loopback,
+// link-local, or other reserved IP range. Used for SSRF prevention.
+func isPrivateOrReservedIP(host string) error {
+	// Strip port if present
+	h, _, err := net.SplitHostPort(host)
+	if err != nil {
+		h = host // no port
+	}
+
+	// Check if it's already an IP literal
+	ip := net.ParseIP(h)
+	if ip != nil {
+		return classifyIP(ip, host)
+	}
+
+	// Resolve hostname to IPs
+	ips, err := net.LookupIP(h)
+	if err != nil {
+		return nil // DNS resolution failed — will be caught by proxy transport
+	}
+
+	for _, addr := range ips {
+		if err := classifyIP(addr, host); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func classifyIP(ip net.IP, host string) error {
+	if ip.IsLoopback() {
+		return fmt.Errorf("target %q resolves to loopback address %s — blocked by SSRF filter", host, ip)
+	}
+	if ip.IsPrivate() {
+		return fmt.Errorf("target %q resolves to private address %s — blocked by SSRF filter", host, ip)
+	}
+	// Link-local unicast (169.254.0.0/16 for IPv4, fe80::/10 for IPv6)
+	if ip.IsLinkLocalUnicast() {
+		return fmt.Errorf("target %q resolves to link-local address %s — blocked by SSRF filter", host, ip)
+	}
+	// Link-local multicast
+	if ip.IsLinkLocalMulticast() {
+		return fmt.Errorf("target %q resolves to link-local multicast address %s — blocked by SSRF filter", host, ip)
+	}
+	// Interface-local multicast
+	if ip.IsInterfaceLocalMulticast() {
+		return fmt.Errorf("target %q resolves to interface-local multicast address %s — blocked by SSRF filter", host, ip)
+	}
+	return nil
+}
+// allowPrivateTargets is set to true in tests to allow httptest.NewServer URLs.
+var allowPrivateTargets bool
+
+// AllowPrivateTargets enables private/reserved IP targets for testing.
+func AllowPrivateTargets() {
+	allowPrivateTargets = true
+}
+
 func NewTarget(rawURL string, weight int) (*Target, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
@@ -30,6 +89,13 @@ func NewTarget(rawURL string, weight int) (*Target, error) {
 	}
 	if weight <= 0 {
 		weight = 1
+	}
+
+	// SSRF prevention: block targets resolving to private/reserved IPs
+	if !allowPrivateTargets {
+		if err := isPrivateOrReservedIP(u.Host); err != nil {
+			return nil, err
+		}
 	}
 
 	t := &Target{
@@ -45,10 +111,26 @@ func NewTarget(rawURL string, weight int) (*Target, error) {
 
 	// Build reverse proxy with sensible timeouts
 	t.proxy = httputil.NewSingleHostReverseProxy(u)
+
+	// Custom Director: set target scheme/host/path and remove incoming hop-by-hop
+	// headers that may have been injected by the client (defense-in-depth).
+	defaultDirector := t.proxy.Director
+	t.proxy.Director = func(req *http.Request) {
+		defaultDirector(req)
+		// Remove headers that should not be forwarded upstream.
+		// Go's ReverseProxy strips standard hop-by-hop headers, but clients can
+		// inject non-standard ones like X-Forwarded-Host to confuse backends.
+		req.Header.Del("X-Forwarded-Host")
+		req.Header.Del("X-Forwarded-Proto")
+	}
+
 	transport := &http.Transport{
 		MaxIdleConns:        100,
 		MaxIdleConnsPerHost: 20,
 		IdleConnTimeout:     90 * time.Second,
+		ResponseHeaderTimeout: 30 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		MaxConnsPerHost:       100,
 	}
 	t.proxy.Transport = transport
 	// Enable immediate flushing for streaming (SSE, WebSocket upgrade, chunked)

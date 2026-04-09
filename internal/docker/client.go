@@ -21,15 +21,35 @@ import (
 type Client struct {
 	socketPath string
 	hostFlag   string // --host flag for docker CLI, empty = use default context
+	tlsVerify  bool   // --tlsverify flag
+	certPath   string // --tlscertdir path for Docker TLS certs
 	cmdFunc    func(ctx context.Context, args ...string) (string, error) // overrides dockerCmd if set
 }
 
-// NewClient creates a Docker client.
+// TLSConfig holds Docker TLS connection parameters.
+type TLSConfig struct {
+	Host       string // Docker daemon host (e.g., "tcp://docker:2376")
+	CertPath   string // Path to TLS certificates (ca.pem, cert.pem, key.pem)
+	Verify     bool   // Verify server certificate
+}
+
+// NewClient creates a Docker client using a local socket.
 // socketPath is used for direct socket connections on Linux; on Windows the CLI is always used.
 func NewClient(socketPath string) *Client {
 	c := &Client{socketPath: socketPath}
 	if socketPath != "" && runtime.GOOS != "windows" {
 		c.hostFlag = "unix://" + socketPath
+	}
+	return c
+}
+
+// NewTLSClient creates a Docker client that connects to a remote daemon over TLS.
+// This avoids mounting the Docker socket, which exposes all container configs and secrets.
+func NewTLSClient(cfg TLSConfig) *Client {
+	c := &Client{
+		hostFlag:  cfg.Host,
+		tlsVerify: cfg.Verify,
+		certPath:  cfg.CertPath,
 	}
 	return c
 }
@@ -236,6 +256,12 @@ func (c *Client) StreamEvents(ctx context.Context, labelPrefix string, ch chan<-
 	if c.hostFlag != "" {
 		args = append([]string{"--host", c.hostFlag}, args...)
 	}
+	if c.tlsVerify {
+		args = append([]string{"--tlsverify"}, args...)
+	}
+	if c.certPath != "" {
+		args = append([]string{"--tlscertdir", c.certPath}, args...)
+	}
 
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	stdout, err := cmd.StdoutPipe()
@@ -272,9 +298,17 @@ func (c *Client) dockerCmd(ctx context.Context, args ...string) (string, error) 
 	if c.cmdFunc != nil {
 		return c.cmdFunc(ctx, args...)
 	}
+	baseArgs := []string{}
 	if c.hostFlag != "" {
-		args = append([]string{"--host", c.hostFlag}, args...)
+		baseArgs = append(baseArgs, "--host", c.hostFlag)
 	}
+	if c.tlsVerify {
+		baseArgs = append(baseArgs, "--tlsverify")
+	}
+	if c.certPath != "" {
+		baseArgs = append(baseArgs, "--tlscertdir", c.certPath)
+	}
+	args = append(baseArgs, args...)
 	cmd := exec.CommandContext(ctx, "docker", args...)
 	out, err := cmd.Output()
 	if err != nil {

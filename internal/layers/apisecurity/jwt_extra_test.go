@@ -84,8 +84,9 @@ func TestJWTValidate_HS256_Valid(t *testing.T) {
 	}
 
 	v, err := NewJWTValidator(JWTConfig{
-		Enabled: true,
-		Issuer:  "test-issuer",
+		Enabled:    true,
+		Issuer:     "test-issuer",
+		Algorithms: []string{"HS256"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -111,7 +112,7 @@ func TestJWTValidate_HS256_Expired(t *testing.T) {
 		ExpiresAt: time.Now().Unix() - 3600, // expired 1 hour ago
 	}
 
-	v, _ := NewJWTValidator(JWTConfig{Enabled: true})
+	v, _ := NewJWTValidator(JWTConfig{Enabled: true, Algorithms: []string{"HS256"}})
 	v.publicKey = secret
 
 	token := makeValidHS256Token(claims, secret)
@@ -131,7 +132,7 @@ func TestJWTValidate_HS256_WrongSecret(t *testing.T) {
 		ExpiresAt: time.Now().Unix() + 3600,
 	}
 
-	v, _ := NewJWTValidator(JWTConfig{Enabled: true})
+	v, _ := NewJWTValidator(JWTConfig{Enabled: true, Algorithms: []string{"HS256"}})
 	v.publicKey = wrongSecret
 
 	token := makeValidHS256Token(claims, secret)
@@ -151,7 +152,7 @@ func TestJWTValidate_WrongIssuer(t *testing.T) {
 		ExpiresAt: time.Now().Unix() + 3600,
 	}
 
-	v, _ := NewJWTValidator(JWTConfig{Enabled: true, Issuer: "expected-issuer"})
+	v, _ := NewJWTValidator(JWTConfig{Enabled: true, Issuer: "expected-issuer", Algorithms: []string{"HS256"}})
 	v.publicKey = secret
 
 	token := makeValidHS256Token(claims, secret)
@@ -171,7 +172,7 @@ func TestJWTValidate_WrongAudience(t *testing.T) {
 		ExpiresAt: time.Now().Unix() + 3600,
 	}
 
-	v, _ := NewJWTValidator(JWTConfig{Enabled: true, Audience: "expected-audience"})
+	v, _ := NewJWTValidator(JWTConfig{Enabled: true, Audience: "expected-audience", Algorithms: []string{"HS256"}})
 	v.publicKey = secret
 
 	token := makeValidHS256Token(claims, secret)
@@ -257,10 +258,16 @@ func TestHasAudience_OtherType(t *testing.T) {
 
 func TestIsAlgorithmAllowed_Default(t *testing.T) {
 	v := &JWTValidator{}
-	allowed := []string{"RS256", "RS384", "RS512", "ES256", "ES384", "ES512", "HS256", "HS384", "HS512"}
+	allowed := []string{"RS256", "ES256"}
 	for _, alg := range allowed {
 		if !v.isAlgorithmAllowed(alg) {
 			t.Errorf("algorithm %s should be allowed by default", alg)
+		}
+	}
+	notAllowed := []string{"RS384", "RS512", "ES384", "ES512", "HS256", "HS384", "HS512"}
+	for _, alg := range notAllowed {
+		if v.isAlgorithmAllowed(alg) {
+			t.Errorf("algorithm %s should NOT be allowed by default", alg)
 		}
 	}
 	if v.isAlgorithmAllowed("none") {
@@ -372,7 +379,7 @@ func TestGenerateToken_HS256(t *testing.T) {
 	}
 
 	// Validate with the same secret
-	v, _ := NewJWTValidator(JWTConfig{Enabled: true, Issuer: "test"})
+	v, _ := NewJWTValidator(JWTConfig{Enabled: true, Issuer: "test", Algorithms: []string{"HS256"}})
 	v.publicKey = secret
 
 	parsed, err := v.Validate(token)
@@ -456,7 +463,8 @@ func TestLayerProcess_JWTAuth(t *testing.T) {
 	cfg := Config{
 		Enabled: true,
 		JWT: JWTConfig{
-			Enabled: true,
+			Enabled:    true,
+			Algorithms: []string{"HS256"},
 		},
 	}
 	layer, err := NewLayer(&cfg)
@@ -613,6 +621,7 @@ func TestJWTValidate_ClockSkew(t *testing.T) {
 	v, _ := NewJWTValidator(JWTConfig{
 		Enabled:          true,
 		ClockSkewSeconds: 30, // allow 30s skew
+		Algorithms:       []string{"HS256"},
 	})
 	v.publicKey = secret
 
@@ -1076,7 +1085,7 @@ func TestJWTValidate_RS384_Valid(t *testing.T) {
 	privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
 	claims := JWTClaims{ExpiresAt: time.Now().Unix() + 3600}
 
-	v, _ := NewJWTValidator(JWTConfig{Enabled: true})
+	v, _ := NewJWTValidator(JWTConfig{Enabled: true, Algorithms: []string{"RS384"}})
 	v.publicKey = &privateKey.PublicKey
 
 	token := makeRS384Token(claims, privateKey)
@@ -1090,7 +1099,7 @@ func TestJWTValidate_RS512_Valid(t *testing.T) {
 	privateKey, _ := rsa.GenerateKey(rand.Reader, 2048)
 	claims := JWTClaims{ExpiresAt: time.Now().Unix() + 3600}
 
-	v, _ := NewJWTValidator(JWTConfig{Enabled: true})
+	v, _ := NewJWTValidator(JWTConfig{Enabled: true, Algorithms: []string{"RS512"}})
 	v.publicKey = &privateKey.PublicKey
 
 	token := makeRS512Token(claims, privateKey)
@@ -1267,7 +1276,7 @@ func TestJWTValidate_HS384_Valid(t *testing.T) {
 	secret := []byte("hs384-secret")
 	claims := JWTClaims{Subject: "hs384-user", ExpiresAt: time.Now().Unix() + 3600}
 
-	v, _ := NewJWTValidator(JWTConfig{Enabled: true})
+	v, _ := NewJWTValidator(JWTConfig{Enabled: true, Algorithms: []string{"HS384"}})
 	v.publicKey = secret
 
 	token := makeHS384Token(claims, secret)
@@ -1284,7 +1293,7 @@ func TestJWTValidate_HS512_Valid(t *testing.T) {
 	secret := []byte("hs512-secret")
 	claims := JWTClaims{Subject: "hs512-user", ExpiresAt: time.Now().Unix() + 3600}
 
-	v, _ := NewJWTValidator(JWTConfig{Enabled: true})
+	v, _ := NewJWTValidator(JWTConfig{Enabled: true, Algorithms: []string{"HS512"}})
 	v.publicKey = secret
 
 	token := makeHS512Token(claims, secret)
@@ -1474,7 +1483,7 @@ func TestValidate_WithJWKSKidLookup(t *testing.T) {
 }
 
 func TestValidate_NoVerificationKey(t *testing.T) {
-	v, _ := NewJWTValidator(JWTConfig{Enabled: true})
+	v, _ := NewJWTValidator(JWTConfig{Enabled: true, Algorithms: []string{"HS256"}})
 	// No publicKey set, no kid in header
 
 	token := makeValidHS256Token(JWTClaims{ExpiresAt: time.Now().Unix() + 3600}, []byte("secret"))
@@ -1864,7 +1873,7 @@ func TestJWTValidate_ES384_Valid(t *testing.T) {
 	sig := encodeECDSASignature(r, s)
 	token := signingInput + "." + base64.RawURLEncoding.EncodeToString(sig)
 
-	v, _ := NewJWTValidator(JWTConfig{Enabled: true})
+	v, _ := NewJWTValidator(JWTConfig{Enabled: true, Algorithms: []string{"ES384"}})
 	v.publicKey = &privateKey.PublicKey
 	_, err := v.Validate(token)
 	if err != nil {
@@ -1887,7 +1896,7 @@ func TestJWTValidate_ES512_Valid(t *testing.T) {
 	sig := encodeECDSASignature(r, s)
 	token := signingInput + "." + base64.RawURLEncoding.EncodeToString(sig)
 
-	v, _ := NewJWTValidator(JWTConfig{Enabled: true})
+	v, _ := NewJWTValidator(JWTConfig{Enabled: true, Algorithms: []string{"ES512"}})
 	v.publicKey = &privateKey.PublicKey
 	_, err := v.Validate(token)
 	if err != nil {
@@ -1935,7 +1944,7 @@ func TestJWTValidate_InvalidHeaderJSON(t *testing.T) {
 }
 
 func TestJWTValidate_InvalidPayloadEncoding(t *testing.T) {
-	v, _ := NewJWTValidator(JWTConfig{Enabled: true})
+	v, _ := NewJWTValidator(JWTConfig{Enabled: true, Algorithms: []string{"HS256"}})
 	v.publicKey = []byte("secret")
 	_, err := v.Validate("eyJhbGciOiJIUzI1NiJ9.!!!.sig")
 	if err == nil || !strings.Contains(err.Error(), "payload encoding") {
@@ -1944,7 +1953,7 @@ func TestJWTValidate_InvalidPayloadEncoding(t *testing.T) {
 }
 
 func TestJWTValidate_InvalidPayloadJSON(t *testing.T) {
-	v, _ := NewJWTValidator(JWTConfig{Enabled: true})
+	v, _ := NewJWTValidator(JWTConfig{Enabled: true, Algorithms: []string{"HS256"}})
 	v.publicKey = []byte("secret")
 	_, err := v.Validate("eyJhbGciOiJIUzI1NiJ9.aW52YWxpZA.sig")
 	if err == nil || !strings.Contains(err.Error(), "payload JSON") {
@@ -1953,7 +1962,7 @@ func TestJWTValidate_InvalidPayloadJSON(t *testing.T) {
 }
 
 func TestJWTValidate_InvalidSignatureEncoding(t *testing.T) {
-	v, _ := NewJWTValidator(JWTConfig{Enabled: true})
+	v, _ := NewJWTValidator(JWTConfig{Enabled: true, Algorithms: []string{"HS256"}})
 	v.publicKey = []byte("secret")
 	_, err := v.Validate("eyJhbGciOiJIUzI1NiJ9.e30.!!!")
 	if err == nil || !strings.Contains(err.Error(), "signature encoding") {

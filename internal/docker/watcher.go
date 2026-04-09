@@ -58,7 +58,7 @@ func (w *Watcher) SetLogger(fn func(level, msg string)) {
 // Start begins watching Docker for container changes.
 // It does an initial sync, then tries event streaming with poll fallback.
 func (w *Watcher) Start() {
-	w.logFn("WARN", "Docker socket is mounted — if GuardianWAF is compromised, attackers can read all container configs, env vars, and network topology. Consider using Docker API over TLS instead of socket mounting.")
+	w.logFn("WARN", "Docker socket is mounted — if GuardianWAF is compromised, attackers can read all container configs, env vars, and network topology. Use NewTLSClient() to connect via Docker TLS instead.")
 
 	// Initial sync
 	w.sync()
