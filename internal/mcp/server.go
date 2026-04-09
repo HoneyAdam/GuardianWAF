@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"sync"
 )
 
@@ -321,7 +322,9 @@ func (s *Server) writeResponse(resp JSONRPCResponse) {
 		return
 	}
 	data = append(data, '\n')
-	_, _ = s.writer.Write(data)
+	if _, err := s.writer.Write(data); err != nil {
+		log.Printf("[mcp] warning: failed to write response: %v", err)
+	}
 }
 
 // HandleRequestJSON processes a JSON-RPC request and returns the response.

@@ -38,7 +38,9 @@ func NewCertDiskStore(cacheDir string, client *Client, handler *HTTP01Handler) *
 
 // AddDomains registers a group of domains for certificate management.
 func (s *CertDiskStore) AddDomains(domains []string) {
+	s.mu.Lock()
 	s.domains = append(s.domains, domains)
+	s.mu.Unlock()
 }
 
 // LoadOrObtain loads a cached cert from disk, or obtains a new one via ACME.

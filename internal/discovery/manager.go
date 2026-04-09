@@ -135,6 +135,10 @@ func (m *Manager) SetEnabled(enabled bool) {
 
 	m.enabled = enabled
 	if enabled {
+		// Create fresh context since the old one may have been canceled
+		ctx, cancel := context.WithCancel(context.Background())
+		m.ctx = ctx
+		m.cancel = cancel
 		go m.run()
 	} else {
 		m.cancel()

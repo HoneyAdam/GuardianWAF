@@ -28,7 +28,12 @@ var secretHolder atomic.Value
 
 func init() {
 	secret := make([]byte, 32)
-	_, _ = rand.Read(secret)
+	if _, err := rand.Read(secret); err != nil {
+		// Fallback: hash of randomness source + timestamp as emergency secret
+		h := sha256.Sum256([]byte(fmt.Sprintf("%d-%d", time.Now().UnixNano(), len(secret))))
+		secret = h[:]
+		log.Printf("[auth] WARNING: crypto/rand failed, using fallback session secret")
+	}
 	secretHolder.Store(secret)
 }
 
