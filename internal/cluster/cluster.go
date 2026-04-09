@@ -542,8 +542,6 @@ func (c *Cluster) handleLeave(nodeID string) {
 	case c.events <- leaveEvent:
 	default:
 	}
-	return
-
 	// If leader left, start election
 	if node.IsLeader {
 		c.mu.Lock()
