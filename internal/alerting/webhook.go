@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -211,15 +212,20 @@ func (m *Manager) HandleEvent(event *engine.Event) {
 // send delivers an alert to a webhook endpoint.
 func (m *Manager) send(wc *WebhookTarget, alert *Alert) {
 	var body []byte
+	var marshalErr error
 	switch wc.Type {
 	case "slack":
-		body, _ = json.Marshal(slackPayload(alert))
+		body, marshalErr = json.Marshal(slackPayload(alert))
 	case "discord":
-		body, _ = json.Marshal(discordPayload(alert))
+		body, marshalErr = json.Marshal(discordPayload(alert))
 	case "pagerduty":
-		body, _ = json.Marshal(pagerdutyPayload(alert))
+		body, marshalErr = json.Marshal(pagerdutyPayload(alert))
 	default:
-		body, _ = json.Marshal(alert)
+		body, marshalErr = json.Marshal(alert)
+	}
+	if marshalErr != nil {
+		m.failed.Add(1)
+		return
 	}
 
 	ctx := context.Background()
@@ -276,10 +282,13 @@ func slackPayload(a *Alert) map[string]any {
 		color = "#0066ff"
 	}
 
-	findingsText := ""
+	var sb strings.Builder
 	for _, f := range a.Findings {
-		findingsText += "• " + f + "\n"
+		sb.WriteString("• ")
+		sb.WriteString(f)
+		sb.WriteByte('\n')
 	}
+	findingsText := sb.String()
 	if findingsText == "" {
 		findingsText = "No specific findings"
 	}
@@ -313,10 +322,13 @@ func discordPayload(a *Alert) map[string]any {
 		color = 0x0066ff
 	}
 
-	findingsText := ""
+	var sb strings.Builder
 	for _, f := range a.Findings {
-		findingsText += "• " + f + "\n"
+		sb.WriteString("• ")
+		sb.WriteString(f)
+		sb.WriteByte('\n')
 	}
+	findingsText := sb.String()
 	if findingsText == "" {
 		findingsText = "No specific findings"
 	}

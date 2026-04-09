@@ -409,13 +409,11 @@ func (d *Dashboard) writeEventsCSV(w http.ResponseWriter, evts []engine.Event) {
 
 	// CSV rows
 	for _, e := range evts {
-		findings := ""
+		findings := make([]string, len(e.Findings))
 		for i, f := range e.Findings {
-			if i > 0 {
-				findings += "; "
-			}
-			findings += f.DetectorName + ":" + f.Description
+			findings[i] = f.DetectorName + ":" + f.Description
 		}
+		findingsStr := strings.Join(findings, "; ")
 		line := fmt.Sprintf("%s,%s,%s,%s,%s,%s,%d,\"%s\",\"%s\"\n",
 			e.Timestamp.Format(time.RFC3339),
 			e.ID,
@@ -425,7 +423,7 @@ func (d *Dashboard) writeEventsCSV(w http.ResponseWriter, evts []engine.Event) {
 			e.Action.String(),
 			e.Score,
 			escapeCSV(e.UserAgent),
-			escapeCSV(findings),
+			escapeCSV(findingsStr),
 		)
 		_, _ = w.Write([]byte(line))
 	}

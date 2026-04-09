@@ -174,7 +174,7 @@ func (e *Engine) AnalyzeTrend(metric string, labels map[string]string, from, to 
 	if ts == nil || len(ts.Points) < 2 {
 		return TrendAnalysis{
 			Metric: metric,
-			Period: from.Format("YYYY-MM-DD") + " to " + to.Format("YYYY-MM-DD"),
+			Period: from.Format("2006-01-02") + " to " + to.Format("2006-01-02"),
 		}
 	}
 
@@ -220,7 +220,7 @@ func (e *Engine) AnalyzeTrend(metric string, labels map[string]string, from, to 
 
 	return TrendAnalysis{
 		Metric:     metric,
-		Period:     from.Format("YYYY-MM-DD") + " to " + to.Format("YYYY-MM-DD"),
+		Period:     from.Format("2006-01-02") + " to " + to.Format("2006-01-02"),
 		DataPoints: dataPoints,
 		Slope:      slope,
 		Direction:  direction,

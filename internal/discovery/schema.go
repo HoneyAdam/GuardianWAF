@@ -192,7 +192,7 @@ func (g *SchemaGenerator) generateDescription(endpoint *Endpoint) string {
 	desc := fmt.Sprintf("Discovered endpoint: %s\n\n", endpoint.Pattern)
 	desc += fmt.Sprintf("- Methods: %v\n", endpoint.Methods)
 	desc += fmt.Sprintf("- Total requests: %d\n", endpoint.Count)
-	desc += fmt.Sprintf("- First seen: %s\n", endpoint.FirstSeen.Format("YYYY-MM-DD"))
+	desc += fmt.Sprintf("- First seen: %s\n", endpoint.FirstSeen.Format("2006-01-02"))
 
 	if len(endpoint.Tags) > 0 {
 		desc += fmt.Sprintf("\nTags: %v", endpoint.Tags)
