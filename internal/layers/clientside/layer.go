@@ -51,12 +51,17 @@ func (l *Layer) Name() string { return "clientside" }
 
 // SetEnabled enables or disables the layer.
 func (l *Layer) SetEnabled(enabled bool) {
+	l.mu.Lock()
 	l.enabled = enabled
+	l.mu.Unlock()
 }
 
 // Process analyzes requests for client-side threats and registers response hooks.
 func (l *Layer) Process(ctx *engine.RequestContext) engine.LayerResult {
-	if !l.enabled {
+	l.mu.RLock()
+	enabled := l.enabled
+	l.mu.RUnlock()
+	if !enabled {
 		return engine.LayerResult{Action: engine.ActionPass}
 	}
 	if ctx.TenantWAFConfig != nil && !ctx.TenantWAFConfig.ClientSide.Enabled {

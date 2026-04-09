@@ -396,6 +396,10 @@ func (c *Client) saveNonce(resp *http.Response) {
 	if n := resp.Header.Get("Replay-Nonce"); n != "" {
 		c.mu.Lock()
 		c.nonces = append(c.nonces, n)
+		// Cap nonce pool to prevent unbounded growth
+		if len(c.nonces) > 32 {
+			c.nonces = c.nonces[len(c.nonces)-32:]
+		}
 		c.mu.Unlock()
 	}
 }
@@ -492,6 +496,9 @@ func (c *Client) jwkThumbprint() (string, error) {
 // --- CSR ---
 
 func createCSR(key crypto.Signer, domains []string) ([]byte, error) {
+	if len(domains) == 0 {
+		return nil, fmt.Errorf("no domains provided for CSR")
+	}
 	template := &x509.CertificateRequest{
 		Subject:  pkix.Name{CommonName: domains[0]},
 		DNSNames: domains,

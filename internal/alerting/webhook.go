@@ -186,6 +186,19 @@ func (m *Manager) HandleEvent(event *engine.Event) {
 		go m.send(&wh.config, &alert)
 	}
 
+	// Prune stale cooldown entries per webhook (keep last 1000)
+	for i := range whooks {
+		wh := &whooks[i]
+		count := 0
+		wh.lastFire.Range(func(key, _ any) bool {
+			count++
+			if count > 1000 {
+				wh.lastFire.Delete(key)
+			}
+			return true
+		})
+	}
+
 	// Process email alerts
 	for _, et := range emails {
 		cfg := et.config

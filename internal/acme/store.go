@@ -43,6 +43,9 @@ func (s *CertDiskStore) AddDomains(domains []string) {
 
 // LoadOrObtain loads a cached cert from disk, or obtains a new one via ACME.
 func (s *CertDiskStore) LoadOrObtain(domains []string) (*tls.Certificate, error) {
+	if len(domains) == 0 {
+		return nil, fmt.Errorf("no domains provided")
+	}
 	primary := domains[0]
 
 	// Try loading from cache
@@ -55,6 +58,9 @@ func (s *CertDiskStore) LoadOrObtain(domains []string) (*tls.Certificate, error)
 			// Parse leaf for expiry check
 			if cert.Leaf == nil && len(cert.Certificate) > 0 {
 				cert.Leaf, _ = x509.ParseCertificate(cert.Certificate[0])
+				if cert.Leaf == nil {
+					return nil, fmt.Errorf("failed to parse certificate leaf for %s", primary)
+				}
 			}
 			// Use cached cert if not expired
 			if cert.Leaf == nil || time.Now().Before(cert.Leaf.NotAfter) {
@@ -203,12 +209,17 @@ func (s *CertDiskStore) storeCert(domains []string, cert *tls.Certificate) {
 
 func (s *CertDiskStore) renewIfNeeded() {
 	for _, domains := range s.domains {
+		if len(domains) == 0 {
+			continue
+		}
 		primary := domains[0]
 		certFile := s.certPath(primary)
 
 		if !fileExists(certFile) {
 			// No cert yet, obtain
-			_, _ = s.LoadOrObtain(domains)
+			if _, err := s.LoadOrObtain(domains); err != nil {
+				fmt.Printf("[acme] warning: failed to obtain cert for %s: %v\n", primary, err)
+			}
 			continue
 		}
 

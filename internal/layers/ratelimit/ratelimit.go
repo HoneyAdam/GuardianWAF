@@ -85,6 +85,19 @@ func (l *Layer) RemoveRule(id string) bool {
 	return false
 }
 
+// Cleanup removes stale token buckets that haven't been used recently.
+// Should be called periodically (e.g., every 5 minutes) to prevent unbounded memory growth.
+func (l *Layer) Cleanup(maxAge time.Duration) {
+	now := time.Now()
+	l.buckets.Range(func(key, value any) bool {
+		b, ok := value.(*TokenBucket)
+		if !ok || now.Sub(b.lastAccess) > maxAge {
+			l.buckets.Delete(key)
+		}
+		return true
+	})
+}
+
 // Process checks the request against all rate limit rules.
 func (l *Layer) Process(ctx *engine.RequestContext) engine.LayerResult {
 	// Check if rate limiting is enabled (tenant config takes precedence)

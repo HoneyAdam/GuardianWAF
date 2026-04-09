@@ -45,6 +45,7 @@ type JWTValidator struct {
 	publicKey crypto.PublicKey
 	jwksCache *sync.Map // kid -> crypto.PublicKey
 	client    *http.Client
+	stopCh    chan struct{}
 }
 
 // JWTClaims represents the standard JWT claims.
@@ -66,6 +67,7 @@ func NewJWTValidator(cfg JWTConfig) (*JWTValidator, error) {
 		client: &http.Client{
 			Timeout: 10 * time.Second,
 		},
+		stopCh: make(chan struct{}),
 	}
 
 	// Load public key if provided directly
@@ -433,8 +435,24 @@ func (v *JWTValidator) fetchJWKS() {
 func (v *JWTValidator) refreshJWKSPeriodically(interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
-	for range ticker.C {
-		v.fetchJWKS()
+	for {
+		select {
+		case <-v.stopCh:
+			return
+		case <-ticker.C:
+			v.fetchJWKS()
+		}
+	}
+}
+
+// Stop stops the JWKS refresh goroutine. After calling Stop, the validator
+// should not be used for token validation (cached keys remain available).
+func (v *JWTValidator) Stop() {
+	select {
+	case <-v.stopCh:
+		// Already closed
+	default:
+		close(v.stopCh)
 	}
 }
 
