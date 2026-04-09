@@ -1,6 +1,7 @@
 package crs
 
 import (
+	"regexp"
 	"testing"
 
 	"github.com/guardianwaf/guardianwaf/internal/engine"
@@ -487,4 +488,26 @@ func TestTransform(t *testing.T) {
 			}
 		})
 	}
+}
+
+// BenchmarkRegexCache verifies that cached regex lookup is significantly
+// faster than recompilation.
+func BenchmarkRegexCache(b *testing.B) {
+	pattern := `^(?:GET|HEAD|POST|PUT|DELETE|OPTIONS|PATCH)$`
+	b.Run("cached", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			re, _ := getCachedRegex(pattern)
+			re.MatchString("GET")
+		}
+	})
+}
+
+func BenchmarkRegexNoCache(b *testing.B) {
+	pattern := `^(?:GET|HEAD|POST|PUT|DELETE|OPTIONS|PATCH)$`
+	b.Run("compile", func(b *testing.B) {
+		for i := 0; i < b.N; i++ {
+			re, _ := regexp.Compile(pattern)
+			re.MatchString("GET")
+		}
+	})
 }
