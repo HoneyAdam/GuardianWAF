@@ -96,46 +96,50 @@ func (t *AttemptTracker) RecordAttempt(attempt *LoginAttempt) {
 	ipRec.Attempts = append(ipRec.Attempts, now)
 	ipRec.mu.Unlock()
 
-	// Record email attempt
+	// Record email attempt (with size cap)
 	if attempt.Email != "" {
-		emailRec := t.emailAttempts[attempt.Email]
-		if emailRec == nil {
-			emailRec = &AttemptRecord{Attempts: []time.Time{}}
-			t.emailAttempts[attempt.Email] = emailRec
+		if t.maxEntries <= 0 || len(t.emailAttempts) < t.maxEntries || t.emailAttempts[attempt.Email] != nil {
+			emailRec := t.emailAttempts[attempt.Email]
+			if emailRec == nil {
+				emailRec = &AttemptRecord{Attempts: []time.Time{}}
+				t.emailAttempts[attempt.Email] = emailRec
+			}
+			emailRec.mu.Lock()
+			emailRec.Attempts = append(emailRec.Attempts, now)
+			emailRec.mu.Unlock()
 		}
-		emailRec.mu.Lock()
-		emailRec.Attempts = append(emailRec.Attempts, now)
-		emailRec.mu.Unlock()
 
-		// Track IP->Email mapping for credential stuffing
+		// Track IP->Email mapping for credential stuffing (capped by ipAttempts presence)
 		if t.ipToEmails[ip] == nil {
 			t.ipToEmails[ip] = make(map[string]bool)
 		}
 		t.ipToEmails[ip][attempt.Email] = true
 
-		// Track Email->IP mapping
+		// Track Email->IP mapping (capped by emailAttempts presence)
 		if t.emailToIPs[attempt.Email] == nil {
 			t.emailToIPs[attempt.Email] = make(map[string]bool)
 		}
 		t.emailToIPs[attempt.Email][ip] = true
 	}
 
-	// Record password hash for spray detection
+	// Record password hash for spray detection (with size cap)
 	if attempt.Password != "" {
 		hash := hashPassword(attempt.Password)
-		pwRec := t.passwordHashes[hash]
-		if pwRec == nil {
-			pwRec = &PasswordRecord{
-				FirstSeen: now,
-				SourceIPs: make(map[string]bool),
+		if t.maxEntries <= 0 || len(t.passwordHashes) < t.maxEntries || t.passwordHashes[hash] != nil {
+			pwRec := t.passwordHashes[hash]
+			if pwRec == nil {
+				pwRec = &PasswordRecord{
+					FirstSeen: now,
+					SourceIPs: make(map[string]bool),
+				}
+				t.passwordHashes[hash] = pwRec
 			}
-			t.passwordHashes[hash] = pwRec
+			pwRec.mu.Lock()
+			pwRec.Count++
+			pwRec.LastSeen = now
+			pwRec.SourceIPs[ip] = true
+			pwRec.mu.Unlock()
 		}
-		pwRec.mu.Lock()
-		pwRec.Count++
-		pwRec.LastSeen = now
-		pwRec.SourceIPs[ip] = true
-		pwRec.mu.Unlock()
 	}
 }
 
@@ -337,6 +341,20 @@ func (t *AttemptTracker) Cleanup(maxAge time.Duration) {
 			delete(t.passwordHashes, hash)
 		}
 		rec.mu.Unlock()
+	}
+
+	// Cleanup ipToEmails — remove entries for IPs that were evicted
+	for ip := range t.ipToEmails {
+		if _, exists := t.ipAttempts[ip]; !exists {
+			delete(t.ipToEmails, ip)
+		}
+	}
+
+	// Cleanup emailToIPs — remove entries for emails that were evicted
+	for email := range t.emailToIPs {
+		if _, exists := t.emailAttempts[email]; !exists {
+			delete(t.emailToIPs, email)
+		}
 	}
 }
 

@@ -407,14 +407,22 @@ func extractQueries(req *http.Request) ([]string, error) {
 }
 
 // calculateDepth calculates the maximum depth of a GraphQL query.
+// It resolves fragment spreads to prevent depth limit bypass via fragments.
 func calculateDepth(ast *AST) int {
 	if ast == nil || ast.Document == nil {
 		return 0
 	}
 
+	// Build fragment lookup table
+	fragmentDefs := make(map[string]Fragment, len(ast.Document.Fragments))
+	for _, f := range ast.Document.Fragments {
+		fragmentDefs[f.Name] = f
+	}
+
 	maxDepth := 0
 	for _, op := range ast.Document.Operations {
-		depth := calculateSelectionDepth(op.SelectionSet, 1)
+		visited := make(map[string]bool)
+		depth := calculateSelectionDepthWithFragments(op.SelectionSet, 1, fragmentDefs, visited)
 		if depth > maxDepth {
 			maxDepth = depth
 		}
@@ -423,19 +431,52 @@ func calculateDepth(ast *AST) int {
 }
 
 // calculateSelectionDepth recursively calculates selection depth.
+// It follows inline fragments and fragment spreads so that depth limits
+// cannot be bypassed by hiding nesting inside named fragments.
 func calculateSelectionDepth(selections []Selection, currentDepth int) int {
+	return calculateSelectionDepthWithFragments(selections, currentDepth, nil, nil)
+}
+
+// calculateSelectionDepthWithFragments does the actual depth walk.
+// fragmentDefs is the lookup table; visited prevents infinite recursion on cyclic spreads.
+func calculateSelectionDepthWithFragments(selections []Selection, currentDepth int, fragmentDefs map[string]Fragment, visited map[string]bool) int {
 	if len(selections) == 0 {
 		return currentDepth
 	}
 
 	maxDepth := currentDepth
 	for _, sel := range selections {
-		if field, ok := sel.(Field); ok {
-			if len(field.SelectionSet) > 0 {
-				depth := calculateSelectionDepth(field.SelectionSet, currentDepth+1)
+		switch s := sel.(type) {
+		case Field:
+			if len(s.SelectionSet) > 0 {
+				depth := calculateSelectionDepthWithFragments(s.SelectionSet, currentDepth+1, fragmentDefs, visited)
 				if depth > maxDepth {
 					maxDepth = depth
 				}
+			}
+		case InlineFragment:
+			if len(s.SelectionSet) > 0 {
+				depth := calculateSelectionDepthWithFragments(s.SelectionSet, currentDepth, fragmentDefs, visited)
+				if depth > maxDepth {
+					maxDepth = depth
+				}
+			}
+		case FragmentSpread:
+			if fragmentDefs == nil || visited == nil {
+				continue
+			}
+			if visited[s.Name] {
+				continue // prevent infinite recursion on cyclic fragments
+			}
+			frag, ok := fragmentDefs[s.Name]
+			if !ok {
+				continue
+			}
+			visited[s.Name] = true
+			depth := calculateSelectionDepthWithFragments(frag.SelectionSet, currentDepth, fragmentDefs, visited)
+			delete(visited, s.Name) // allow same fragment at different branches
+			if depth > maxDepth {
+				maxDepth = depth
 			}
 		}
 	}

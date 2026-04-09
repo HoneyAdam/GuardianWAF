@@ -667,6 +667,18 @@ func boolStr(b bool) string {
 	return "no"
 }
 
+// sanitizeLogField strips control characters (0x00-0x1F, 0x7F) from a string
+// to prevent log injection via ANSI escape sequences or other control chars
+// in user-controlled fields (path, user-agent, etc.).
+func sanitizeLogField(s string) string {
+	return strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7F {
+			return -1 // drop control characters
+		}
+		return r
+	}, s)
+}
+
 // generateSecurePassword creates a random 16-character password.
 func generateSecurePassword() string {
 	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
@@ -774,7 +786,7 @@ func cmdServe(args []string) {
 					entry.UserAgent, entry.Findings)
 			} else {
 				fmt.Fprintf(os.Stdout, "%s %s %s %s %d %s score=%d dur=%sus findings=%d\n",
-					entry.Timestamp, entry.ClientIP, entry.Method, entry.Path,
+					entry.Timestamp, sanitizeLogField(entry.ClientIP), entry.Method, sanitizeLogField(entry.Path),
 					entry.StatusCode, entry.Action, entry.Score, entry.Duration, entry.Findings)
 			}
 		})
@@ -958,7 +970,12 @@ func cmdServe(args []string) {
 			if idx := strings.LastIndex(host, ":"); idx > 0 {
 				host = host[:idx]
 			}
-			target := "https://" + host + r.RequestURI
+			uri := r.URL.RequestURI()
+			// Prevent open redirect via protocol-relative URLs (//evil.com)
+			if strings.HasPrefix(uri, "//") {
+				uri = "/" + strings.TrimLeft(uri, "/")
+			}
+			target := "https://" + host + uri
 			http.Redirect(w, r, target, http.StatusMovedPermanently)
 		})
 	}
@@ -1177,6 +1194,9 @@ func cmdServe(args []string) {
 	// 10b. Start AI analyzer if enabled
 	if cfg.WAF.AIAnalysis.Enabled {
 		aiStore := ai.NewStore(cfg.WAF.AIAnalysis.StorePath)
+		if cfg.Dashboard.APIKey != "" {
+			aiStore.SetEncryptionKey(cfg.Dashboard.APIKey)
+		}
 		aiAnalyzer = ai.NewAnalyzer(ai.AnalyzerConfig{
 			Enabled:          true,
 			BatchSize:        cfg.WAF.AIAnalysis.BatchSize,
@@ -1528,7 +1548,7 @@ func cmdSidecar(args []string) {
 					entry.UserAgent, entry.Findings)
 			} else {
 				fmt.Fprintf(os.Stdout, "%s %s %s %s %d %s score=%d dur=%sus findings=%d\n",
-					entry.Timestamp, entry.ClientIP, entry.Method, entry.Path,
+					entry.Timestamp, sanitizeLogField(entry.ClientIP), entry.Method, sanitizeLogField(entry.Path),
 					entry.StatusCode, entry.Action, entry.Score, entry.Duration, entry.Findings)
 			}
 		})

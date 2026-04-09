@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -52,6 +53,7 @@ type Config struct {
 	HeartbeatTimeout  time.Duration `yaml:"heartbeat_timeout"`
 	LeaderElectionTimeout time.Duration `yaml:"leader_election_timeout"`
 	MaxNodes       int           `yaml:"max_nodes"`
+	AuthSecret     string        `yaml:"auth_secret"` // shared secret for cluster API authentication
 }
 
 // DefaultConfig returns default cluster config.
@@ -441,7 +443,16 @@ func (c *Cluster) sendMessage(node *Node, msg *Message) error {
 		return err
 	}
 
-	resp, err := c.httpClient.Post(url, "application/json", bytes.NewReader(data))
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(data))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if c.config.AuthSecret != "" {
+		req.Header.Set("X-Cluster-Auth", c.config.AuthSecret)
+	}
+
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -470,7 +481,16 @@ func (c *Cluster) joinViaSeed(seed string) error {
 
 	data, _ := json.Marshal(c.localNode)
 
-	resp, err := c.httpClient.Post(url, "application/json", bytes.NewReader(data))
+	req, reqErr := http.NewRequest(http.MethodPost, url, bytes.NewReader(data))
+	if reqErr != nil {
+		return reqErr
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if c.config.AuthSecret != "" {
+		req.Header.Set("X-Cluster-Auth", c.config.AuthSecret)
+	}
+
+	resp, err := c.httpClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -698,8 +718,12 @@ func (c *Cluster) startHTTPServer() {
 
 	addr := fmt.Sprintf("%s:%d", c.config.BindAddr, c.config.BindPort)
 	c.httpServer = &http.Server{
-		Addr:    addr,
-		Handler: mux,
+		Addr:              addr,
+		Handler:           mux,
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		IdleTimeout:       60 * time.Second,
 	}
 
 	go func() {
@@ -709,17 +733,42 @@ func (c *Cluster) startHTTPServer() {
 	}()
 }
 
+// authenticateCluster validates the X-Cluster-Auth header using constant-time comparison.
+func (c *Cluster) authenticateCluster(r *http.Request) bool {
+	if c.config.AuthSecret == "" {
+		return true // no secret configured, allow (backward-compatible)
+	}
+	auth := r.Header.Get("X-Cluster-Auth")
+	return subtle.ConstantTimeCompare([]byte(auth), []byte(c.config.AuthSecret)) == 1
+}
+
 // HTTP handlers
 func (c *Cluster) handleJoinHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !c.authenticateCluster(r) {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1MB max
 	var node Node
 	if err := json.NewDecoder(r.Body).Decode(&node); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
+	}
+
+	// Enforce max nodes
+	if c.config.MaxNodes > 0 {
+		c.mu.RLock()
+		nodeCount := len(c.nodes)
+		c.mu.RUnlock()
+		if nodeCount >= c.config.MaxNodes {
+			http.Error(w, "cluster full", http.StatusServiceUnavailable)
+			return
+		}
 	}
 
 	c.handleJoin(&node)
@@ -731,10 +780,15 @@ func (c *Cluster) handleMessageHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !c.authenticateCluster(r) {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1MB max
 	var msg Message
 	if err := json.NewDecoder(r.Body).Decode(&msg); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, "invalid request", http.StatusBadRequest)
 		return
 	}
 
@@ -764,6 +818,10 @@ func (c *Cluster) handleNodesHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	if !c.authenticateCluster(r) {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
 
 	nodes := c.GetNodes()
 	w.Header().Set("Content-Type", "application/json")
@@ -774,6 +832,10 @@ func (c *Cluster) handleNodesHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (c *Cluster) handleHealthHTTP(w http.ResponseWriter, r *http.Request) {
+	if !c.authenticateCluster(r) {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]any{
 		"status":    c.state.Load().(NodeState),
@@ -828,8 +890,12 @@ func (c *Cluster) registerDefaultHandlers() {
 		if err := json.Unmarshal(msg.Payload, &state); err != nil {
 			return err
 		}
+		// Copy fields into existing object rather than replacing pointer,
+		// to avoid unlocking a mutex that was never locked.
 		c.stateSync.mu.Lock()
-		c.stateSync = &state
+		c.stateSync.IPBans = state.IPBans
+		c.stateSync.RateLimits = state.RateLimits
+		c.stateSync.ConfigHash = state.ConfigHash
 		c.stateSync.mu.Unlock()
 		return nil
 	}
