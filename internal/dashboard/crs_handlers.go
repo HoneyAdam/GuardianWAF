@@ -45,17 +45,27 @@ func (h *CRSHandler) handleRules(w http.ResponseWriter, r *http.Request) {
 	phase := r.URL.Query().Get("phase")
 	severity := r.URL.Query().Get("severity")
 
+	// Parse phase filter once before the loop
+	var phaseFilter int
+	hasPhase := phase != ""
+	if hasPhase {
+		p, pErr := strconv.Atoi(phase)
+		if pErr != nil {
+			// Invalid phase filter — ignore it
+			hasPhase = false
+		} else {
+			phaseFilter = p
+		}
+	}
+
 	// Build response
 	rules := crsLayer.GetAllRules()
 	var filtered []map[string]any
 
 	for _, rule := range rules {
 		// Filter by phase
-		if phase != "" {
-			p, _ := strconv.Atoi(phase)
-			if rule.Phase != p {
-				continue
-			}
+		if hasPhase && rule.Phase != phaseFilter {
+			continue
 		}
 
 		// Filter by severity

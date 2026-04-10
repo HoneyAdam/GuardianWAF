@@ -155,11 +155,15 @@ func (h *Handler) listClusters(w http.ResponseWriter, r *http.Request) {
 	// Convert to serializable format (avoid copying mutex)
 	result := make([]map[string]any, len(clusters))
 	for i, c := range clusters {
+		c.mu.RLock()
+		nodes := make([]string, len(c.Nodes))
+		copy(nodes, c.Nodes)
+		c.mu.RUnlock()
 		result[i] = map[string]any{
 			"id":          c.ID,
 			"name":        c.Name,
 			"description": c.Description,
-			"nodes":       c.Nodes,
+			"nodes":       nodes,
 			"sync_scope":  c.SyncScope.String(),
 			"created_at":  c.CreatedAt,
 		}
@@ -249,12 +253,17 @@ func (h *Handler) getCluster(w http.ResponseWriter, r *http.Request, clusterID s
 		return
 	}
 
+	cluster.mu.RLock()
+	nodes := make([]string, len(cluster.Nodes))
+	copy(nodes, cluster.Nodes)
+	cluster.mu.RUnlock()
+
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]any{
 		"id":          cluster.ID,
 		"name":        cluster.Name,
 		"description": cluster.Description,
-		"nodes":       cluster.Nodes,
+		"nodes":       nodes,
 		"sync_scope":  cluster.SyncScope.String(),
 		"created_at":  cluster.CreatedAt,
 	}); err != nil {

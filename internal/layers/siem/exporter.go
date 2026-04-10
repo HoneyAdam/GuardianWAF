@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -116,7 +117,12 @@ func (e *Exporter) Start() {
 
 // Stop stops the exporter.
 func (e *Exporter) Stop() {
-	close(e.stopChan)
+	select {
+	case <-e.stopChan:
+		return
+	default:
+		close(e.stopChan)
+	}
 	e.wg.Wait()
 }
 
@@ -241,15 +247,22 @@ func (e *Exporter) sendBatch(events []*Event) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 		return fmt.Errorf("SIEM returned error: %s", resp.Status)
 	}
+
+	_, _ = io.Copy(io.Discard, resp.Body)
 
 	return nil
 }
 
 // formatJSONBatch formats events as JSON array.
 func (e *Exporter) formatJSONBatch(events []*Event) []byte {
-	data, _ := json.Marshal(events)
+	data, err := json.Marshal(events)
+	if err != nil {
+		log.Printf("[siem] failed to marshal JSON batch: %v", err)
+		return nil
+	}
 	return data
 }
 
@@ -266,7 +279,10 @@ func (e *Exporter) formatSplunkBatch(events []*Event) []byte {
 			"event":      event,
 		}
 
-		data, _ := json.Marshal(splunkEvent)
+		data, err := json.Marshal(splunkEvent)
+		if err != nil {
+			continue
+		}
 		buf.Write(data)
 		buf.WriteByte('\n')
 	}
@@ -286,12 +302,18 @@ func (e *Exporter) formatElasticBatch(events []*Event) []byte {
 			},
 		}
 
-		indexData, _ := json.Marshal(index)
+		indexData, err := json.Marshal(index)
+		if err != nil {
+			continue
+		}
 		buf.Write(indexData)
 		buf.WriteByte('\n')
 
 		// Event data
-		eventData, _ := json.Marshal(event)
+		eventData, err := json.Marshal(event)
+		if err != nil {
+			continue
+		}
 		buf.Write(eventData)
 		buf.WriteByte('\n')
 	}

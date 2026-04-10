@@ -2,6 +2,7 @@ package virtualpatch
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"regexp"
 	"strings"
@@ -55,7 +56,9 @@ func NewLayer(config *Config) *Layer {
 	if config.AutoUpdate {
 		layer.nvdClient = NewNVDClient("")
 		if config.NVDFeedURL != "" {
-			layer.nvdClient.SetBaseURL(config.NVDFeedURL)
+			if err := layer.nvdClient.SetBaseURL(config.NVDFeedURL); err != nil {
+				log.Printf("[virtualpatch] WARNING: NVD feed URL rejected: %v", err)
+			}
 		}
 		layer.stopUpdate = make(chan struct{})
 		layer.startAutoUpdate()
@@ -210,7 +213,12 @@ func extractPatternsFromDescription(desc string) []PatchPattern {
 // Stop stops the auto-update goroutine.
 func (l *Layer) Stop() {
 	if l.stopUpdate != nil {
-		close(l.stopUpdate)
+		select {
+		case <-l.stopUpdate:
+			return
+		default:
+			close(l.stopUpdate)
+		}
 		l.updateWg.Wait()
 	}
 }
@@ -255,6 +263,8 @@ func (l *Layer) Process(ctx *engine.RequestContext) engine.LayerResult {
 		return engine.LayerResult{Action: engine.ActionPass}
 	}
 
+	start := time.Now()
+
 	// Get all active patches
 	patches := l.database.GetActivePatches()
 
@@ -294,6 +304,7 @@ func (l *Layer) Process(ctx *engine.RequestContext) engine.LayerResult {
 					Action:   engine.ActionBlock,
 					Findings: findings,
 					Score:    totalScore,
+					Duration: time.Since(start),
 				}
 			}
 		}
@@ -305,6 +316,7 @@ func (l *Layer) Process(ctx *engine.RequestContext) engine.LayerResult {
 			Action:   engine.ActionBlock,
 			Findings: findings,
 			Score:    totalScore,
+			Duration: time.Since(start),
 		}
 	}
 
@@ -314,11 +326,13 @@ func (l *Layer) Process(ctx *engine.RequestContext) engine.LayerResult {
 			Action:   engine.ActionLog,
 			Findings: findings,
 			Score:    totalScore,
+			Duration: time.Since(start),
 		}
 	}
 
 	return engine.LayerResult{
-		Action: engine.ActionPass,
+		Action:   engine.ActionPass,
+		Duration: time.Since(start),
 	}
 }
 
@@ -451,7 +465,9 @@ func (l *Layer) matchRegex(value, pattern string) bool {
 		}
 
 		l.mu.Lock()
-		l.compiledPatterns[pattern] = compiled
+		if len(l.compiledPatterns) < 10000 {
+			l.compiledPatterns[pattern] = compiled
+		}
 		l.mu.Unlock()
 		re = compiled
 	}
@@ -477,9 +493,9 @@ func (l *Layer) recordHit(patchID string) {
 
 	patch := l.database.GetPatch(patchID)
 	if patch != nil {
-		patch.Hits++
-		patch.LastHit = &time.Time{}
-		*patch.LastHit = time.Now()
+		atomic.AddInt64(&patch.Hits, 1)
+		now := time.Now()
+		patch.LastHit = &now
 	}
 }
 

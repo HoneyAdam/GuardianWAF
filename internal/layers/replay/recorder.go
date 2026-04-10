@@ -66,6 +66,7 @@ type Recorder struct {
 	buffer      *bufio.Writer
 	stopCh      chan struct{}
 	closed      bool
+	wg          sync.WaitGroup
 }
 
 // RecordedRequest represents a captured HTTP request.
@@ -109,6 +110,7 @@ func NewRecorder(cfg *Config) (*Recorder, error) {
 	}
 
 	// Start cleanup goroutine
+	r.wg.Add(1)
 	go r.cleanupRoutine()
 
 	return r, nil
@@ -294,7 +296,7 @@ func (r *Recorder) cleanupOldFiles() {
 			continue
 		}
 		name := entry.Name()
-		if len(name) < 8 {
+		if len(name) < 17 {
 			continue
 		}
 		date := name[9:17] // requests-YYYYMMDD-XXX.log
@@ -330,6 +332,7 @@ func (r *Recorder) cleanupOldFiles() {
 
 // cleanupRoutine periodically cleans up old files.
 func (r *Recorder) cleanupRoutine() {
+	defer r.wg.Done()
 	ticker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()
 
@@ -346,13 +349,18 @@ func (r *Recorder) cleanupRoutine() {
 // Close stops the recorder and closes the current file.
 func (r *Recorder) Close() error {
 	r.mu.Lock()
-	defer r.mu.Unlock()
-
 	if r.closed {
+		r.mu.Unlock()
 		return nil
 	}
 	r.closed = true
+	r.mu.Unlock()
+
 	close(r.stopCh)
+	r.wg.Wait()
+
+	r.mu.Lock()
+	defer r.mu.Unlock()
 
 	if r.buffer != nil {
 		r.buffer.Flush()

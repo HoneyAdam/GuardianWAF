@@ -146,7 +146,7 @@ func (d *Dashboard) handleAIHistory(w http.ResponseWriter, r *http.Request) {
 	n := 20
 	if v := r.URL.Query().Get("limit"); v != "" {
 		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
-			n = parsed
+			n = min(parsed, 1000)
 		}
 	}
 
@@ -191,7 +191,7 @@ func (d *Dashboard) handleAIAnalyze(w http.ResponseWriter, r *http.Request) {
 	n := 20
 	if v := r.URL.Query().Get("limit"); v != "" {
 		if parsed, err := strconv.Atoi(v); err == nil && parsed > 0 {
-			n = parsed
+			n = min(parsed, 1000)
 		}
 	}
 

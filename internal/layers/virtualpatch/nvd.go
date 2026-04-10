@@ -4,8 +4,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
+	"net"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 )
@@ -30,10 +33,38 @@ func NewNVDClient(apiKey string) *NVDClient {
 }
 
 // SetBaseURL sets a custom base URL for the NVD API.
-func (c *NVDClient) SetBaseURL(baseURL string) {
+// Returns an error if the URL targets a private/loopback address (SSRF protection).
+func (c *NVDClient) SetBaseURL(baseURL string) error {
+	if err := validateURLNotPrivate(baseURL); err != nil {
+		return fmt.Errorf("base URL rejected: %w", err)
+	}
+	if strings.HasPrefix(baseURL, "http://") {
+		log.Printf("[virtualpatch] WARNING: NVD base URL is not HTTPS: %s", baseURL)
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.baseURL = baseURL
+	return nil
+}
+
+// validateURLNotPrivate checks that a URL does not resolve to a private,
+// loopback, or link-local IP address (SSRF prevention).
+func validateURLNotPrivate(rawURL string) error {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid URL: %w", err)
+	}
+	host := u.Hostname()
+	if host == "localhost" || strings.HasSuffix(host, ".internal") || strings.HasSuffix(host, ".local") {
+		return fmt.Errorf("must not target localhost or internal hosts")
+	}
+	ip := net.ParseIP(host)
+	if ip != nil {
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() {
+			return fmt.Errorf("must not target private/loopback/link-local addresses")
+		}
+	}
+	return nil
 }
 
 // NVDResponse represents the NVD API response.
@@ -233,6 +264,7 @@ func (c *NVDClient) Search(opts SearchOptions) (*NVDResponse, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
 
@@ -240,6 +272,7 @@ func (c *NVDClient) Search(opts SearchOptions) (*NVDResponse, error) {
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 50<<20)).Decode(&result); err != nil {
 		return nil, fmt.Errorf("decoding response: %w", err)
 	}
+	_, _ = io.Copy(io.Discard, resp.Body)
 
 	return &result, nil
 }
@@ -277,6 +310,7 @@ func (c *NVDClient) GetCVE(cveID string) (*CVEEntry, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 		return nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
 
@@ -284,6 +318,7 @@ func (c *NVDClient) GetCVE(cveID string) (*CVEEntry, error) {
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 50<<20)).Decode(&result); err != nil {
 		return nil, fmt.Errorf("decoding response: %w", err)
 	}
+	_, _ = io.Copy(io.Discard, resp.Body)
 
 	if len(result.Vulnerabilities) == 0 {
 		return nil, fmt.Errorf("CVE not found: %s", cveID)
