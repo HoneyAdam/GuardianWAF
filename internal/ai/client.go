@@ -69,6 +69,9 @@ func NewClient(cfg ClientConfig) *Client {
 		TLSClientConfig: &tls.Config{
 			MinVersion: tls.VersionTLS12,
 		},
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:  10 * time.Second,
+		ResponseHeaderTimeout: 30 * time.Second,
 	}
 	if cfg.TLSServerName != "" {
 		transport.TLSClientConfig.ServerName = cfg.TLSServerName

@@ -428,14 +428,18 @@ func isInteger(s string) bool {
 	return true
 }
 
+var (
+	reUUID = regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
+	reSlug = regexp.MustCompile(`^[a-z0-9-]+$`)
+	reHash = regexp.MustCompile(`^[a-f0-9]+$`)
+)
+
 func isUUID(s string) bool {
-	pattern := regexp.MustCompile(`^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$`)
-	return pattern.MatchString(strings.ToLower(s))
+	return reUUID.MatchString(strings.ToLower(s))
 }
 
 func isSlug(s string) bool {
-	pattern := regexp.MustCompile(`^[a-z0-9-]+$`)
-	return pattern.MatchString(s)
+	return reSlug.MatchString(s)
 }
 
 func isHash(s string) bool {
@@ -443,8 +447,7 @@ func isHash(s string) bool {
 	if len(s) != 32 && len(s) != 40 && len(s) != 64 {
 		return false
 	}
-	pattern := regexp.MustCompile(`^[a-f0-9]+$`)
-	return pattern.MatchString(strings.ToLower(s))
+	return reHash.MatchString(strings.ToLower(s))
 }
 
 func inferDataType(value string) string {

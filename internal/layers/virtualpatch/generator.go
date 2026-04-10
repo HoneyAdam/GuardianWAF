@@ -282,13 +282,17 @@ func (g *Generator) calculateScore(cve *CVEEntry) int {
 }
 
 // extractKeywords extracts attack keywords from description.
+var (
+	reKeywords = regexp.MustCompile(`["'](\w+)["']|(\w+)\(|param\w+|\b(union|select|insert|update|delete|drop|create|exec|eval)\b`)
+	reProduct  = regexp.MustCompile(`(?i)(apache|nginx|wordpress|drupal|joomla|laravel|spring|struts)[\s\w]*`)
+)
+
 func (g *Generator) extractKeywords(desc string) []string {
 	// Simple keyword extraction
 	keywords := []string{}
 
 	// Look for quoted strings, function names, parameter names
-	re := regexp.MustCompile(`["'](\w+)["']|(\w+)\(|param\w+|\b(union|select|insert|update|delete|drop|create|exec|eval)\b`)
-	matches := re.FindAllStringSubmatch(desc, -1)
+	matches := reKeywords.FindAllStringSubmatch(desc, -1)
 
 	for _, match := range matches {
 		for _, m := range match {
@@ -322,8 +326,7 @@ func generatePatchName(cve *CVEEntry) string {
 	name := "Virtual Patch for " + cve.CVEID
 
 	// Try to extract product name
-	re := regexp.MustCompile(`(?i)(apache|nginx|wordpress|drupal|joomla|laravel|spring|struts)[\s\w]*`)
-	matches := re.FindString(cve.Description)
+	matches := reProduct.FindString(cve.Description)
 	if matches != "" {
 		name = "VP " + matches + " " + cve.CVEID
 	}

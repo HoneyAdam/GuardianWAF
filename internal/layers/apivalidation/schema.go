@@ -18,6 +18,9 @@ var (
 	reDate     = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}$`)
 	reIPv4     = regexp.MustCompile(`^(\d{1,3}\.){3}\d{1,3}$`)
 	reHostname = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$`)
+
+	// userPatternCache caches user-defined regex patterns from API schemas.
+	userPatternCache sync.Map // string → *regexp.Regexp
 )
 
 // Config holds API validation configuration.
@@ -388,7 +391,7 @@ func (v *SchemaValidator) validateString(data any, schema *Schema, path string, 
 
 	// Pattern
 	if schema.Pattern != "" {
-		re, err := regexp.Compile(schema.Pattern)
+		re, err := getCachedPattern(schema.Pattern)
 		if err == nil && !re.MatchString(str) {
 			result.Valid = false
 			result.Errors = append(result.Errors, ValidationError{
@@ -735,4 +738,17 @@ func validateHostname(host string) bool {
 		return false
 	}
 	return reHostname.MatchString(host)
+}
+
+// getCachedPattern returns a cached compiled regex, compiling on first use.
+func getCachedPattern(pattern string) (*regexp.Regexp, error) {
+	if v, ok := userPatternCache.Load(pattern); ok {
+		return v.(*regexp.Regexp), nil
+	}
+	re, err := regexp.Compile(pattern)
+	if err != nil {
+		return nil, err
+	}
+	userPatternCache.Store(pattern, re)
+	return re, nil
 }
