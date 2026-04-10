@@ -109,7 +109,9 @@ func (l *Layer) Name() string { return "apivalidation" }
 
 // SetEnabled enables or disables the layer.
 func (l *Layer) SetEnabled(enabled bool) {
+	l.mu.Lock()
 	l.enabled = enabled
+	l.mu.Unlock()
 }
 
 // LoadSchema loads an OpenAPI schema from a file or URL.
@@ -348,7 +350,10 @@ func (l *Layer) getAdditionalProperties(schema *Schema) bool {
 
 // Process validates the request against OpenAPI schemas.
 func (l *Layer) Process(ctx *engine.RequestContext) engine.LayerResult {
-	if !l.enabled || !l.config.ValidateRequest {
+	l.mu.RLock()
+	enabled := l.enabled
+	l.mu.RUnlock()
+	if !enabled || !l.config.ValidateRequest {
 		return engine.LayerResult{Action: engine.ActionPass}
 	}
 	if ctx.TenantWAFConfig != nil && !ctx.TenantWAFConfig.APIValidation.Enabled {

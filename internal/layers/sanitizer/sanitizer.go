@@ -1,6 +1,8 @@
 package sanitizer
 
 import (
+	"sync"
+
 	"github.com/guardianwaf/guardianwaf/internal/engine"
 )
 
@@ -8,6 +10,7 @@ import (
 type Layer struct {
 	config  Config
 	enabled bool
+	mu      sync.RWMutex
 }
 
 // NewLayer creates a new sanitizer layer with the given configuration.
@@ -23,13 +26,17 @@ func (l *Layer) Name() string { return "sanitizer" }
 
 // SetEnabled enables or disables the sanitizer layer.
 func (l *Layer) SetEnabled(enabled bool) {
+	l.mu.Lock()
 	l.enabled = enabled
+	l.mu.Unlock()
 }
 
 // Process normalizes and validates the request.
 func (l *Layer) Process(ctx *engine.RequestContext) engine.LayerResult {
 	// Check if sanitizer is enabled (tenant config takes precedence)
+	l.mu.RLock()
 	enabled := l.enabled
+	l.mu.RUnlock()
 	if ctx.TenantWAFConfig != nil && !ctx.TenantWAFConfig.Sanitizer.Enabled {
 		enabled = false
 	}
