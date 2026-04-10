@@ -86,6 +86,9 @@ func NewExporter(cfg *Config) *Exporter {
 		TLSClientConfig: &tls.Config{
 			InsecureSkipVerify: false, // Always enforce TLS verification
 		},
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:  10 * time.Second,
+		ResponseHeaderTimeout: 30 * time.Second,
 	}
 
 	return &Exporter{

@@ -3,6 +3,7 @@ package discovery
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 )
 
 // OpenAPISpec represents an OpenAPI 3.0 specification.
@@ -252,16 +253,16 @@ func (g *SchemaGenerator) generateRequestBody(endpoint *Endpoint) *RequestBody {
 // Helper functions
 
 func sanitizeOperationID(pattern string) string {
-	// Replace special characters with underscores
-	result := ""
+	var b strings.Builder
+	b.Grow(len(pattern))
 	for _, c := range pattern {
 		if (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') {
-			result += string(c)
+			b.WriteRune(c)
 		} else {
-			result += "_"
+			b.WriteByte('_')
 		}
 	}
-	return result
+	return b.String()
 }
 
 func (g *SchemaGenerator) getStatusCodeDescription(code string) string {
