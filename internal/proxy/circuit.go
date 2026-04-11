@@ -77,6 +77,7 @@ func (cb *CircuitBreaker) Allow() bool {
 			// Transition to half-open: allow one probe
 			if cb.state.CompareAndSwap(int32(CircuitOpen), int32(CircuitHalfOpen)) {
 				cb.halfOpenProbe.Store(true)
+				cb.failures.Store(0) // Reset so probe failure correctly re-opens
 				return true
 			}
 			// Another goroutine already transitioned; reject

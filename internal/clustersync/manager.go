@@ -611,7 +611,7 @@ func (m *Manager) syncFromNode(node *Node) {
 	}
 
 	var events []*SyncEvent
-	if err := json.NewDecoder(resp.Body).Decode(&events); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 10<<20)).Decode(&events); err != nil {
 		return
 	}
 	_, _ = io.Copy(io.Discard, resp.Body)

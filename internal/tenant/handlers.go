@@ -262,7 +262,7 @@ func (h *Handlers) updateTenant(w http.ResponseWriter, r *http.Request, tenantID
 
 	tenant := h.manager.GetTenant(tenantID)
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(tenant); err != nil {
+	if err := json.NewEncoder(w).Encode(sanitizeTenant(tenant)); err != nil {
 		// Client disconnected
 		_ = err
 	}

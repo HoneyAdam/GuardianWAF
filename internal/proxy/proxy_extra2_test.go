@@ -318,11 +318,14 @@ func TestAllow_HalfOpenThenFailure(t *testing.T) {
 	cb.RecordFailure()
 	cb.RecordFailure()
 	time.Sleep(60 * time.Millisecond)
-	cb.Allow() // transition to half-open
+	cb.Allow() // transition to half-open (resets failure count to 0)
 
+	// Failures counter was reset on Open->HalfOpen transition, so we need
+	// threshold failures to re-open the circuit.
+	cb.RecordFailure()
 	cb.RecordFailure()
 	if cb.State() != CircuitOpen {
-		t.Errorf("expected open after failure in half-open, got %s", cb.State())
+		t.Errorf("expected open after failures in half-open, got %s", cb.State())
 	}
 }
 

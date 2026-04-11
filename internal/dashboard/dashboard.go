@@ -908,9 +908,7 @@ func (d *Dashboard) handleUpdateConfig(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Copy config to avoid mutating shared state without a lock.
-	origCfg := d.engine.Config()
-	cfgCopy := *origCfg
-	cfg := &cfgCopy
+	cfg := deepCopyConfig(d.engine.Config())
 
 	// Apply top-level mode
 	if v, ok := patch["mode"].(string); ok {
@@ -1917,9 +1915,7 @@ func (d *Dashboard) handleAddWebhook(w http.ResponseWriter, r *http.Request) {
 		cooldown = 30 * time.Second
 	}
 
-	origCfg := d.engine.Config()
-	cfgCopy := *origCfg
-	cfg := &cfgCopy
+	cfg := deepCopyConfig(d.engine.Config())
 	cfg.Alerting.Webhooks = append(cfg.Alerting.Webhooks, config.WebhookConfig{
 		Name:     body.Name,
 		URL:      body.URL,
@@ -1948,9 +1944,7 @@ func (d *Dashboard) handleDeleteWebhook(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	origCfg := d.engine.Config()
-	cfgCopy := *origCfg
-	cfg := &cfgCopy
+	cfg := deepCopyConfig(d.engine.Config())
 	found := false
 	for i, w := range cfg.Alerting.Webhooks {
 		if w.Name == name {
@@ -2022,9 +2016,7 @@ func (d *Dashboard) handleAddEmail(w http.ResponseWriter, r *http.Request) {
 		cooldown = 5 * time.Minute
 	}
 
-	origCfg := d.engine.Config()
-	cfgCopy := *origCfg
-	cfg := &cfgCopy
+	cfg := deepCopyConfig(d.engine.Config())
 	cfg.Alerting.Emails = append(cfg.Alerting.Emails, config.EmailConfig{
 		Name:     body.Name,
 		SMTPHost: body.SMTPHost,
@@ -2058,9 +2050,7 @@ func (d *Dashboard) handleDeleteEmail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	origCfg := d.engine.Config()
-	cfgCopy := *origCfg
-	cfg := &cfgCopy
+	cfg := deepCopyConfig(d.engine.Config())
 	found := false
 	for i, e := range cfg.Alerting.Emails {
 		if e.Name == name {
@@ -2096,4 +2086,21 @@ func (d *Dashboard) handleTestAlert(w http.ResponseWriter, r *http.Request) {
 	// This would ideally call the alerting manager's TestAlert method
 	// For now, we just return a success message
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "message": "Test alert functionality requires MCP or direct alerting manager access"})
+}
+
+// deepCopyConfig creates a deep copy of the config using JSON round-trip.
+// This prevents shared mutable state between the dashboard and engine.
+func deepCopyConfig(cfg *config.Config) *config.Config {
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		// Fallback: return a shallow copy (better than nothing)
+		cp := *cfg
+		return &cp
+	}
+	cp := &config.Config{}
+	if err := json.Unmarshal(data, cp); err != nil {
+		cp2 := *cfg
+		return &cp2
+	}
+	return cp
 }

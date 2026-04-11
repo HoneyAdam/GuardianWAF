@@ -319,15 +319,22 @@ func (bm *BillingManager) save() error {
 	}
 
 	_ = os.MkdirAll(filepath.Dir(bm.storePath), 0755)
-	file, err := os.Create(bm.storePath)
+	tmpFile := bm.storePath + ".tmp"
+	file, err := os.Create(tmpFile)
 	if err != nil {
-		return fmt.Errorf("creating billing store file: %w", err)
+		return fmt.Errorf("creating billing temp file: %w", err)
 	}
-	defer file.Close()
 
 	encoder := json.NewEncoder(file)
 	encoder.SetIndent("", "  ")
-	return encoder.Encode(data)
+	if err := encoder.Encode(data); err != nil {
+		file.Close()
+		return err
+	}
+	if err := file.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmpFile, bm.storePath)
 }
 
 // load loads billing data from disk.

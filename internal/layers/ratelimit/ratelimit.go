@@ -91,7 +91,7 @@ func (l *Layer) Cleanup(maxAge time.Duration) {
 	now := time.Now()
 	l.buckets.Range(func(key, value any) bool {
 		b, ok := value.(*TokenBucket)
-		if !ok || now.Sub(b.lastAccess) > maxAge {
+		if !ok || now.Sub(b.LastAccess()) > maxAge {
 			l.buckets.Delete(key)
 		}
 		return true
@@ -254,9 +254,12 @@ func matchPath(pattern, p string) bool {
 func (l *Layer) trackViolation(ip string, rule *Rule) {
 	key := "violation:" + rule.ID + ":" + ip
 
-	// Use LoadOrStore to get or create the counter atomically
-	newPtr := new(atomic.Int64)
-	actual, _ := l.violations.LoadOrStore(key, newPtr)
+	// Pre-check to avoid allocating on every call
+	actual, loaded := l.violations.Load(key)
+	if !loaded {
+		newPtr := new(atomic.Int64)
+		actual, _ = l.violations.LoadOrStore(key, newPtr)
+	}
 	counter := actual.(*atomic.Int64)
 	count := counter.Add(1)
 
