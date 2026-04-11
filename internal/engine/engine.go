@@ -2,6 +2,7 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"net/http"
@@ -439,11 +440,22 @@ func applyResponseHook(w http.ResponseWriter, metadata map[string]any) {
 
 // Reload hot-reloads the configuration.
 // Updates thresholds and config atomically.
+// The config is deep-copied to prevent caller mutations from affecting the engine.
 func (e *Engine) Reload(cfg *config.Config) error {
+	// Deep copy via JSON round-trip to isolate shared slices/maps
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		return fmt.Errorf("config marshal for reload: %w", err)
+	}
+	cfgCopy := &config.Config{}
+	if err := json.Unmarshal(data, cfgCopy); err != nil {
+		return fmt.Errorf("config unmarshal for reload: %w", err)
+	}
+
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	e.cfg = cfg
+	e.cfg = cfgCopy
 	e.blockThreshold.Store(int32(cfg.WAF.Detection.Threshold.Block))
 	e.logThreshold.Store(int32(cfg.WAF.Detection.Threshold.Log))
 	e.maxBodySize.Store(cfg.WAF.Sanitizer.MaxBodySize)
