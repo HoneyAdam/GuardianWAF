@@ -191,6 +191,33 @@ func (s *Service) VerifyClientCertificate(cert *x509.Certificate) (*ClientIdenti
 				break
 			}
 		}
+		// If still at capacity after evicting expired, remove oldest entries
+		if len(s.sessions) >= 100000 {
+			type entry struct {
+				id  string
+				at  time.Time
+			}
+			var oldest []entry
+			for id, ci := range s.sessions {
+				oldest = append(oldest, entry{id, ci.AuthenticatedAt})
+			}
+			// Sort by AuthenticatedAt ascending (oldest first)
+			for i := 0; i < len(oldest); i++ {
+				for j := i + 1; j < len(oldest); j++ {
+					if oldest[j].at.Before(oldest[i].at) {
+						oldest[i], oldest[j] = oldest[j], oldest[i]
+					}
+				}
+			}
+			// Evict oldest 10% to make room
+			toRemove := len(oldest) / 10
+			if toRemove < 1 {
+				toRemove = 1
+			}
+			for i := 0; i < toRemove && i < len(oldest); i++ {
+				delete(s.sessions, oldest[i].id)
+			}
+		}
 	}
 	s.sessions[identity.SessionID] = identity
 	s.mu.Unlock()
@@ -225,6 +252,7 @@ func (s *Service) VerifyDeviceAttestation(deviceID string, attestationData []byt
 }
 
 // GetClientIdentity retrieves a client identity by session ID.
+// Returns a copy to avoid data races — callers must not modify the returned struct.
 func (s *Service) GetClientIdentity(sessionID string) *ClientIdentity {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -239,7 +267,9 @@ func (s *Service) GetClientIdentity(sessionID string) *ClientIdentity {
 		return nil
 	}
 
-	return identity
+	// Return a copy to prevent data races when callers read fields after lock release
+	cp := *identity
+	return &cp
 }
 
 // RevokeSession revokes a client session.
