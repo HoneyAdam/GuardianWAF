@@ -113,11 +113,11 @@ type Engine struct {
 	passedRequests     atomic.Int64
 	totalLatencyUs     atomic.Int64
 
-	// Configuration
-	paranoiaLevel  int
-	maxBodySize    int64
-	blockThreshold int
-	logThreshold   int
+	// Configuration (atomic for lock-free reads in Middleware hot path)
+	paranoiaLevel  atomic.Int32
+	maxBodySize    atomic.Int64
+	blockThreshold atomic.Int32
+	logThreshold   atomic.Int32
 
 	mu sync.RWMutex // protects cfg
 }
@@ -139,11 +139,12 @@ func NewEngine(cfg *config.Config, eventStore EventStorer, eventBus EventPublish
 		eventStore:     eventStore,
 		eventBus:       eventBus,
 		Logs:           NewLogBuffer(2000),
-		paranoiaLevel:  2, // default
-		maxBodySize:    cfg.WAF.Sanitizer.MaxBodySize,
-		blockThreshold: cfg.WAF.Detection.Threshold.Block,
-		logThreshold:   cfg.WAF.Detection.Threshold.Log,
 	}
+	// Initialize atomic config fields
+	e.paranoiaLevel.Store(2) // default
+	e.maxBodySize.Store(cfg.WAF.Sanitizer.MaxBodySize)
+	e.blockThreshold.Store(int32(cfg.WAF.Detection.Threshold.Block))
+	e.logThreshold.Store(int32(cfg.WAF.Detection.Threshold.Log))
 
 	// Configure trusted proxies for X-Forwarded-For handling
 	SetTrustedProxies(cfg.TrustedProxies)
@@ -204,7 +205,7 @@ func (e *Engine) AddLayer(layer OrderedLayer) {
 // Returns an Event describing the outcome.
 func (e *Engine) Check(r *http.Request) *Event {
 	// Acquire context from pool
-	ctx := AcquireContext(r, e.paranoiaLevel, e.maxBodySize)
+	ctx := AcquireContext(r, int(e.paranoiaLevel.Load()), e.maxBodySize.Load())
 	defer ReleaseContext(ctx)
 
 	// Execute pipeline
@@ -212,9 +213,9 @@ func (e *Engine) Check(r *http.Request) *Event {
 
 	// Determine final action based on score thresholds
 	finalAction := ActionPass
-	if result.TotalScore >= e.blockThreshold {
+	if result.TotalScore >= int(e.blockThreshold.Load()) {
 		finalAction = ActionBlock
-	} else if result.TotalScore >= e.logThreshold {
+	} else if result.TotalScore >= int(e.logThreshold.Load()) {
 		finalAction = ActionLog
 	}
 	// Pipeline may have already set block (e.g., IP ACL, rate limit)
@@ -287,7 +288,7 @@ func (e *Engine) Middleware(next http.Handler) http.Handler {
 
 		// Acquire context and run pipeline (inline, not via Check,
 		// so we can access metadata before the context is released)
-		ctx := AcquireContext(r, e.paranoiaLevel, e.maxBodySize)
+		ctx := AcquireContext(r, int(e.paranoiaLevel.Load()), e.maxBodySize.Load())
 
 		// Set tenant info from context if available (set by caller via SetTenantContext)
 		// This avoids importing tenant package to break circular dependency
@@ -306,9 +307,11 @@ func (e *Engine) Middleware(next http.Handler) http.Handler {
 
 		// Determine final action
 		finalAction := ActionPass
-		if result.TotalScore >= e.blockThreshold {
+		blockThresh := int(e.blockThreshold.Load())
+		logThresh := int(e.logThreshold.Load())
+		if result.TotalScore >= blockThresh {
 			finalAction = ActionBlock
-		} else if result.TotalScore >= e.logThreshold {
+		} else if result.TotalScore >= logThresh {
 			finalAction = ActionLog
 		}
 		if result.Action == ActionBlock {
@@ -441,9 +444,9 @@ func (e *Engine) Reload(cfg *config.Config) error {
 	defer e.mu.Unlock()
 
 	e.cfg = cfg
-	e.blockThreshold = cfg.WAF.Detection.Threshold.Block
-	e.logThreshold = cfg.WAF.Detection.Threshold.Log
-	e.maxBodySize = cfg.WAF.Sanitizer.MaxBodySize
+	e.blockThreshold.Store(int32(cfg.WAF.Detection.Threshold.Block))
+	e.logThreshold.Store(int32(cfg.WAF.Detection.Threshold.Log))
+	e.maxBodySize.Store(cfg.WAF.Sanitizer.MaxBodySize)
 
 	// Note: layers are re-added by the caller after reload
 	// This just updates thresholds and config

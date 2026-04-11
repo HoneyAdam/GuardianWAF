@@ -167,11 +167,11 @@ func TestNewEngine(t *testing.T) {
 	}
 
 	// Verify thresholds from default config
-	if e.blockThreshold != 50 {
-		t.Errorf("expected blockThreshold 50, got %d", e.blockThreshold)
+	if int(e.blockThreshold.Load()) != 50 {
+		t.Errorf("expected blockThreshold 50, got %d", e.blockThreshold.Load())
 	}
-	if e.logThreshold != 25 {
-		t.Errorf("expected logThreshold 25, got %d", e.logThreshold)
+	if int(e.logThreshold.Load()) != 25 {
+		t.Errorf("expected logThreshold 25, got %d", e.logThreshold.Load())
 	}
 }
 
@@ -579,11 +579,11 @@ func TestEngine_Reload(t *testing.T) {
 	defer e.Close()
 
 	// Initial thresholds from default config
-	if e.blockThreshold != 50 {
-		t.Fatalf("expected initial blockThreshold 50, got %d", e.blockThreshold)
+	if int(e.blockThreshold.Load()) != 50 {
+		t.Fatalf("expected initial blockThreshold 50, got %d", e.blockThreshold.Load())
 	}
-	if e.logThreshold != 25 {
-		t.Fatalf("expected initial logThreshold 25, got %d", e.logThreshold)
+	if int(e.logThreshold.Load()) != 25 {
+		t.Fatalf("expected initial logThreshold 25, got %d", e.logThreshold.Load())
 	}
 
 	// Add a score layer with score 35
@@ -609,11 +609,11 @@ func TestEngine_Reload(t *testing.T) {
 	}
 
 	// Verify thresholds updated
-	if e.blockThreshold != 30 {
-		t.Errorf("expected reloaded blockThreshold 30, got %d", e.blockThreshold)
+	if int(e.blockThreshold.Load()) != 30 {
+		t.Errorf("expected reloaded blockThreshold 30, got %d", e.blockThreshold.Load())
 	}
-	if e.logThreshold != 10 {
-		t.Errorf("expected reloaded logThreshold 10, got %d", e.logThreshold)
+	if int(e.logThreshold.Load()) != 10 {
+		t.Errorf("expected reloaded logThreshold 10, got %d", e.logThreshold.Load())
 	}
 
 	// With new thresholds: score 35 >= block (30) = ActionBlock
@@ -635,8 +635,8 @@ func TestEngine_Reload_MaxBodySize(t *testing.T) {
 		t.Fatalf("Reload: %v", err)
 	}
 
-	if e.maxBodySize != 512 {
-		t.Errorf("expected maxBodySize 512, got %d", e.maxBodySize)
+	if e.maxBodySize.Load() != 512 {
+		t.Errorf("expected maxBodySize 512, got %d", e.maxBodySize.Load())
 	}
 }
 

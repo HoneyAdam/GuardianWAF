@@ -531,8 +531,17 @@ func (c *Cluster) joinViaSeed(seed string) error {
 }
 
 // handleJoin handles a node join request.
-func (c *Cluster) handleJoin(node *Node) {
+// Returns false if the cluster is full.
+func (c *Cluster) handleJoin(node *Node) bool {
 	c.mu.Lock()
+	// Enforce max nodes under write lock to prevent TOCTOU race
+	if c.config.MaxNodes > 0 {
+		_, exists := c.nodes[node.ID]
+		if !exists && len(c.nodes) >= c.config.MaxNodes {
+			c.mu.Unlock()
+			return false
+		}
+	}
 	existing, exists := c.nodes[node.ID]
 	if exists {
 		existing.State = StateActive
@@ -565,6 +574,7 @@ func (c *Cluster) handleJoin(node *Node) {
 	if msg != nil {
 		c.broadcast(msg)
 	}
+	return true
 }
 
 // handleLeave handles a node leave.
@@ -794,18 +804,10 @@ func (c *Cluster) handleJoinHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Enforce max nodes
-	if c.config.MaxNodes > 0 {
-		c.mu.RLock()
-		nodeCount := len(c.nodes)
-		c.mu.RUnlock()
-		if nodeCount >= c.config.MaxNodes {
-			http.Error(w, "cluster full", http.StatusServiceUnavailable)
-			return
-		}
+	if !c.handleJoin(&node) {
+		http.Error(w, "cluster full", http.StatusServiceUnavailable)
+		return
 	}
-
-	c.handleJoin(&node)
 	w.WriteHeader(http.StatusOK)
 }
 

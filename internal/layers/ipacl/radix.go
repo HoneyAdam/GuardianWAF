@@ -182,7 +182,10 @@ func (t *RadixTree) walk(node *radixNode, bits []byte, result *[]string) {
 
 	for bit := 0; bit < 2; bit++ {
 		if node.children[bit] != nil {
-			t.walk(node.children[bit], append(bits, byte(bit)), result)
+			childBits := make([]byte, len(bits)+1)
+			copy(childBits, bits)
+			childBits[len(bits)] = byte(bit)
+			t.walk(node.children[bit], childBits, result)
 		}
 	}
 }

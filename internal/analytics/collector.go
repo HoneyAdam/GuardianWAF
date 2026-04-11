@@ -77,6 +77,10 @@ func (g *GaugeValue) Load() float64 {
 	return v
 }
 
+// maxMapEntries caps the number of unique metric keys to prevent
+// unbounded memory growth from attacker-controlled label values.
+const maxMapEntries = 10000
+
 // Config for analytics collector.
 type Config struct {
 	Enabled         bool          `yaml:"enabled"`
@@ -292,6 +296,10 @@ func (c *Collector) Counter(name string, labels map[string]string, value int64) 
 		c.mu.Lock()
 		// Double-check after acquiring write lock
 		if counter, exists = c.counters[key]; !exists {
+				if len(c.counters) >= maxMapEntries {
+					c.mu.Unlock()
+					return
+				}
 			counter = &atomic.Int64{}
 			c.counters[key] = counter
 		}
@@ -321,6 +329,10 @@ func (c *Collector) Gauge(name string, labels map[string]string, value float64) 
 	if !exists {
 		c.mu.Lock()
 		if gauge, exists = c.gauges[key]; !exists {
+				if len(c.gauges) >= maxMapEntries {
+					c.mu.Unlock()
+					return
+				}
 			gauge = &GaugeValue{}
 			c.gauges[key] = gauge
 		}
@@ -349,6 +361,10 @@ func (c *Collector) Histogram(name string, labels map[string]string, value float
 	if !exists {
 		c.mu.Lock()
 		if hist, exists = c.histograms[key]; !exists {
+				if len(c.histograms) >= maxMapEntries {
+					c.mu.Unlock()
+					return
+				}
 			hist = NewHistogram(name, nil)
 			c.histograms[key] = hist
 		}
@@ -367,6 +383,10 @@ func (c *Collector) addToSeries(key string, value float64) {
 	if !exists {
 		c.mu.Lock()
 		if ts, exists = c.series[key]; !exists {
+				if len(c.series) >= maxMapEntries {
+					c.mu.Unlock()
+					return
+				}
 			ts = NewTimeSeriesBuffer(key, nil, c.config.MaxDataPoints)
 			c.series[key] = ts
 		}

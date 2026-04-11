@@ -189,3 +189,51 @@ func TestParseHexSingleIP_Metadata(t *testing.T) {
 		t.Errorf("expected metadata endpoint, got %d.%d.%d.%d", ip[0], ip[1], ip[2], ip[3])
 	}
 }
+
+// --- IPv6 private IP detection tests ---
+
+func TestDetect_IPv6PrivateIP(t *testing.T) {
+	findings := Detect("http://[fc00::1]/secret", "query")
+	totalScore := 0
+	for _, f := range findings {
+		totalScore += f.Score
+	}
+	if totalScore < 60 {
+		t.Errorf("expected score >= 60 for IPv6 private fc00::1, got %d", totalScore)
+	}
+}
+
+func TestDetect_IPv6LinkLocal(t *testing.T) {
+	findings := Detect("http://[fe80::1]/internal", "query")
+	totalScore := 0
+	for _, f := range findings {
+		totalScore += f.Score
+	}
+	if totalScore < 60 {
+		t.Errorf("expected score >= 60 for IPv6 link-local fe80::1, got %d", totalScore)
+	}
+}
+
+func TestDetect_IPv6Loopback(t *testing.T) {
+	findings := Detect("http://[::1]/admin", "query")
+	totalScore := 0
+	for _, f := range findings {
+		totalScore += f.Score
+	}
+	if totalScore < 80 {
+		t.Errorf("expected score >= 80 for IPv6 loopback [::1], got %d", totalScore)
+	}
+}
+
+func TestDetect_IPv6Public_NoDetection(t *testing.T) {
+	findings := Detect("http://[2001:db8::1]/path", "query")
+	for _, f := range findings {
+		if f.Description != "" && (containsStr(f.Description, "private") || containsStr(f.Description, "link-local")) {
+			t.Errorf("should not flag public IPv6 as private: %s", f.Description)
+		}
+	}
+}
+
+func containsStr(s, sub string) bool {
+	return len(s) >= len(sub) && (s == sub || len(s) > 0 && containsStr(s[1:], sub))
+}

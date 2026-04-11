@@ -1,6 +1,7 @@
 package ssrf
 
 import (
+	"net"
 	"strings"
 	"time"
 
@@ -249,6 +250,49 @@ func checkPrivateIPs(lower, location string) []engine.Finding {
 				}
 			}
 
+			idx = hostEnd
+		}
+	}
+
+	// Check IPv6 private/link-local addresses (handles [fc00::1], [fe80::1], etc.)
+	for _, prefix := range urlPrefixes {
+		idx := 0
+		for {
+			pos := strings.Index(lower[idx:], prefix)
+			if pos < 0 {
+				break
+			}
+			pos += idx
+			hostStart := pos + len(prefix)
+			if hostStart >= len(lower) {
+				break
+			}
+			hostEnd := hostStart
+			for hostEnd < len(lower) {
+				c := lower[hostEnd]
+				if c == '/' || c == '?' || c == '#' || c == ' ' {
+					break
+				}
+				if c == ']' {
+					hostEnd++
+					break
+				}
+				if c == ':' && lower[hostStart] != '[' {
+					break
+				}
+				hostEnd++
+			}
+			host := lower[hostStart:hostEnd]
+			if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
+				ipv6Str := host[1 : len(host)-1]
+				if parsedIP := net.ParseIP(ipv6Str); parsedIP != nil {
+					if parsedIP.IsPrivate() || parsedIP.IsLinkLocalUnicast() || parsedIP.IsLoopback() {
+						findings = append(findings, makeFinding(70, engine.SeverityCritical,
+							"HTTP request to IPv6 private/link-local address detected: "+host,
+							extractContext(lower, host), location, 0.85))
+					}
+				}
+			}
 			idx = hostEnd
 		}
 	}
