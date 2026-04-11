@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"net/url"
 	"runtime/debug"
-	"strings"
 	"time"
 )
 
@@ -56,7 +55,7 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 func SecurityHeadersMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Skip security headers for SSE endpoint
-		if strings.Contains(r.URL.Path, "/sse") {
+		if r.URL.Path == "/api/v1/sse" || r.URL.Path == "/mcp/sse" {
 			next.ServeHTTP(w, r)
 			return
 		}

@@ -96,11 +96,15 @@ func (s *Store) SaveTenant(tenant *Tenant) error {
 		return fmt.Errorf("marshaling tenant: %w", err)
 	}
 
-	// Write to file
+	// Write to file atomically (temp + rename)
 	filename := fmt.Sprintf("%s.json", tenant.ID)
 	filepath := filepath.Join(s.basePath, filename)
-	if err := os.WriteFile(filepath, jsonData, 0600); err != nil {
+	tmp := filepath + ".tmp"
+	if err := os.WriteFile(tmp, jsonData, 0600); err != nil {
 		return fmt.Errorf("writing tenant file: %w", err)
+	}
+	if err := os.Rename(tmp, filepath); err != nil {
+		return fmt.Errorf("renaming tenant file: %w", err)
 	}
 
 	// Update index
