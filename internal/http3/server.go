@@ -7,6 +7,7 @@ package http3
 import (
 	"crypto/tls"
 	"fmt"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -133,7 +134,8 @@ func (s *Server) Start() error {
 	// Start serving in a goroutine
 	go func() {
 		if err := s.http3Server.ServeListener(s.listener); err != nil && err != http.ErrServerClosed {
-			fmt.Fprintf(os.Stderr, "HTTP/3 server error: %v\n", err)
+					slog.Warn("HTTP/3 server error", "error", err)
+
 		}
 	}()
 
@@ -180,8 +182,9 @@ type Stats struct {
 }
 
 // GetStats returns current server statistics.
+// Note: detailed per-connection stats require quic-go tracing hooks
+// which are not exposed through the http3.Server API.
 func (s *Server) GetStats() Stats {
-	// TODO: Implement statistics collection
 	return Stats{}
 }
 

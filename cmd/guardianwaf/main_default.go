@@ -13,6 +13,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
@@ -893,7 +894,7 @@ func cmdServe(args []string) {
 		// Load default cert if provided
 		if cfg.TLS.CertFile != "" && cfg.TLS.KeyFile != "" {
 			if err := certStore.LoadDefaultCert(cfg.TLS.CertFile, cfg.TLS.KeyFile); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: failed to load default TLS cert: %v\n", err)
+				slog.Warn("failed to load default TLS cert", "error", err)
 			}
 		}
 
@@ -901,7 +902,7 @@ func cmdServe(args []string) {
 		for _, vh := range cfg.VirtualHosts {
 			if vh.TLS.CertFile != "" && vh.TLS.KeyFile != "" {
 				if err := certStore.LoadCert(vh.Domains, vh.TLS.CertFile, vh.TLS.KeyFile); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: failed to load TLS cert for %v: %v\n", vh.Domains, err)
+					slog.Warn("failed to load TLS cert", "domains", vh.Domains, "error", err)
 				}
 			}
 		}
@@ -919,21 +920,21 @@ func cmdServe(args []string) {
 				accountKeyPEM = data
 			}
 			if err := acmeClient.Init(accountKeyPEM); err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: ACME init failed: %v\n", err)
+				slog.Warn("ACME init failed", "error", err)
 			} else {
 				// Save account key
 				if keyPEM, err := acmeClient.AccountKeyPEM(); err == nil {
 					if err := os.MkdirAll(cfg.TLS.ACME.CacheDir, 0o700); err != nil {
-						fmt.Fprintf(os.Stderr, "Warning: failed to create ACME cache dir: %v\n", err)
+						slog.Warn("failed to create ACME cache dir", "error", err)
 					} else {
 						if err := os.WriteFile(accountKeyPath, keyPEM, 0o600); err != nil {
-							fmt.Fprintf(os.Stderr, "Warning: failed to write ACME account key: %v\n", err)
+							slog.Warn("failed to write ACME account key", "error", err)
 						}
 					}
 				}
 				// Register account
 				if err := acmeClient.Register(cfg.TLS.ACME.Email); err != nil {
-					fmt.Fprintf(os.Stderr, "Warning: ACME registration: %v\n", err)
+					slog.Warn("ACME registration failed", "error", err)
 				} else {
 					// Obtain certs for all ACME domains + vhost domains
 					diskStore = acme.NewCertDiskStore(cfg.TLS.ACME.CacheDir, acmeClient, acmeHandler)
@@ -942,7 +943,7 @@ func cmdServe(args []string) {
 						diskStore.AddDomains(domains)
 						cert, err := diskStore.LoadOrObtain(domains)
 						if err != nil {
-							fmt.Fprintf(os.Stderr, "Warning: ACME cert for %v: %v\n", domains, err)
+							slog.Warn("ACME cert failed", "domains", domains, "error", err)
 						} else {
 							certStore.LoadCertFromTLS(domains, cert)
 						}
@@ -2063,7 +2064,7 @@ func addLayers(eng *engine.Engine, cfg *config.Config) {
 			},
 		})
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to create IP ACL layer: %v\n", err)
+			slog.Warn("failed to create IP ACL layer", "error", err)
 		} else {
 			eng.AddLayer(engine.OrderedLayer{Layer: ipaclLayer, Order: engine.OrderIPACL})
 		}
@@ -2098,7 +2099,7 @@ func addLayers(eng *engine.Engine, cfg *config.Config) {
 			Feeds:     feeds,
 		})
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to create threat intel layer: %v\n", err)
+			slog.Warn("failed to create threat intel layer", "error", err)
 		} else {
 			eng.AddLayer(engine.OrderedLayer{Layer: tiLayer, Order: engine.OrderThreatIntel})
 			tiLayer.Start()
@@ -2120,7 +2121,7 @@ func addLayers(eng *engine.Engine, cfg *config.Config) {
 			PreflightCacheSeconds: cfg.WAF.CORS.PreflightCacheSeconds,
 		})
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to create CORS layer: %v\n", err)
+			slog.Warn("failed to create CORS layer", "error", err)
 		} else {
 			eng.AddLayer(engine.OrderedLayer{Layer: corsLayer, Order: engine.OrderCORS})
 			eng.Logs.Infof("CORS security enabled (%d allowed origins)", len(cfg.WAF.CORS.AllowOrigins))
@@ -2229,7 +2230,7 @@ func addLayers(eng *engine.Engine, cfg *config.Config) {
 			GeoDBPath: cfg.WAF.ATOProtection.GeoDBPath,
 		})
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to create ATO protection layer: %v\n", err)
+			slog.Warn("failed to create ATO protection layer", "error", err)
 		} else {
 			eng.AddLayer(engine.OrderedLayer{Layer: atoLayer, Order: engine.OrderATO})
 			eng.Logs.Infof("ATO protection enabled (%d login paths)", len(cfg.WAF.ATOProtection.LoginPaths))
@@ -2272,7 +2273,7 @@ func addLayers(eng *engine.Engine, cfg *config.Config) {
 			},
 		})
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to create API security layer: %v\n", err)
+			slog.Warn("failed to create API security layer", "error", err)
 		} else {
 			eng.AddLayer(engine.OrderedLayer{Layer: apiLayer, Order: engine.OrderAPISecurity})
 			eng.Logs.Info("API security layer enabled")
@@ -2506,7 +2507,7 @@ func buildReverseProxy(cfg *config.Config) (http.Handler, []*proxy.HealthChecker
 		for _, t := range u.Targets {
 			target, err := proxy.NewTarget(t.URL, t.Weight)
 			if err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: invalid upstream URL %q: %v\n", t.URL, err)
+				slog.Warn("invalid upstream URL", "url", t.URL, "error", err)
 				continue
 			}
 			targets = append(targets, target)
@@ -2583,7 +2584,7 @@ func buildReverseProxy(cfg *config.Config) (http.Handler, []*proxy.HealthChecker
 func startDashboard(cfg *config.Config, eng *engine.Engine) (*http.Server, *dashboard.SSEBroadcaster, *dashboard.Dashboard) {
 	eventStore, ok := eng.EventStore().(events.EventStore)
 	if !ok {
-		fmt.Fprintf(os.Stderr, "Warning: event store does not support queries; dashboard events disabled\n")
+		slog.Warn("event store does not support queries; dashboard events disabled")
 		eventStore = events.NewMemoryStore(1000)
 	}
 
