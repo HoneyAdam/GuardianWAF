@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -703,7 +704,9 @@ func generateDashboardPassword() string {
 // envForEntropy returns a small amount of process-specific data to mix into
 // fallback password generation. Not a replacement for CSPRNG.
 func envForEntropy() string {
-	return fmt.Sprintf("%d", time.Now().UnixNano())
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	return fmt.Sprintf("%d-%d-%d-%d", time.Now().UnixNano(), os.Getpid(), m.Alloc, m.NumGC)
 }
 
 // --------------------------------------------------------------------------

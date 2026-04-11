@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/http/pprof"
 	"strconv"
 	"strings"
 	"sync"
@@ -153,6 +154,13 @@ func New(eng *engine.Engine, store events.EventStore, apiKey string) *Dashboard 
 
 	// Docker auto-discovery endpoints
 	d.mux.HandleFunc("GET /api/v1/docker/services", d.authWrap(d.handleDockerServices))
+
+	// Debug pprof endpoints — behind auth, same as all other API routes
+	d.mux.HandleFunc("GET /debug/pprof/", d.authWrap(http.HandlerFunc(pprof.Index)).ServeHTTP)
+	d.mux.HandleFunc("GET /debug/pprof/cmdline", d.authWrap(http.HandlerFunc(pprof.Cmdline)).ServeHTTP)
+	d.mux.HandleFunc("GET /debug/pprof/profile", d.authWrap(http.HandlerFunc(pprof.Profile)).ServeHTTP)
+	d.mux.HandleFunc("GET /debug/pprof/symbol", d.authWrap(http.HandlerFunc(pprof.Symbol)).ServeHTTP)
+	d.mux.HandleFunc("GET /debug/pprof/trace", d.authWrap(http.HandlerFunc(pprof.Trace)).ServeHTTP)
 
 	// SPA serving — React build output from dist/ with fallback to legacy static/
 	d.mux.HandleFunc("GET /assets/", d.handleDistAssets)       // Vite hashed assets — public (content-hashed, no secrets)

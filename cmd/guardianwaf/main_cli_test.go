@@ -78,6 +78,33 @@ func captureOptionalExit(t *testing.T, fn func()) (code int, called bool) {
 	return
 }
 
+
+// allocatePorts finds n free TCP ports by opening listeners and keeping them open
+// until the caller is ready. Returns a cleanup function that releases the ports.
+// This avoids the TOCTOU race of close-then-bind where another process could grab
+// the port between the listener close and the server bind.
+func allocatePorts(t *testing.T, n int) (ports []int, release func()) {
+	t.Helper()
+	listeners := make([]net.Listener, n)
+	ports = make([]int, n)
+	for i := range n {
+		ln, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			for j := range i {
+				listeners[j].Close()
+			}
+			t.Fatalf("allocate port %d: %v", i, err)
+		}
+		listeners[i] = ln
+		ports[i] = ln.Addr().(*net.TCPAddr).Port
+	}
+	return ports, func() {
+		for _, ln := range listeners {
+			ln.Close()
+		}
+	}
+}
+
 func TestRunMain_NoArgs(t *testing.T) {
 	code := runMain([]string{"guardianwaf"})
 	if code != 1 {
@@ -101,6 +128,7 @@ func TestRunMain_Serve(t *testing.T) {
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "gwaf.yaml")
 	os.WriteFile(cfgPath, []byte("mode: enforce\nlisten: 127.0.0.1:0\ndashboard:\n  enabled: false\nmcp:\n  enabled: false\n"), 0o644)
+
 
 	done := make(chan struct{})
 	go func() {
@@ -616,20 +644,10 @@ func TestCmdServe_FullFeatures(t *testing.T) {
 		}()
 	}
 
-	// Find free ports
-	ln1, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	mainPort := ln1.Addr().(*net.TCPAddr).Port
-	ln1.Close()
-
-	ln2, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	dashPort := ln2.Addr().(*net.TCPAddr).Port
-	ln2.Close()
+	// Find free ports (keep listeners open until server binds to avoid TOCTOU race)
+	ports, releasePorts := allocatePorts(t, 2)
+	mainPort := ports[0]
+	dashPort := ports[1]
 
 	dir := t.TempDir()
 
@@ -712,6 +730,13 @@ virtual_hosts:
         upstream: default
 `, mainPort, dashPort, geoCSV, filepath.Join(dir, "ai_store.json"))
 	_ = os.WriteFile(cfgPath, []byte(cfg), 0o644)
+
+	// Release ports so servers can bind
+	releasePorts()
+
+
+	// Release ports so servers can bind
+	releasePorts()
 
 	done := make(chan struct{})
 	go func() {
@@ -879,19 +904,9 @@ func TestCmdServe_TLSRedirect(t *testing.T) {
 		}()
 	}
 
-	ln1, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	httpPort := ln1.Addr().(*net.TCPAddr).Port
-	ln1.Close()
-
-	ln2, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	tlsPort := ln2.Addr().(*net.TCPAddr).Port
-	ln2.Close()
+	ports, releasePorts := allocatePorts(t, 2)
+	httpPort := ports[0]
+	tlsPort := ports[1]
 
 	dir := t.TempDir()
 	certPath, keyPath := generateTempCerts(t, dir)
@@ -916,6 +931,10 @@ waf:
     enabled: false
 `, httpPort, tlsPort, certPath, keyPath)
 	_ = os.WriteFile(cfgPath, []byte(cfg), 0o644)
+
+
+	// Release ports so servers can bind
+	releasePorts()
 
 	done := make(chan struct{})
 	go func() {
@@ -1741,19 +1760,9 @@ func TestCmdServe_ACMERedirectBypass(t *testing.T) {
 		}()
 	}
 
-	ln1, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	httpPort := ln1.Addr().(*net.TCPAddr).Port
-	ln1.Close()
-
-	ln2, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	tlsPort := ln2.Addr().(*net.TCPAddr).Port
-	ln2.Close()
+	ports, releasePorts := allocatePorts(t, 2)
+	httpPort := ports[0]
+	tlsPort := ports[1]
 
 	dir := t.TempDir()
 	certPath, keyPath := generateTempCerts(t, dir)
@@ -1783,6 +1792,10 @@ waf:
     enabled: false
 `, httpPort, tlsPort, certPath, keyPath, filepath.Join(dir, "acme_cache"))
 	_ = os.WriteFile(cfgPath, []byte(cfg), 0o644)
+
+
+	// Release ports so servers can bind
+	releasePorts()
 
 	done := make(chan struct{})
 	go func() {
@@ -1862,12 +1875,9 @@ func TestCmdServe_DashboardClosuresErrors(t *testing.T) {
 		}()
 	}
 
-	ln1, _ := net.Listen("tcp", "127.0.0.1:0")
-	mainPort := ln1.Addr().(*net.TCPAddr).Port
-	ln1.Close()
-	ln2, _ := net.Listen("tcp", "127.0.0.1:0")
-	dashPort := ln2.Addr().(*net.TCPAddr).Port
-	ln2.Close()
+	ports, releasePorts := allocatePorts(t, 2)
+	mainPort := ports[0]
+	dashPort := ports[1]
 
 	dir := t.TempDir()
 	cfgPath := filepath.Join(dir, "serve.yaml")
@@ -1910,6 +1920,10 @@ routes:
     upstream: default
 `, mainPort, dashPort)
 	_ = os.WriteFile(cfgPath, []byte(cfg), 0o644)
+
+
+	// Release ports so servers can bind
+	releasePorts()
 
 	done := make(chan struct{})
 	go func() {
