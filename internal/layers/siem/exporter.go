@@ -132,12 +132,16 @@ func (e *Exporter) Export(event *Event) {
 		return
 	}
 
-	// Add configured fields
-	for k, v := range e.config.Fields {
-		if event.Fields == nil {
-			event.Fields = make(map[string]string)
+	// Add configured fields (copy to avoid mutating shared event)
+	if len(e.config.Fields) > 0 {
+		fields := make(map[string]string, len(event.Fields)+len(e.config.Fields))
+		for k, v := range event.Fields {
+			fields[k] = v
 		}
-		event.Fields[k] = v
+		for k, v := range e.config.Fields {
+			fields[k] = v
+		}
+		event.Fields = fields
 	}
 
 	select {

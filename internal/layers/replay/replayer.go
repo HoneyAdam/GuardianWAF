@@ -274,7 +274,11 @@ func (r *Replayer) replayBatch(ctx context.Context, records []*RecordedRequest) 
 	}
 
 	// Rate limiter
-	rateLimiter := time.NewTicker(time.Second / time.Duration(r.config.RateLimit))
+	rateLimit := r.config.RateLimit
+	if rateLimit <= 0 {
+		rateLimit = 1
+	}
+	rateLimiter := time.NewTicker(time.Second / time.Duration(rateLimit))
 	defer rateLimiter.Stop()
 
 	// Worker pool

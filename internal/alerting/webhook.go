@@ -235,8 +235,16 @@ func (m *Manager) HandleEvent(event *engine.Event) {
 			et.lastFire.Store(event.ClientIP, time.Now())
 		}
 
-		// Send email async
-		go m.SendEmail(et, event)
+		// Send email async (with same concurrency limit as webhooks)
+		select {
+		case m.sem <- struct{}{}:
+			go func(et *EmailTarget, ev *engine.Event) {
+				defer func() { <-m.sem }()
+				m.SendEmail(et, ev)
+			}(et, event)
+		default:
+			m.failed.Add(1)
+		}
 	}
 }
 

@@ -66,7 +66,9 @@ func (l *Layer) Process(ctx *engine.RequestContext) engine.LayerResult {
 	// Mark request for canary routing
 	if l.canary.ShouldRouteToCanary(ctx.Request) {
 		ctx.Metadata["canary"] = true
+		l.canary.mu.RLock()
 		ctx.Metadata["canary_upstream"] = l.canary.config.CanaryUpstream
+		l.canary.mu.RUnlock()
 	}
 
 	return engine.LayerResult{Action: engine.ActionPass, Duration: time.Since(start)}
@@ -113,7 +115,10 @@ func (m *Middleware) Handler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if m.canary != nil && m.canary.ShouldRouteToCanary(r) {
 			// Add canary header for downstream identification
-			r.Header.Set("X-Canary-Version", m.canary.config.CanaryVersion)
+			m.canary.mu.RLock()
+			version := m.canary.config.CanaryVersion
+			m.canary.mu.RUnlock()
+			r.Header.Set("X-Canary-Version", version)
 		}
 		next.ServeHTTP(w, r)
 	})

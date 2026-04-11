@@ -465,11 +465,20 @@ func (l *Layer) matchRegex(value, pattern string) bool {
 		}
 
 		l.mu.Lock()
-		if len(l.compiledPatterns) < 10000 {
+		// Re-check under write lock to avoid redundant compilation
+		if existing, exists := l.compiledPatterns[pattern]; exists {
+			re = existing
+		} else {
+			if len(l.compiledPatterns) >= 10000 {
+				for k := range l.compiledPatterns {
+					delete(l.compiledPatterns, k)
+					break
+				}
+			}
 			l.compiledPatterns[pattern] = compiled
+			re = compiled
 		}
 		l.mu.Unlock()
-		re = compiled
 	}
 
 	return re.MatchString(value)
@@ -493,7 +502,7 @@ func (l *Layer) recordHit(patchID string) {
 
 	patch := l.database.GetPatch(patchID)
 	if patch != nil {
-		atomic.AddInt64(&patch.Hits, 1)
+		patch.Hits++
 		now := time.Now()
 		patch.LastHit = &now
 	}

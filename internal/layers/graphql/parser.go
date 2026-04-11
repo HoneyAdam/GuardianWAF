@@ -457,8 +457,21 @@ func parseDirective(str string) (*Directive, string) {
 // findMatchingBrace finds the matching closing brace.
 func findMatchingBrace(str string, start int) int {
 	depth := 0
+	inString := false
 	for i := start; i < len(str); i++ {
+		if inString {
+			if str[i] == '\\' && i+1 < len(str) {
+				i++ // skip escaped char
+				continue
+			}
+			if str[i] == '"' {
+				inString = false
+			}
+			continue
+		}
 		switch str[i] {
+		case '"':
+			inString = true
 		case '{':
 			depth++
 		case '}':
@@ -474,8 +487,21 @@ func findMatchingBrace(str string, start int) int {
 // findMatchingParen finds the matching closing parenthesis.
 func findMatchingParen(str string, start int) int {
 	depth := 0
+	inString := false
 	for i := start; i < len(str); i++ {
+		if inString {
+			if str[i] == '\\' && i+1 < len(str) {
+				i++ // skip escaped char
+				continue
+			}
+			if str[i] == '"' {
+				inString = false
+			}
+			continue
+		}
 		switch str[i] {
+		case '"':
+			inString = true
 		case '(':
 			depth++
 		case ')':

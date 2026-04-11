@@ -9,6 +9,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -165,30 +166,21 @@ func (s *Service) VerifyClientCertificate(cert *x509.Certificate) (*ClientIdenti
 
 	// Check if device is known/attested
 	deviceFingerprint := calculateDeviceFingerprint(cert)
-	s.mu.RLock()
+	// Single lock scope: device lookup + LastSeenAt + session store (TOCTOU fix)
+	s.mu.Lock()
 	device, exists := s.devices[deviceFingerprint]
-	s.mu.RUnlock()
-
 	if exists && device != nil {
 		identity.Device = device
 		identity.TrustLevel = device.TrustLevel
-
-		// Update last seen
-		s.mu.Lock()
 		device.LastSeenAt = time.Now()
-		s.mu.Unlock()
 	}
 
 	// Store session (with cap to prevent OOM)
-	s.mu.Lock()
 	if len(s.sessions) >= 100000 {
 		// Evict expired sessions
 		for id, ci := range s.sessions {
 			if time.Since(ci.AuthenticatedAt) > s.config.SessionTTL {
 				delete(s.sessions, id)
-			}
-			if len(s.sessions) < 100000 {
-				break
 			}
 		}
 		// If still at capacity after evicting expired, remove oldest entries
@@ -201,14 +193,12 @@ func (s *Service) VerifyClientCertificate(cert *x509.Certificate) (*ClientIdenti
 			for id, ci := range s.sessions {
 				oldest = append(oldest, entry{id, ci.AuthenticatedAt})
 			}
-			// Sort by AuthenticatedAt ascending (oldest first)
-			for i := 0; i < len(oldest); i++ {
-				for j := i + 1; j < len(oldest); j++ {
-					if oldest[j].at.Before(oldest[i].at) {
-						oldest[i], oldest[j] = oldest[j], oldest[i]
-					}
-				}
-			}
+			// Sort by AuthenticatedAt ascending (O(n log n))
+			slices.SortFunc(oldest, func(a, b entry) int {
+				if a.at.Before(b.at) { return -1 }
+				if a.at.After(b.at) { return 1 }
+				return 0
+			})
 			// Evict oldest 10% to make room
 			toRemove := len(oldest) / 10
 			if toRemove < 1 {

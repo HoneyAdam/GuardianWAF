@@ -297,14 +297,16 @@ func (c *Client) completeAuthorization(authzURL string, handler *HTTP01Handler) 
 			return err
 		}
 
-		var pollAuthz authorization
-		if err := json.NewDecoder(pollResp.Body).Decode(&pollAuthz); err != nil {
-			io.Copy(io.Discard, io.LimitReader(pollResp.Body, 1<<20))
+		bodyBytes, err := io.ReadAll(io.LimitReader(pollResp.Body, 1<<20))
 		pollResp.Body.Close()
+		if err != nil {
+			return fmt.Errorf("failed to read authorization response: %w", err)
+		}
+
+		var pollAuthz authorization
+		if err := json.Unmarshal(bodyBytes, &pollAuthz); err != nil {
 			return fmt.Errorf("failed to decode authorization response: %w", err)
 		}
-		io.Copy(io.Discard, io.LimitReader(pollResp.Body, 1<<20))
-		pollResp.Body.Close()
 
 		if pollAuthz.Status == "valid" {
 			return nil

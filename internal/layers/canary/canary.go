@@ -93,7 +93,7 @@ type Stats struct {
 	CanaryErrors    atomic.Int64
 	TotalLatency    atomic.Int64 // nanoseconds
 	CanaryLatency   atomic.Int64 // nanoseconds
-	LastHealthCheck time.Time
+	LastHealthCheck atomic.Value // stores time.Time
 	Healthy         atomic.Bool
 }
 
@@ -327,10 +327,17 @@ func (c *Canary) healthCheckLoop() {
 
 // performHealthCheck checks if canary upstream is healthy.
 func (c *Canary) performHealthCheck() {
-	c.stats.LastHealthCheck = time.Now()
+	c.stats.LastHealthCheck.Store(time.Now())
 
-	url := c.config.CanaryUpstream + c.config.HealthCheck.Path
-	ctx, cancel := context.WithTimeout(context.Background(), c.config.HealthCheck.Timeout)
+	// Snapshot config under read lock to avoid data race
+	c.mu.RLock()
+	upstream := c.config.CanaryUpstream
+	hcPath := c.config.HealthCheck.Path
+	hcTimeout := c.config.HealthCheck.Timeout
+	c.mu.RUnlock()
+
+	url := upstream + hcPath
+	ctx, cancel := context.WithTimeout(context.Background(), hcTimeout)
 	defer cancel()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
@@ -361,10 +368,14 @@ func (c *Canary) performHealthCheck() {
 
 // GetUpstream returns the appropriate upstream for a request.
 func (c *Canary) GetUpstream(r *http.Request) string {
+	c.mu.RLock()
+	canary := c.config.CanaryUpstream
+	stable := c.config.StableUpstream
+	c.mu.RUnlock()
 	if c.ShouldRouteToCanary(r) {
-		return c.config.CanaryUpstream
+		return canary
 	}
-	return c.config.StableUpstream
+	return stable
 }
 
 // GetStats returns current canary statistics.
@@ -391,7 +402,7 @@ func (c *Canary) GetStats() map[string]any {
 		"error_rate":       errorRate,
 		"healthy":          c.stats.Healthy.Load(),
 		"halted":           c.haltCanary.Load(),
-		"last_health_check": c.stats.LastHealthCheck,
+		"last_health_check": c.stats.LastHealthCheck.Load(),
 	}
 }
 
