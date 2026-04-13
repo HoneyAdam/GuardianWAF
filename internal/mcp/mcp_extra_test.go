@@ -37,12 +37,12 @@ func TestWriteResponse_MarshalError(t *testing.T) {
 }
 
 func TestHandleSSE_NonFlusher(t *testing.T) {
-	handler, _ := helperSSEServer("")
+	handler, _ := helperSSEServer("test-api-key")
 	rec := httptest.NewRecorder()
 	nf := &struct {
 		http.ResponseWriter
 	}{ResponseWriter: rec}
-	req := httptest.NewRequest(http.MethodGet, "/mcp/sse", nil)
+	req := helperAuthReq(http.MethodGet, "/mcp/sse", nil)
 	handler.handleSSE(nf, req)
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("expected 500, got %d", rec.Code)
@@ -50,14 +50,14 @@ func TestHandleSSE_NonFlusher(t *testing.T) {
 }
 
 func TestHandleSSE_HTTPS(t *testing.T) {
-	handler, _ := helperSSEServer("")
+	handler, _ := helperSSEServer("test-api-key")
 
 	// Use a thread-safe wrapper around ResponseRecorder
 	rec := httptest.NewRecorder()
 	safeRec := &safeResponseRecorder{rec: rec}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	req := httptest.NewRequest(http.MethodGet, "/mcp/sse", nil).WithContext(ctx)
+	req := helperAuthReq(http.MethodGet, "/mcp/sse", nil).WithContext(ctx)
 	req.TLS = &tls.ConnectionState{}
 
 	done := make(chan struct{})
@@ -132,7 +132,7 @@ func (s *safeResponseRecorder) code() int {
 }
 
 func TestBroadcastResponse_MarshalError(t *testing.T) {
-	handler, _ := helperSSEServer("")
+	handler, _ := helperSSEServer("test-api-key")
 	handler.broadcastResponse(JSONRPCResponse{
 		JSONRPC: "2.0",
 		ID:      1,

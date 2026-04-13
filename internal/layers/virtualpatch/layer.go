@@ -1,6 +1,7 @@
 package virtualpatch
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -490,7 +491,35 @@ func (l *Layer) matchRegex(value, pattern string) bool {
 		l.mu.Unlock()
 	}
 
-	return re.MatchString(value)
+	return regexMatchWithTimeout(re, value)
+}
+
+// vpRegexTimeout limits regex execution time in the virtual patch layer.
+const vpRegexTimeout = 5 * time.Second
+
+// regexMatchWithTimeout runs re.MatchString in a goroutine with a timeout.
+// Prevents unbounded CPU usage from pathological regex patterns.
+func regexMatchWithTimeout(re *regexp.Regexp, s string) bool {
+	type result struct {
+		matched bool
+	}
+	done := make(chan result, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		matched := re.MatchString(s)
+		select {
+		case <-ctx.Done():
+		case done <- result{matched: matched}:
+		}
+	}()
+	select {
+	case r := <-done:
+		return r.matched
+	case <-time.After(vpRegexTimeout):
+		log.Printf("[virtualpatch] regex match timed out after %v", vpRegexTimeout)
+		return false
+	}
 }
 
 // shouldBlock checks if a severity level should be blocked.

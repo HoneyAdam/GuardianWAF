@@ -340,7 +340,7 @@ func (h *Handlers) updateTenantWAFConfig(w http.ResponseWriter, r *http.Request,
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(tenant); err != nil {
+	if err := json.NewEncoder(w).Encode(sanitizeTenant(tenant)); err != nil {
 		// Client disconnected, error ignored
 		_ = err
 	}

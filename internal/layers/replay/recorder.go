@@ -95,7 +95,7 @@ func NewRecorder(cfg *Config) (*Recorder, error) {
 	}
 
 	// Ensure storage directory exists
-	if err := os.MkdirAll(cfg.StoragePath, 0755); err != nil {
+	if err := os.MkdirAll(cfg.StoragePath, 0700); err != nil {
 		return nil, fmt.Errorf("failed to create replay directory: %w", err)
 	}
 

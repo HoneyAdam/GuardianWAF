@@ -6,12 +6,14 @@ package rules
 import (
 	"context"
 	"fmt"
+	"log"
 	"net"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/guardianwaf/guardianwaf/internal/config"
@@ -321,12 +323,47 @@ func (l *Layer) getFieldValue(field string, ctx *engine.RequestContext) string {
 // regexMatchTimeout limits regex execution time to prevent ReDoS attacks.
 const regexMatchTimeout = 5 * time.Second
 
+// maxConcurrentRegex limits the number of simultaneous regex goroutines.
+var activeRegexCount int64
+
+const maxConcurrentRegex = 500
+
+// isRegexSafe performs basic static analysis to reject pathological regex patterns.
+func isRegexSafe(pattern string) error {
+	nesting := 0
+	maxNesting := 0
+	for i := 0; i < len(pattern); i++ {
+		switch pattern[i] {
+		case '(':
+			nesting++
+			if nesting > maxNesting {
+				maxNesting = nesting
+			}
+		case ')':
+			if nesting > 0 {
+				nesting--
+			}
+		}
+	}
+	if maxNesting > 6 {
+		return fmt.Errorf("regex too complex: nesting depth %d exceeds limit 6", maxNesting)
+	}
+	if len(pattern) > 2000 {
+		return fmt.Errorf("regex too long: %d bytes exceeds limit 2000", len(pattern))
+	}
+	return nil
+}
+
 func (l *Layer) regexMatch(pattern, value string) bool {
 	l.mu.RLock()
 	re, ok := l.regexCache[pattern]
 	l.mu.RUnlock()
 
 	if !ok {
+		if err := isRegexSafe(pattern); err != nil {
+			log.Printf("[rules] rejecting unsafe regex: %v", err)
+			return false
+		}
 		var err error
 		re, err = regexp.Compile(pattern)
 		if err != nil {
@@ -348,8 +385,16 @@ func (l *Layer) regexMatch(pattern, value string) bool {
 }
 
 // regexMatchWithTimeout runs re.MatchString in a goroutine with a timeout.
-// Returns false on timeout or no match.
+// Returns false on timeout or no match. Limits concurrent regex goroutines.
 func regexMatchWithTimeout(re *regexp.Regexp, s string) bool {
+	// Limit concurrent regex goroutines to prevent resource exhaustion
+	if cur := atomic.AddInt64(&activeRegexCount, 1); cur > maxConcurrentRegex {
+		atomic.AddInt64(&activeRegexCount, -1)
+		log.Printf("[rules] regex concurrency limit reached (%d), skipping match", maxConcurrentRegex)
+		return false
+	}
+	defer atomic.AddInt64(&activeRegexCount, -1)
+
 	type result struct {
 		matched bool
 	}

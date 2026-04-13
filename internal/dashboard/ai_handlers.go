@@ -68,11 +68,11 @@ func (d *Dashboard) handleAIGetConfig(w http.ResponseWriter, r *http.Request) {
 	}
 	store := d.aiAnalyzer.GetStore()
 	cfg := store.GetConfig()
-	// Mask API key for display
+	// Mask API key for display - show only last 4 chars to prevent partial exposure
 	maskedKey := ""
 	if cfg.APIKey != "" {
-		if len(cfg.APIKey) > 8 {
-			maskedKey = cfg.APIKey[:4] + "..." + cfg.APIKey[len(cfg.APIKey)-4:]
+		if len(cfg.APIKey) >= 8 {
+			maskedKey = "****" + cfg.APIKey[len(cfg.APIKey)-4:]
 		} else {
 			maskedKey = "****"
 		}
@@ -172,10 +172,8 @@ func (d *Dashboard) handleAIStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	usage := store.GetUsage()
-	storePath := store.Path()
 	writeJSON(w, http.StatusOK, map[string]any{
 		"enabled":            true,
-		"store_path":         storePath,
 		"tokens_used_hour":   usage.TokensUsedHour,
 		"tokens_used_day":    usage.TokensUsedDay,
 		"requests_hour":      usage.RequestsHour,

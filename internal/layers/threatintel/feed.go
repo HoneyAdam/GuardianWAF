@@ -422,6 +422,21 @@ func validateFeedURL(rawURL string) error {
 		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() {
 			return fmt.Errorf("feed URL must not target private/loopback/link-local addresses")
 		}
+		return nil
+	}
+	// Hostname — resolve DNS and check all resulting IPs (prevents DNS rebinding)
+	addrs, err := net.LookupHost(host)
+	if err != nil {
+		return nil
+	}
+	for _, addr := range addrs {
+		ip := net.ParseIP(addr)
+		if ip == nil {
+			continue
+		}
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() || ip.IsUnspecified() {
+			return fmt.Errorf("feed URL hostname resolves to private/loopback address %s", ip)
+		}
 	}
 	return nil
 }

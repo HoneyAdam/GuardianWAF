@@ -439,7 +439,9 @@ func sanitizeErr(err error) string {
 		return ""
 	}
 	msg := err.Error()
-	if strings.Contains(msg, "/") || strings.Contains(msg, "\\") {
+	if strings.Contains(msg, "/") || strings.Contains(msg, "\\") ||
+		strings.Contains(msg, "goroutine") || strings.Contains(msg, "runtime/") ||
+		strings.Contains(msg, "\n") || strings.Contains(msg, "\r") {
 		return "internal error"
 	}
 	if len(msg) > 200 {

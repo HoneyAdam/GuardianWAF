@@ -48,7 +48,8 @@ func (h *SSEHandler) RegisterRoutes(mux *http.ServeMux) {
 
 func (h *SSEHandler) authenticate(r *http.Request) bool {
 	if h.apiKey == "" {
-		return true
+		log.Printf("[mcp/sse] SECURITY: rejecting unauthenticated request from %s — no API key configured", r.RemoteAddr)
+		return false
 	}
 	if key := r.Header.Get("X-API-Key"); key != "" {
 		return subtle.ConstantTimeCompare([]byte(key), []byte(h.apiKey)) == 1

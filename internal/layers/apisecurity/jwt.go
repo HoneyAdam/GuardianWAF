@@ -19,7 +19,9 @@ import (
 	"io"
 	"log"
 	"math/big"
+	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"sync"
 	"time"
@@ -42,11 +44,12 @@ type JWTConfig struct {
 
 // JWTValidator validates JWT tokens.
 type JWTValidator struct {
-	config    JWTConfig
-	publicKey crypto.PublicKey
-	jwksCache *sync.Map // kid -> crypto.PublicKey
-	client    *http.Client
-	stopCh    chan struct{}
+	config      JWTConfig
+	publicKey   crypto.PublicKey
+	jwksCache   *sync.Map // kid -> crypto.PublicKey
+	client      *http.Client
+	stopCh      chan struct{}
+	ssrfChecked bool // tracks if JWKS URL SSRF validation passed
 }
 
 // JWTClaims represents the standard JWT claims.
@@ -91,6 +94,11 @@ func NewJWTValidator(cfg JWTConfig) (*JWTValidator, error) {
 
 	// Fetch JWKS if URL provided — start periodic refresh
 	if cfg.JWKSURL != "" {
+		// SSRF validation — fail fast on private network URLs
+		if err := validateJWKSURL(cfg.JWKSURL); err != nil {
+			return nil, fmt.Errorf("JWKS URL rejected: %w", err)
+		}
+		v.ssrfChecked = true
 		go v.fetchJWKS()
 		go v.refreshJWKSPeriodically(5 * time.Minute)
 	}
@@ -1052,4 +1060,47 @@ func GenerateToken(claims JWTClaims, secret []byte, alg string) (string, error) 
 	}
 
 	return signingInput + "." + base64.RawURLEncoding.EncodeToString(sig), nil
+}
+
+// validateJWKSURL checks that the JWKS URL does not target private/internal networks.
+// Prevents SSRF attacks via maliciously configured JWKS endpoints.
+func validateJWKSURL(rawURL string) error {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid URL: %w", err)
+	}
+	host := u.Hostname()
+	if host == "" {
+		return fmt.Errorf("URL has no host")
+	}
+	// Reject known local hostnames
+	if host == "localhost" || strings.HasSuffix(host, ".internal") ||
+		strings.HasSuffix(host, ".local") || strings.HasSuffix(host, ".localhost") {
+		return fmt.Errorf("must not target localhost or internal hosts")
+	}
+	// Check raw IP
+	if ip := net.ParseIP(host); ip != nil {
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
+			ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+			return fmt.Errorf("must not target private/loopback/link-local addresses")
+		}
+		return nil
+	}
+	// Resolve DNS and check all resulting IPs
+	addrs, err := net.LookupHost(host)
+	if err != nil {
+		// Allow through if DNS fails — will fail at connection time
+		return nil
+	}
+	for _, addr := range addrs {
+		ip := net.ParseIP(addr)
+		if ip == nil {
+			continue
+		}
+		if ip.IsLoopback() || ip.IsPrivate() || ip.IsLinkLocalUnicast() ||
+			ip.IsLinkLocalMulticast() || ip.IsUnspecified() {
+			return fmt.Errorf("hostname resolves to private/loopback address %s", ip)
+		}
+	}
+	return nil
 }

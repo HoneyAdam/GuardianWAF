@@ -20,6 +20,7 @@ import (
 const (
 	sessionCookieName = "gwaf_session"
 	sessionMaxAge     = 24 * time.Hour
+	sessionAbsMaxAge  = 7 * 24 * time.Hour // Absolute maximum session lifetime (7 days)
 )
 
 // secretHolder holds the HMAC signing key atomically for thread safety.
@@ -29,10 +30,9 @@ var secretHolder atomic.Value
 func init() {
 	secret := make([]byte, 32)
 	if _, err := rand.Read(secret); err != nil {
-		// Fallback: hash of randomness source + timestamp as emergency secret
-		h := sha256.Sum256([]byte(fmt.Sprintf("%d-%d", time.Now().UnixNano(), len(secret))))
-		secret = h[:]
-		log.Printf("[auth] WARNING: crypto/rand failed, using fallback session secret")
+		// crypto/rand failure is a critical security issue — cannot safely generate
+		// session secrets. Fail fast rather than using a predictable fallback.
+		log.Fatalf("[auth] FATAL: crypto/rand failed — cannot generate session secret: %v", err)
 	}
 	secretHolder.Store(secret)
 }
@@ -60,7 +60,8 @@ func SetSessionSecret(key string) {
 // signSession creates an HMAC-signed session token bound to a client IP: timestamp.signature
 // The IP is included in the HMAC to prevent session cookie theft across different clients.
 func signSession(clientIP string) string {
-	ts := fmt.Sprintf("%d", time.Now().Unix())
+	now := time.Now().Unix()
+	ts := fmt.Sprintf("%d.%d", now, now) // timestamp.creation_timestamp
 	mac := hmac.New(sha256.New, loadSecret())
 	mac.Write([]byte(ts + ":" + clientIP))
 	sig := hex.EncodeToString(mac.Sum(nil))
@@ -69,28 +70,38 @@ func signSession(clientIP string) string {
 
 // verifySession checks if a session token is valid, not expired, and bound to the given client IP.
 func verifySession(token, clientIP string) bool {
-	parts := strings.SplitN(token, ".", 2)
-	if len(parts) != 2 {
+	parts := strings.SplitN(token, ".", 3)
+	if len(parts) != 3 {
 		return false
 	}
 	ts := parts[0]
-	sig := parts[1]
+	created := parts[1]
+	sig := parts[2]
 
-	// Verify HMAC (includes IP binding)
+	// Verify HMAC (includes IP binding) — use ts.created as the signed payload
+	tsFull := ts + "." + created
 	mac := hmac.New(sha256.New, loadSecret())
-	mac.Write([]byte(ts + ":" + clientIP))
+	mac.Write([]byte(tsFull + ":" + clientIP))
 	expected := hex.EncodeToString(mac.Sum(nil))
 	if !hmac.Equal([]byte(sig), []byte(expected)) {
 		return false
 	}
 
-	// Check expiry
+	// Check sliding expiry (last renewal)
 	unix, err := strconv.ParseInt(ts, 10, 64)
 	if err != nil || unix < 0 {
 		return false
 	}
-	created := time.Unix(unix, 0)
-	return time.Since(created) < sessionMaxAge
+	if time.Since(time.Unix(unix, 0)) >= sessionMaxAge {
+		return false
+	}
+
+	// Check absolute expiry (creation time)
+	createdUnix, err := strconv.ParseInt(created, 10, 64)
+	if err != nil || createdUnix < 0 {
+		return false
+	}
+	return time.Since(time.Unix(createdUnix, 0)) < sessionAbsMaxAge
 }
 
 // clientIPFromRequest extracts the client IP from a request's RemoteAddr.
@@ -98,6 +109,10 @@ func clientIPFromRequest(r *http.Request) string {
 	ip := r.RemoteAddr
 	if host, _, err := net.SplitHostPort(ip); err == nil {
 		ip = host
+	}
+	// Normalize IPv6 addresses to prevent rate-limit bypass via different representations
+	if parsed := net.ParseIP(ip); parsed != nil {
+		ip = parsed.String()
 	}
 	return ip
 }

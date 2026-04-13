@@ -194,7 +194,9 @@ func (m *Manager) HandleEvent(event *engine.Event) {
 				defer func() {
 					if r := recover(); r != nil {
 						m.failed.Add(1)
-						m.logFn.Load().(func(string, string))("error", fmt.Sprintf("webhook goroutine panic: %v", r))
+						if logFn, ok := m.logFn.Load().(func(string, string)); ok {
+						logFn("error", fmt.Sprintf("webhook goroutine panic: %v", r))
+					}
 					}
 				}()
 				m.send(wc, a)

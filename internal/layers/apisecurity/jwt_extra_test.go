@@ -1352,9 +1352,10 @@ func TestFetchJWKS_RSAKey(t *testing.T) {
 
 	v, _ := NewJWTValidator(JWTConfig{
 		Enabled: true,
-		JWKSURL: srv.URL,
 	})
-	// Manually trigger fetch (constructor starts it in goroutine)
+	// Set JWKS URL directly (bypass SSRF check for localhost test server)
+	v.config.JWKSURL = srv.URL
+	// Manually trigger fetch
 	v.fetchJWKS()
 
 	// Verify key was cached
@@ -1393,7 +1394,8 @@ func TestFetchJWKS_ECKey(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	v, _ := NewJWTValidator(JWTConfig{Enabled: true, JWKSURL: srv.URL})
+	v, _ := NewJWTValidator(JWTConfig{Enabled: true})
+	v.config.JWKSURL = srv.URL
 	v.fetchJWKS()
 
 	k, ok := v.jwksCache.Load("ec-key-1")
@@ -1421,7 +1423,8 @@ func TestFetchJWKS_BadResponse(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	v, _ := NewJWTValidator(JWTConfig{Enabled: true, JWKSURL: srv.URL})
+	v, _ := NewJWTValidator(JWTConfig{Enabled: true})
+	v.config.JWKSURL = srv.URL
 	// Should not panic
 	v.fetchJWKS()
 }
@@ -1446,7 +1449,8 @@ func TestFetchJWKS_NoKid(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	v, _ := NewJWTValidator(JWTConfig{Enabled: true, JWKSURL: srv.URL})
+	v, _ := NewJWTValidator(JWTConfig{Enabled: true})
+	v.config.JWKSURL = srv.URL
 	v.fetchJWKS()
 
 	// Key without kid should not be cached
@@ -1842,8 +1846,9 @@ func TestFetchJWKS_EC_P384_P521(t *testing.T) {
 			}))
 			defer srv.Close()
 
-			v, _ := NewJWTValidator(JWTConfig{Enabled: true, JWKSURL: srv.URL})
-			v.fetchJWKS()
+			v, _ := NewJWTValidator(JWTConfig{Enabled: true})
+				v.config.JWKSURL = srv.URL
+				v.fetchJWKS()
 
 			k, ok := v.jwksCache.Load(tc.name)
 			if !ok {
@@ -1923,7 +1928,8 @@ func TestFetchJWKS_UnknownCurve(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	v, _ := NewJWTValidator(JWTConfig{Enabled: true, JWKSURL: srv.URL})
+	v, _ := NewJWTValidator(JWTConfig{Enabled: true})
+	v.config.JWKSURL = srv.URL
 	v.fetchJWKS()
 
 	_, ok := v.jwksCache.Load("unknown-curve")

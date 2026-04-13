@@ -106,7 +106,7 @@ func NewEngine(cfg *Config) (*Engine, error) {
 
 	// Ensure storage directory exists
 	if cfg.StoragePath != "" {
-		if err := os.MkdirAll(cfg.StoragePath, 0755); err != nil {
+		if err := os.MkdirAll(cfg.StoragePath, 0700); err != nil {
 			log.Printf("[remediation] warning: failed to create storage directory %s: %v", cfg.StoragePath, err)
 		}
 	}

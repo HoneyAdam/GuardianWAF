@@ -318,7 +318,7 @@ func (bm *BillingManager) save() error {
 		CurrentUsage: bm.currentUsage,
 	}
 
-	if err := os.MkdirAll(filepath.Dir(bm.storePath), 0755); err != nil {
+	if err := os.MkdirAll(filepath.Dir(bm.storePath), 0700); err != nil {
 		return fmt.Errorf("creating billing directory: %w", err)
 	}
 	tmpFile := bm.storePath + ".tmp"

@@ -115,14 +115,26 @@ func (t *AttemptTracker) RecordAttempt(attempt *LoginAttempt) {
 			emailRec.mu.Unlock()
 		}
 
-		// Track IP->Email mapping for credential stuffing (capped by ipAttempts presence)
+		// Track IP->Email mapping for credential stuffing (capped by maxEntries)
 		if t.ipToEmails[ip] == nil {
+			if len(t.ipToEmails) >= t.maxEntries {
+				for k := range t.ipToEmails {
+					delete(t.ipToEmails, k)
+					break
+				}
+			}
 			t.ipToEmails[ip] = make(map[string]bool)
 		}
 		t.ipToEmails[ip][attempt.Email] = true
 
-		// Track Email->IP mapping (capped by emailAttempts presence)
+		// Track Email->IP mapping (capped by maxEntries)
 		if t.emailToIPs[attempt.Email] == nil {
+			if len(t.emailToIPs) >= t.maxEntries {
+				for k := range t.emailToIPs {
+					delete(t.emailToIPs, k)
+					break
+				}
+			}
 			t.emailToIPs[attempt.Email] = make(map[string]bool)
 		}
 		t.emailToIPs[attempt.Email][ip] = true

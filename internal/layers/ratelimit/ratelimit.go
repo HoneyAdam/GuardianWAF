@@ -36,10 +36,13 @@ type Layer struct {
 	config     Config
 	buckets    sync.Map // key -> *TokenBucket
 	violations sync.Map // key -> *int64 (violation count for auto-ban)
+	bucketCount atomic.Int64
 
 	// OnAutoBan is called when violation count exceeds AutoBanAfter.
 	OnAutoBan func(ip string, reason string)
 }
+
+const maxBuckets = 500000 // Hard cap to prevent memory exhaustion
 
 // NewLayer creates a new rate limiter layer.
 func NewLayer(cfg *Config) *Layer {
@@ -98,6 +101,7 @@ func (l *Layer) Cleanup(maxAge time.Duration) {
 		b, ok := value.(*TokenBucket)
 		if !ok || now.Sub(b.LastAccess()) > maxAge {
 			l.buckets.Delete(key)
+			l.bucketCount.Add(-1)
 		}
 		return true
 	})
@@ -140,6 +144,9 @@ func (l *Layer) Process(ctx *engine.RequestContext) engine.LayerResult {
 
 		key := l.bucketKey(rule, ip, reqPath)
 		bucket := l.getOrCreateBucket(key, rule)
+		if bucket == nil {
+			continue // bucket limit reached, skip this rule
+		}
 
 		if !bucket.Allow() {
 			finding := engine.Finding{
@@ -204,6 +211,11 @@ func (l *Layer) getOrCreateBucket(key string, rule *Rule) *TokenBucket {
 		return val.(*TokenBucket)
 	}
 
+	// Hard cap: reject new bucket creation when limit reached
+	if l.bucketCount.Load() >= maxBuckets {
+		return nil
+	}
+
 	maxTokens := float64(rule.Limit)
 	if rule.Burst > 0 {
 		maxTokens = float64(rule.Burst)
@@ -216,7 +228,10 @@ func (l *Layer) getOrCreateBucket(key string, rule *Rule) *TokenBucket {
 	}
 
 	bucket := NewTokenBucket(maxTokens, refillRate)
-	actual, _ := l.buckets.LoadOrStore(key, bucket)
+	actual, loaded := l.buckets.LoadOrStore(key, bucket)
+	if !loaded {
+		l.bucketCount.Add(1)
+	}
 	return actual.(*TokenBucket)
 }
 

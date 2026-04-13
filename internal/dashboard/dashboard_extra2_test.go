@@ -266,8 +266,8 @@ func TestAIGetConfig_WithAnalyzer(t *testing.T) {
 		t.Error("expected api_key_set=true")
 	}
 	mask, _ := result["api_key_mask"].(string)
-	if !strings.Contains(mask, "sk-t") || !strings.Contains(mask, "5678") {
-		t.Errorf("expected masked key, got %s", mask)
+	if !strings.HasPrefix(mask, "****") || !strings.HasSuffix(mask, "5678") {
+		t.Errorf("expected masked key with only last 4 chars, got %s", mask)
 	}
 }
 
@@ -506,9 +506,7 @@ func TestAIStats_WithAnalyzer(t *testing.T) {
 	if result["enabled"] != true {
 		t.Errorf("expected enabled=true, got %v", result["enabled"])
 	}
-	if result["store_path"] == nil {
-		t.Error("expected store_path field")
-	}
+	// store_path is intentionally excluded from API response (L08: path leakage fix)
 }
 
 // --- handleAIAnalyze ---

@@ -86,7 +86,14 @@ func (p *Pipeline) Execute(ctx *RequestContext) (result PipelineResult) {
 		layer := ol.Layer
 
 		// Check if this layer should be skipped due to exclusions
-		if shouldSkip(layer, ctx.Path, exclusions) {
+		// Use normalized path when available for exclusion matching (prevents
+		// evasion via path traversal like /api/webhook/../../etc/passwd).
+		// Falls back to raw path for layers that run before the sanitizer.
+		skipPath := ctx.NormalizedPath
+		if skipPath == "" {
+			skipPath = ctx.Path
+		}
+		if shouldSkip(layer, skipPath, exclusions) {
 			continue
 		}
 

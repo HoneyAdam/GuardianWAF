@@ -883,7 +883,12 @@ func cmdServe(args []string) {
 	var upstreamHandler atomic.Value
 	upstreamHandler.Store(eng.Middleware(upstream))
 	serveMux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		upstreamHandler.Load().(http.Handler).ServeHTTP(w, r)
+		handler, ok := upstreamHandler.Load().(http.Handler)
+			if !ok || handler == nil {
+				http.Error(w, "service unavailable", http.StatusServiceUnavailable)
+				return
+			}
+			handler.ServeHTTP(w, r)
 	})
 	handler := http.Handler(serveMux)
 
@@ -1025,8 +1030,26 @@ func cmdServe(args []string) {
 				host = host[:idx]
 			}
 			// Sanitize host to prevent open redirect via Host header injection
-			if strings.ContainsAny(host, "@/") {
+			if strings.ContainsAny(host, "@/") || len(host) == 0 || len(host) > 253 {
 				host = ""
+			}
+			// Validate host against known TLS domains or allow localhost
+			if host != "" && host != "localhost" {
+				hostOK := false
+				for _, vh := range cfg.VirtualHosts {
+					for _, dom := range vh.Domains {
+						if dom == host || (len(dom) > 1 && dom[0] == '*' && strings.HasSuffix(host, dom[1:])) {
+							hostOK = true
+							break
+						}
+					}
+					if hostOK {
+						break
+					}
+				}
+				if !hostOK {
+					host = ""
+				}
 			}
 			uri := r.URL.RequestURI()
 			// Prevent open redirect via protocol-relative URLs (//evil.com)
@@ -1245,7 +1268,11 @@ func cmdServe(args []string) {
 		if tenantManager != nil {
 			tenantMiddleware = tenant.NewMiddleware(tenantManager)
 			// Store original handler
-			originalHandler := upstreamHandler.Load().(http.Handler)
+			originalHandler, ok := upstreamHandler.Load().(http.Handler)
+			if !ok || originalHandler == nil {
+				eng.Logs.Warnf("tenant middleware: upstream handler not available")
+				return
+			}
 			// Wrap with tenant middleware
 			wrappedHandler := tenantMiddleware.Handler(originalHandler)
 			upstreamHandler.Store(wrappedHandler)

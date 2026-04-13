@@ -682,7 +682,7 @@ func (i *Integrator) handleDiscoveryExport(w http.ResponseWriter, r *http.Reques
 		var err error
 		data, err = spec.ToJSON()
 		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			http.Error(w, "export failed", http.StatusInternalServerError)
 			return
 		}
 		contentType = "application/json"
@@ -707,7 +707,7 @@ func (i *Integrator) handleDiscoverySpec(w http.ResponseWriter, r *http.Request)
 	spec := i.apiDiscovery.ExportToOpenAPI()
 	data, err := spec.ToJSON()
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, "export failed", http.StatusInternalServerError)
 		return
 	}
 

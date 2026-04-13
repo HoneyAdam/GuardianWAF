@@ -24,6 +24,20 @@ func helperSSEServer(apiKey string) (*SSEHandler, *Server) {
 	return handler, srv
 }
 
+// helperAuthReq creates an authenticated request with the default test API key.
+func helperAuthReq(method, target string, body io.Reader) *http.Request {
+	req := httptest.NewRequest(method, target, body)
+	req.Header.Set("X-API-Key", "test-api-key")
+	return req
+}
+
+// helperAuthReqKey creates an authenticated request with a custom API key.
+func helperAuthReqKey(method, target string, body io.Reader, key string) *http.Request {
+	req := httptest.NewRequest(method, target, body)
+	req.Header.Set("X-API-Key", key)
+	return req
+}
+
 // --- NewSSEHandler ---
 
 func TestNewSSEHandler_BasicFields(t *testing.T) {
@@ -47,11 +61,17 @@ func TestNewSSEHandler_BasicFields(t *testing.T) {
 
 // --- authenticate ---
 
-func TestAuthenticate_EmptyAPIKeyAllowsAll(t *testing.T) {
-	handler, _ := helperSSEServer("")
+func TestAuthenticate_NonEmptyKeyRequiresHeader(t *testing.T) {
+	handler, _ := helperSSEServer("test-api-key")
 	req := httptest.NewRequest(http.MethodGet, "/mcp/sse", nil)
-	if !handler.authenticate(req) {
-		t.Fatal("expected empty apiKey to allow all requests")
+	if handler.authenticate(req) {
+		t.Fatal("expected request without API key to be denied when apiKey is set")
+	}
+	// Correct key should pass
+	req2 := httptest.NewRequest(http.MethodGet, "/mcp/sse", nil)
+	req2.Header.Set("X-API-Key", "test-api-key")
+	if !handler.authenticate(req2) {
+		t.Fatal("expected correct API key to authenticate")
 	}
 }
 
@@ -93,12 +113,12 @@ func TestAuthenticate_NoKeyWhenRequiredDenies(t *testing.T) {
 // --- RegisterRoutes ---
 
 func TestRegisterRoutes_Registered(t *testing.T) {
-	handler, _ := helperSSEServer("")
+	handler, _ := helperSSEServer("test-api-key")
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
 
 	// Verify POST /mcp/message route is reachable.
-	req := httptest.NewRequest(http.MethodPost, "/mcp/message", nil)
+	req := helperAuthReq(http.MethodPost, "/mcp/message", nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
 	// Empty body -> LimitReader returns 0 bytes -> empty JSON -> parse error handled
@@ -112,7 +132,7 @@ func TestRegisterRoutes_Registered(t *testing.T) {
 	// Verify GET /mcp/sse route is reachable (it blocks on context, so use a cancellable context).
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
-	sseReq := httptest.NewRequest(http.MethodGet, "/mcp/sse", nil).WithContext(ctx)
+	sseReq := helperAuthReq(http.MethodGet, "/mcp/sse", nil).WithContext(ctx)
 	sseW := httptest.NewRecorder()
 	mux.ServeHTTP(sseW, sseReq)
 	// After context cancellation the handler unblocks; check that it wrote the SSE headers.
@@ -124,14 +144,14 @@ func TestRegisterRoutes_Registered(t *testing.T) {
 // --- ClientCount ---
 
 func TestClientCount_InitiallyZero(t *testing.T) {
-	handler, _ := helperSSEServer("")
+	handler, _ := helperSSEServer("test-api-key")
 	if handler.ClientCount() != 0 {
 		t.Fatalf("expected 0 clients, got %d", handler.ClientCount())
 	}
 }
 
 func TestClientCount_AfterSSEConnection(t *testing.T) {
-	handler, _ := helperSSEServer("")
+	handler, _ := helperSSEServer("test-api-key")
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
 
@@ -143,6 +163,7 @@ func TestClientCount_AfterSSEConnection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("creating request: %v", err)
 	}
+	req.Header.Set("X-API-Key", "test-api-key")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("SSE connection failed: %v", err)
@@ -185,14 +206,19 @@ func TestHandleSSE_Unauthorized(t *testing.T) {
 }
 
 func TestHandleSSE_Headers(t *testing.T) {
-	handler, _ := helperSSEServer("")
+	handler, _ := helperSSEServer("test-api-key")
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
 
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
 
-	resp, err := http.Get(ts.URL + "/mcp/sse") //nolint:noctx
+	sseReq, err := http.NewRequest(http.MethodGet, ts.URL+"/mcp/sse", nil) //nolint:noctx
+	if err != nil {
+		t.Fatalf("creating request: %v", err)
+	}
+	sseReq.Header.Set("X-API-Key", "test-api-key")
+	resp, err := http.DefaultClient.Do(sseReq)
 	if err != nil {
 		t.Fatalf("SSE connection failed: %v", err)
 	}
@@ -218,14 +244,19 @@ func TestHandleSSE_Headers(t *testing.T) {
 }
 
 func TestHandleSSE_EndpointEvent(t *testing.T) {
-	handler, _ := helperSSEServer("")
+	handler, _ := helperSSEServer("test-api-key")
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
 
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
 
-	resp, err := http.Get(ts.URL + "/mcp/sse") //nolint:noctx
+	epReq, err := http.NewRequest(http.MethodGet, ts.URL+"/mcp/sse", nil) //nolint:noctx
+	if err != nil {
+		t.Fatalf("creating request: %v", err)
+	}
+	epReq.Header.Set("X-API-Key", "test-api-key")
+	resp, err := http.DefaultClient.Do(epReq)
 	if err != nil {
 		t.Fatalf("SSE connection failed: %v", err)
 	}
@@ -269,8 +300,8 @@ func TestHandleMessage_Unauthorized(t *testing.T) {
 }
 
 func TestHandleMessage_EmptyBody(t *testing.T) {
-	handler, _ := helperSSEServer("")
-	req := httptest.NewRequest(http.MethodPost, "/mcp/message", strings.NewReader(""))
+	handler, _ := helperSSEServer("test-api-key")
+	req := helperAuthReq(http.MethodPost, "/mcp/message", strings.NewReader(""))
 	w := httptest.NewRecorder()
 	handler.handleMessage(w, req)
 
@@ -283,9 +314,9 @@ func TestHandleMessage_EmptyBody(t *testing.T) {
 }
 
 func TestHandleMessage_ValidJSONRPC(t *testing.T) {
-	handler, _ := helperSSEServer("")
+	handler, _ := helperSSEServer("test-api-key")
 	reqBody := `{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05"}}`
-	req := httptest.NewRequest(http.MethodPost, "/mcp/message", strings.NewReader(reqBody))
+	req := helperAuthReq(http.MethodPost, "/mcp/message", strings.NewReader(reqBody))
 	w := httptest.NewRecorder()
 	handler.handleMessage(w, req)
 
@@ -295,8 +326,8 @@ func TestHandleMessage_ValidJSONRPC(t *testing.T) {
 }
 
 func TestHandleMessage_InvalidJSON(t *testing.T) {
-	handler, _ := helperSSEServer("")
-	req := httptest.NewRequest(http.MethodPost, "/mcp/message", strings.NewReader("not-json"))
+	handler, _ := helperSSEServer("test-api-key")
+	req := helperAuthReq(http.MethodPost, "/mcp/message", strings.NewReader("not-json"))
 	w := httptest.NewRecorder()
 	handler.handleMessage(w, req)
 
@@ -453,7 +484,7 @@ func TestWriteResponse_NilWriter(t *testing.T) {
 // --- broadcastResponse ---
 
 func TestBroadcastResponse_SendsToClients(t *testing.T) {
-	handler, _ := helperSSEServer("")
+	handler, _ := helperSSEServer("test-api-key")
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
 
@@ -461,7 +492,12 @@ func TestBroadcastResponse_SendsToClients(t *testing.T) {
 	defer ts.Close()
 
 	// Connect SSE client.
-	resp, err := http.Get(ts.URL + "/mcp/sse") //nolint:noctx
+	sseReq, err := http.NewRequest(http.MethodGet, ts.URL+"/mcp/sse", nil) //nolint:noctx
+	if err != nil {
+		t.Fatalf("creating SSE request: %v", err)
+	}
+	sseReq.Header.Set("X-API-Key", "test-api-key")
+	resp, err := http.DefaultClient.Do(sseReq)
 	if err != nil {
 		t.Fatalf("SSE connection failed: %v", err)
 	}
@@ -485,7 +521,13 @@ func TestBroadcastResponse_SendsToClients(t *testing.T) {
 
 	// Send a message via POST to trigger broadcastResponse.
 	initReq := `{"jsonrpc":"2.0","id":99,"method":"initialize","params":{"protocolVersion":"2024-11-05"}}`
-	postResp, err := http.Post(ts.URL+"/mcp/message", "application/json", strings.NewReader(initReq)) //nolint:noctx
+	postReq, err := http.NewRequest(http.MethodPost, ts.URL+"/mcp/message", strings.NewReader(initReq)) //nolint:noctx
+	if err != nil {
+		t.Fatalf("creating POST request: %v", err)
+	}
+	postReq.Header.Set("X-API-Key", "test-api-key")
+	postReq.Header.Set("Content-Type", "application/json")
+	postResp, err := http.DefaultClient.Do(postReq)
 	if err != nil {
 		t.Fatalf("POST message failed: %v", err)
 	}
@@ -551,7 +593,7 @@ func TestBroadcastResponse_SendsToClients(t *testing.T) {
 // --- Integration: multiple SSE clients receive broadcast ---
 
 func TestBroadcastResponse_MultipleClients(t *testing.T) {
-	handler, _ := helperSSEServer("")
+	handler, _ := helperSSEServer("test-api-key")
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
 
@@ -566,7 +608,13 @@ func TestBroadcastResponse_MultipleClients(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			resp, err := http.Get(ts.URL + "/mcp/sse") //nolint:noctx
+			sseReq, err := http.NewRequest(http.MethodGet, ts.URL+"/mcp/sse", nil) //nolint:noctx
+			if err != nil {
+				results <- fmt.Sprintf("error: %v", err)
+				return
+			}
+			sseReq.Header.Set("X-API-Key", "test-api-key")
+			resp, err := http.DefaultClient.Do(sseReq)
 			if err != nil {
 				results <- fmt.Sprintf("error: %v", err)
 				return
@@ -599,7 +647,13 @@ func TestBroadcastResponse_MultipleClients(t *testing.T) {
 
 	// Send a message to trigger broadcast.
 	initReq := `{"jsonrpc":"2.0","id":42,"method":"initialize","params":{}}`
-	postResp, err := http.Post(ts.URL+"/mcp/message", "application/json", strings.NewReader(initReq)) //nolint:noctx
+	postReq, err := http.NewRequest(http.MethodPost, ts.URL+"/mcp/message", strings.NewReader(initReq)) //nolint:noctx
+	if err != nil {
+		t.Fatalf("creating POST request: %v", err)
+	}
+	postReq.Header.Set("X-API-Key", "test-api-key")
+	postReq.Header.Set("Content-Type", "application/json")
+	postResp, err := http.DefaultClient.Do(postReq)
 	if err != nil {
 		t.Fatalf("POST message failed: %v", err)
 	}
@@ -628,7 +682,7 @@ func TestBroadcastResponse_MultipleClients(t *testing.T) {
 // --- broadcastResponse with no clients (should not panic) ---
 
 func TestBroadcastResponse_NoClients(t *testing.T) {
-	handler, _ := helperSSEServer("")
+	handler, _ := helperSSEServer("test-api-key")
 	resp := JSONRPCResponse{
 		JSONRPC: "2.0",
 		ID:      1,
@@ -641,8 +695,8 @@ func TestBroadcastResponse_NoClients(t *testing.T) {
 // --- handleMessage read error (body returns error) ---
 
 func TestHandleMessage_BodyReadError(t *testing.T) {
-	handler, _ := helperSSEServer("")
-	req := httptest.NewRequest(http.MethodPost, "/mcp/message", &errReader{err: fmt.Errorf("read failure")})
+	handler, _ := helperSSEServer("test-api-key")
+	req := helperAuthReq(http.MethodPost, "/mcp/message", &errReader{err: fmt.Errorf("read failure")})
 	w := httptest.NewRecorder()
 	handler.handleMessage(w, req)
 
@@ -654,7 +708,7 @@ func TestHandleMessage_BodyReadError(t *testing.T) {
 // --- handleMessage with SSE client connected (broadcast path) ---
 
 func TestHandleMessage_BroadcastsToSSEClient(t *testing.T) {
-	handler, _ := helperSSEServer("")
+	handler, _ := helperSSEServer("test-api-key")
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
 
@@ -662,7 +716,12 @@ func TestHandleMessage_BroadcastsToSSEClient(t *testing.T) {
 	defer ts.Close()
 
 	// Connect SSE client.
-	sseResp, err := http.Get(ts.URL + "/mcp/sse")
+	sseReq, err := http.NewRequest(http.MethodGet, ts.URL+"/mcp/sse", nil) //nolint:noctx
+	if err != nil {
+		t.Fatalf("creating SSE request: %v", err)
+	}
+	sseReq.Header.Set("X-API-Key", "test-api-key")
+	sseResp, err := http.DefaultClient.Do(sseReq)
 	if err != nil {
 		t.Fatalf("SSE connection failed: %v", err)
 	}
@@ -678,7 +737,13 @@ func TestHandleMessage_BroadcastsToSSEClient(t *testing.T) {
 
 	// Send a tools/list request via POST.
 	toolsReq := `{"jsonrpc":"2.0","id":7,"method":"tools/list"}`
-	postResp, err := http.Post(ts.URL+"/mcp/message", "application/json", strings.NewReader(toolsReq))
+	msgReq, err := http.NewRequest(http.MethodPost, ts.URL+"/mcp/message", strings.NewReader(toolsReq)) //nolint:noctx
+	if err != nil {
+		t.Fatalf("creating POST request: %v", err)
+	}
+	msgReq.Header.Set("X-API-Key", "test-api-key")
+	msgReq.Header.Set("Content-Type", "application/json")
+	postResp, err := http.DefaultClient.Do(msgReq)
 	if err != nil {
 		t.Fatalf("POST failed: %v", err)
 	}
@@ -753,14 +818,19 @@ func TestHandleSSE_WithAPIKeyQueryParam(t *testing.T) {
 // --- SSE endpoint URL uses https scheme when TLS is set ---
 
 func TestHandleSSE_EndpointURLScheme(t *testing.T) {
-	handler, _ := helperSSEServer("")
+	handler, _ := helperSSEServer("test-api-key")
 	mux := http.NewServeMux()
 	handler.RegisterRoutes(mux)
 
 	ts := httptest.NewServer(mux)
 	defer ts.Close()
 
-	resp, err := http.Get(ts.URL + "/mcp/sse") //nolint:noctx
+	urlReq, err := http.NewRequest(http.MethodGet, ts.URL+"/mcp/sse", nil) //nolint:noctx
+	if err != nil {
+		t.Fatalf("creating request: %v", err)
+	}
+	urlReq.Header.Set("X-API-Key", "test-api-key")
+	resp, err := http.DefaultClient.Do(urlReq)
 	if err != nil {
 		t.Fatalf("SSE connection failed: %v", err)
 	}
@@ -896,7 +966,7 @@ func TestHandleRequestJSON_PreservesOriginalWriter(t *testing.T) {
 // --- broadcastResponse with client whose done channel is closed ---
 
 func TestBroadcastResponse_DoneClient(t *testing.T) {
-	handler, _ := helperSSEServer("")
+	handler, _ := helperSSEServer("test-api-key")
 
 	// Manually create a client with done already closed to simulate a disconnected client.
 	doneCh := make(chan struct{})

@@ -534,8 +534,9 @@ func ParseFrame(r io.Reader) (*Frame, error) {
 
 	frame.PayloadLen = payloadLen
 
-	// Guard against OOM: reject frames claiming payloads larger than 16MB
-	const maxFramePayload = 16 * 1024 * 1024
+	// Guard against OOM: reject frames claiming payloads larger than 2MB.
+	// ValidateFrame applies the config-level MaxFrameSize limit (default 1MB) after parsing.
+	const maxFramePayload = 2 * 1024 * 1024
 	if payloadLen > maxFramePayload {
 		return nil, fmt.Errorf("frame payload too large: %d bytes (max %d)", payloadLen, maxFramePayload)
 	}

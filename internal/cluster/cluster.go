@@ -811,7 +811,8 @@ func (c *Cluster) startHTTPServer() {
 // authenticateCluster validates the X-Cluster-Auth header using constant-time comparison.
 func (c *Cluster) authenticateCluster(r *http.Request) bool {
 	if c.config.AuthSecret == "" {
-		return true // no secret configured, allow (backward-compatible)
+		log.Printf("[cluster] SECURITY: rejecting unauthenticated request from %s — no auth_secret configured", r.RemoteAddr)
+		return false
 	}
 	auth := r.Header.Get("X-Cluster-Auth")
 	return subtle.ConstantTimeCompare([]byte(auth), []byte(c.config.AuthSecret)) == 1
@@ -872,7 +873,7 @@ func (c *Cluster) handleMessageHTTP(w http.ResponseWriter, r *http.Request) {
 	c.handlerMu.RUnlock()
 	if exists {
 		if err := handler(&msg); err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
+			http.Error(w, clusterSanitizeErr(err), http.StatusInternalServerError)
 			return
 		}
 	}
@@ -996,4 +997,20 @@ func generateNodeID() string {
 		return fmt.Sprintf("node-%d", time.Now().UnixNano())
 	}
 	return hex.EncodeToString(b)
+}
+
+// clusterSanitizeErr prevents leaking internal details in HTTP error responses.
+func clusterSanitizeErr(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "/") || strings.Contains(msg, "\\") ||
+		strings.Contains(msg, "goroutine") || strings.Contains(msg, "runtime/") {
+		return "internal error"
+	}
+	if len(msg) > 200 {
+		msg = msg[:200]
+	}
+	return msg
 }

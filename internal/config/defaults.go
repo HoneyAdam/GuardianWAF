@@ -180,18 +180,18 @@ func DefaultConfig() *Config {
 				Enabled:            false,
 				MaxDepth:           10,
 				MaxComplexity:      1000,
-				BlockIntrospection: false,
+				BlockIntrospection: true,
 				AllowEndpoints:     []string{"/graphql", "/api/graphql"},
 			},
 			GRPC: GRPCConfig{
 				Enabled:              true,
 				GRPCWebEnabled:       true,
-				ReflectionEnabled:    true,
+				ReflectionEnabled:    false,
 				ValidateProto:        false, // Enable for strict validation
 				MaxMessageSize:       4 * 1024 * 1024, // 4MB
 				MaxStreamDuration:    30 * time.Minute,
 				MaxConcurrentStreams: 100,
-				RequireTLS:           false,
+				RequireTLS:           true,
 			},
 			Tenant: TenantConfig{
 				Enabled:    false,

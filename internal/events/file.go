@@ -23,7 +23,7 @@ const (
 
 // FileStore writes events as JSONL (one JSON object per line) to a file.
 type FileStore struct {
-	mu       sync.Mutex
+	mu       sync.RWMutex
 	file     *os.File
 	writer   *bufio.Writer
 	ch       chan engine.Event // buffered channel for async writes
@@ -61,6 +61,13 @@ func NewFileStore(filePath string, maxSize int64) (*FileStore, error) {
 
 // Store sends an event to the background writer. Non-blocking; drops the event if the channel is full.
 func (fs *FileStore) Store(event engine.Event) error {
+	fs.mu.RLock()
+	if fs.closed {
+		fs.mu.RUnlock()
+		return errors.New("event dropped: file store is closed")
+	}
+	fs.mu.RUnlock()
+
 	select {
 	case fs.ch <- event:
 		return nil

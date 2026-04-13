@@ -365,6 +365,7 @@ func TestCluster_checkFailedNodes(t *testing.T) {
 func TestHTTP_handleJoinHTTP(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Enabled = true
+	cfg.AuthSecret = "test-secret"
 
 	cluster, err := New(cfg)
 	if err != nil {
@@ -375,6 +376,7 @@ func TestHTTP_handleJoinHTTP(t *testing.T) {
 	body, _ := json.Marshal(node)
 
 	req := httptest.NewRequest(http.MethodPost, "/cluster/join", bytes.NewReader(body))
+	req.Header.Set("X-Cluster-Auth", "test-secret")
 	w := httptest.NewRecorder()
 
 	cluster.handleJoinHTTP(w, req)
@@ -391,6 +393,7 @@ func TestHTTP_handleJoinHTTP(t *testing.T) {
 func TestHTTP_handleJoinHTTP_InvalidMethod(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Enabled = true
+	cfg.AuthSecret = "test-secret"
 
 	cluster, err := New(cfg)
 	if err != nil {
@@ -398,6 +401,7 @@ func TestHTTP_handleJoinHTTP_InvalidMethod(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/cluster/join", nil)
+	req.Header.Set("X-Cluster-Auth", "test-secret")
 	w := httptest.NewRecorder()
 
 	cluster.handleJoinHTTP(w, req)
@@ -410,6 +414,7 @@ func TestHTTP_handleJoinHTTP_InvalidMethod(t *testing.T) {
 func TestHTTP_handleJoinHTTP_InvalidBody(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Enabled = true
+	cfg.AuthSecret = "test-secret"
 
 	cluster, err := New(cfg)
 	if err != nil {
@@ -417,6 +422,7 @@ func TestHTTP_handleJoinHTTP_InvalidBody(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/cluster/join", bytes.NewReader([]byte("invalid")))
+	req.Header.Set("X-Cluster-Auth", "test-secret")
 	w := httptest.NewRecorder()
 
 	cluster.handleJoinHTTP(w, req)
@@ -429,6 +435,7 @@ func TestHTTP_handleJoinHTTP_InvalidBody(t *testing.T) {
 func TestHTTP_handleMessageHTTP(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Enabled = true
+	cfg.AuthSecret = "test-secret"
 
 	cluster, err := New(cfg)
 	if err != nil {
@@ -446,6 +453,7 @@ func TestHTTP_handleMessageHTTP(t *testing.T) {
 	body, _ := json.Marshal(msg)
 
 	req := httptest.NewRequest(http.MethodPost, "/cluster/message", bytes.NewReader(body))
+	req.Header.Set("X-Cluster-Auth", "test-secret")
 	w := httptest.NewRecorder()
 
 	cluster.handleMessageHTTP(w, req)
@@ -463,6 +471,7 @@ func TestHTTP_handleMessageHTTP(t *testing.T) {
 func TestHTTP_handleNodesHTTP(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Enabled = true
+	cfg.AuthSecret = "test-secret"
 
 	cluster, err := New(cfg)
 	if err != nil {
@@ -473,6 +482,7 @@ func TestHTTP_handleNodesHTTP(t *testing.T) {
 	cluster.nodes["node-2"] = &Node{ID: "node-2", State: StateActive}
 
 	req := httptest.NewRequest(http.MethodGet, "/cluster/nodes", nil)
+	req.Header.Set("X-Cluster-Auth", "test-secret")
 	w := httptest.NewRecorder()
 
 	cluster.handleNodesHTTP(w, req)
@@ -494,6 +504,7 @@ func TestHTTP_handleNodesHTTP(t *testing.T) {
 func TestHTTP_handleHealthHTTP(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Enabled = true
+	cfg.AuthSecret = "test-secret"
 	cfg.NodeID = "test-node"
 
 	cluster, err := New(cfg)
@@ -505,6 +516,7 @@ func TestHTTP_handleHealthHTTP(t *testing.T) {
 	cluster.localNode.State = StateActive
 
 	req := httptest.NewRequest(http.MethodGet, "/cluster/health", nil)
+	req.Header.Set("X-Cluster-Auth", "test-secret")
 	w := httptest.NewRecorder()
 
 	cluster.handleHealthHTTP(w, req)
