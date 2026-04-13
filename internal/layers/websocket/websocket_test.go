@@ -466,9 +466,12 @@ func TestRegisterConnection(t *testing.T) {
 	}
 
 	// Verify it's stored
-	retrieved := security.GetConnection("conn-1")
-	if retrieved == nil {
+	retrieved, ok := security.GetConnection("conn-1")
+	if !ok {
 		t.Error("connection should be retrievable")
+	}
+	if retrieved.ID != "conn-1" {
+		t.Errorf("retrieved ID = %s, want conn-1", retrieved.ID)
 	}
 
 	if len(security.GetAllConnections()) != 1 {
@@ -478,7 +481,7 @@ func TestRegisterConnection(t *testing.T) {
 	// Unregister
 	security.UnregisterConnection("conn-1")
 
-	if security.GetConnection("conn-1") != nil {
+	if _, ok := security.GetConnection("conn-1"); ok {
 		t.Error("connection should be removed")
 	}
 }
@@ -799,7 +802,7 @@ func TestCleanupLoop(t *testing.T) {
 	security.CleanupStaleConnections()
 
 	// Connection should be cleaned up
-	if security.GetConnection("conn-1") != nil {
+	if _, ok := security.GetConnection("conn-1"); ok {
 		t.Error("idle connection should be cleaned up")
 	}
 }

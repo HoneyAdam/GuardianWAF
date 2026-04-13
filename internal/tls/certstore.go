@@ -154,7 +154,11 @@ func (cs *CertStore) StartReload(interval time.Duration) {
 				fmt.Printf("[ERROR] TLS cert reload panic: %v\n", r)
 			}
 		}()
-		ticker := time.NewTicker(interval)
+		tickerInterval := interval
+		if tickerInterval <= 0 {
+			tickerInterval = 1 * time.Hour
+		}
+		ticker := time.NewTicker(tickerInterval)
 		defer ticker.Stop()
 
 		for {

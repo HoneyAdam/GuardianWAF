@@ -1,11 +1,12 @@
 import { useState, useEffect } from 'react'
-import { useParams } from 'react-router'
+import { useParams, useNavigate } from 'react-router'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectOption } from '@/components/ui/select'
 import { useToast } from '@/components/ui/toast'
+import { useFocusTrap } from '@/hooks/use-focus-trap'
 import { api } from '@/lib/api'
 import {
   ArrowLeft,
@@ -69,6 +70,7 @@ const ROTATION_INTERVALS = [
 
 export default function TenantDetailPage() {
   const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [tenant, setTenant] = useState<Tenant | null>(null)
@@ -105,7 +107,7 @@ export default function TenantDetailPage() {
         status: data.status || 'active',
         domains: data.domains?.length ? data.domains : ['']
       })
-    } catch (error) {
+    } catch {
       toast({
         title: 'Error',
         description: 'Failed to load tenant',
@@ -143,10 +145,10 @@ export default function TenantDetailPage() {
       })
       toast({ title: 'Success', description: 'Tenant updated' })
       loadTenant()
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: 'Error',
-        description: error.message || 'Failed to update tenant',
+        description: error instanceof Error ? error.message : 'Failed to update tenant',
         variant: 'destructive'
       })
     } finally {
@@ -179,7 +181,7 @@ export default function TenantDetailPage() {
         title: 'Success',
         description: 'New API key generated successfully'
       })
-    } catch (error) {
+    } catch {
       toast({
         title: 'Error',
         description: 'Failed to regenerate API key',
@@ -193,8 +195,8 @@ export default function TenantDetailPage() {
     try {
       await api.adminDeleteTenant(id!)
       toast({ title: 'Success', description: 'Tenant deleted' })
-      window.location.href = '/tenants'
-    } catch (error) {
+      navigate('/tenants')
+    } catch {
       toast({
         title: 'Error',
         description: 'Failed to delete tenant',
@@ -268,7 +270,7 @@ Documentation: https://docs.guardianwaf.com
     return (
       <div className="max-w-2xl mx-auto text-center py-8">
         <h1 className="text-2xl font-bold mb-4">Tenant Not Found</h1>
-        <Button onClick={() => window.location.href = '/tenants'}>
+        <Button onClick={() => navigate('/tenants')}>
           <ArrowLeft className="w-4 h-4 mr-2" />
           Back to Tenants
         </Button>
@@ -281,7 +283,7 @@ Documentation: https://docs.guardianwaf.com
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Button variant="ghost" onClick={() => window.location.href = '/tenants'}>
+          <Button variant="ghost" onClick={() => navigate('/tenants')}>
             <ArrowLeft className="w-4 h-4 mr-2" />
             Back
           </Button>
@@ -291,7 +293,7 @@ Documentation: https://docs.guardianwaf.com
           </Badge>
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" onClick={() => window.location.href = `/tenants/${id}/analytics`}>
+          <Button variant="outline" onClick={() => navigate(`/tenants/${id}/analytics`)}>
             <History className="w-4 h-4 mr-2" />
             Analytics
           </Button>
@@ -495,13 +497,14 @@ Documentation: https://docs.guardianwaf.com
         <CardContent>
           <div className="overflow-x-auto">
             <table className="w-full">
+              <caption className="sr-only">API key rotation history with key ID, created date, status, reason, and expiration columns</caption>
               <thead>
                 <tr className="border-b border-gray-200 dark:border-gray-700">
-                  <th className="text-left py-3 px-4 font-medium">Key ID</th>
-                  <th className="text-left py-3 px-4 font-medium">Created</th>
-                  <th className="text-left py-3 px-4 font-medium">Status</th>
-                  <th className="text-left py-3 px-4 font-medium">Reason</th>
-                  <th className="text-left py-3 px-4 font-medium">Expiration</th>
+                  <th scope="col" className="text-left py-3 px-4 font-medium">Key ID</th>
+                  <th scope="col" className="text-left py-3 px-4 font-medium">Created</th>
+                  <th scope="col" className="text-left py-3 px-4 font-medium">Status</th>
+                  <th scope="col" className="text-left py-3 px-4 font-medium">Reason</th>
+                  <th scope="col" className="text-left py-3 px-4 font-medium">Expiration</th>
                 </tr>
               </thead>
               <tbody>
@@ -648,7 +651,7 @@ Documentation: https://docs.guardianwaf.com
 
       {/* Save Button */}
       <div className="flex justify-end gap-4">
-        <Button variant="outline" onClick={() => window.location.href = '/tenants'}>
+        <Button variant="outline" onClick={() => navigate('/tenants')}>
           Cancel
         </Button>
         <Button onClick={handleSave} disabled={saving}>
@@ -659,7 +662,7 @@ Documentation: https://docs.guardianwaf.com
 
       {/* Rotation Modal */}
       {showRotationModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+        <RotationModalFocusTrap onClose={() => setShowRotationModal(false)}>
           <Card className="w-full max-w-md mx-4">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
@@ -696,8 +699,19 @@ Documentation: https://docs.guardianwaf.com
               </div>
             </CardContent>
           </Card>
-        </div>
+        </RotationModalFocusTrap>
       )}
+    </div>
+  )
+}
+
+function RotationModalFocusTrap({ onClose, children }: { onClose: () => void; children: React.ReactNode }) {
+  const trapRef = useFocusTrap(onClose)
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={onClose}>
+      <div ref={trapRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Rotate API key" className="outline-none" onClick={e => e.stopPropagation()}>
+        {children}
+      </div>
     </div>
   )
 }

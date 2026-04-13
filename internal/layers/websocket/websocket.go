@@ -321,23 +321,61 @@ func (s *Security) UnregisterConnection(id string) {
 	log.Printf("[websocket] Connection closed: %s", id)
 }
 
-// GetConnection returns a connection by ID.
-func (s *Security) GetConnection(id string) *Connection {
-	s.connMu.RLock()
-	conn := s.connections[id]
-	s.connMu.RUnlock()
-	return conn
+// ConnectionSnapshot holds a point-in-time copy of connection state.
+// Unlike *Connection, it is safe to read without holding any lock.
+type ConnectionSnapshot struct {
+	ID         string
+	RemoteAddr string
+	Origin     string
+	Path       string
+	Connected  time.Time
+	LastSeen   time.Time
+	MsgCount   int64
+	ByteCount  int64
 }
 
-// GetAllConnections returns all connections.
-func (s *Security) GetAllConnections() []*Connection {
+// snapshot returns a lock-free copy of the connection's current state.
+func (c *Connection) snapshot() ConnectionSnapshot {
+	c.mu.RLock()
+	snap := ConnectionSnapshot{
+		ID:         c.ID,
+		RemoteAddr: c.RemoteAddr,
+		Origin:     c.Origin,
+		Path:       c.Path,
+		Connected:  c.Connected,
+		LastSeen:   c.LastSeen,
+		MsgCount:   c.MsgCount,
+		ByteCount:  c.ByteCount,
+	}
+	c.mu.RUnlock()
+	return snap
+}
+
+// GetConnection returns a snapshot of connection state by ID.
+func (s *Security) GetConnection(id string) (ConnectionSnapshot, bool) {
+	s.connMu.RLock()
+	conn, ok := s.connections[id]
+	s.connMu.RUnlock()
+	if !ok {
+		return ConnectionSnapshot{}, false
+	}
+	return conn.snapshot(), true
+}
+
+// GetAllConnections returns snapshots of all active connections.
+func (s *Security) GetAllConnections() []ConnectionSnapshot {
 	s.connMu.RLock()
 	conns := make([]*Connection, 0, len(s.connections))
 	for _, conn := range s.connections {
 		conns = append(conns, conn)
 	}
 	s.connMu.RUnlock()
-	return conns
+
+	snapshots := make([]ConnectionSnapshot, len(conns))
+	for i, conn := range conns {
+		snapshots[i] = conn.snapshot()
+	}
+	return snapshots
 }
 
 // ValidateFrame validates an incoming WebSocket frame.
@@ -410,11 +448,25 @@ var patterns = []orderedPattern{
 	{"onload=", "xss"},
 	// SQL injection
 	{"select ", "sqli"},
+	{"select	", "sqli"},
+	{"select(", "sqli"},
+	{"select/**/", "sqli"},
 	{"insert ", "sqli"},
+	{"insert	", "sqli"},
+	{"insert(", "sqli"},
 	{"update ", "sqli"},
+	{"update	", "sqli"},
+	{"update(", "sqli"},
 	{"delete ", "sqli"},
+	{"delete	", "sqli"},
+	{"delete(", "sqli"},
 	{"drop ", "sqli"},
+	{"drop	", "sqli"},
+	{"drop(", "sqli"},
 	{"union ", "sqli"},
+	{"union	", "sqli"},
+	{"union(", "sqli"},
+	{"union/**/", "sqli"},
 	// Path traversal
 	{"../", "path_traversal"},
 	{"..\\", "path_traversal"},
@@ -524,6 +576,7 @@ func GenerateAcceptKey(key string) string {
 // cleanupLoop periodically cleans up stale connections.
 func (s *Security) cleanupLoop() {
 	defer s.wg.Done()
+	defer func() { recover() }()
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 

@@ -151,6 +151,10 @@ func (d *Dashboard) handleAIHistory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	store := d.aiAnalyzer.GetStore()
+	if store == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"history": []any{}, "count": 0})
+		return
+	}
 	history := store.GetHistory(n)
 	writeJSON(w, http.StatusOK, map[string]any{"history": history, "count": len(history)})
 }
@@ -163,6 +167,10 @@ func (d *Dashboard) handleAIStats(w http.ResponseWriter, r *http.Request) {
 	}
 
 	store := d.aiAnalyzer.GetStore()
+	if store == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"enabled": false})
+		return
+	}
 	usage := store.GetUsage()
 	storePath := store.Path()
 	writeJSON(w, http.StatusOK, map[string]any{

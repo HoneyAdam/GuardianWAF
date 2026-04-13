@@ -208,7 +208,11 @@ func New(cfg Config, opts ...Option) (*Engine, error) {
 			chCfg.SecretKey = []byte(internalCfg.WAF.Challenge.SecretKey)
 		}
 		chCfg.ClientIPExtractor = engine.ExtractClientIP
-		eng.SetChallengeService(challenge.NewService(chCfg))
+		challengeSvc, svcErr := challenge.NewService(chCfg)
+		if svcErr != nil {
+			return nil, fmt.Errorf("creating challenge service: %w", svcErr)
+		}
+		eng.SetChallengeService(challengeSvc)
 	}
 
 	return &Engine{internal: eng, cfg: internalCfg}, nil
@@ -261,6 +265,11 @@ func (e *Engine) OnEvent(fn func(Event)) {
 	ch := make(chan engine.Event, 64)
 	e.internal.EventBus().Subscribe(ch)
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				// Prevent goroutine crash from taking down the process
+			}
+		}()
 		for event := range ch {
 			fn(event)
 		}
@@ -416,6 +425,9 @@ func toInternalDetector(dc DetectorConfig, defaultEnabled bool) config.DetectorC
 
 // convertResult converts an internal engine event to a public Result.
 func convertResult(event *engine.Event) Result {
+	if event == nil {
+		return Result{}
+	}
 	findings := make([]Finding, len(event.Findings))
 	for i, f := range event.Findings {
 		findings[i] = Finding{

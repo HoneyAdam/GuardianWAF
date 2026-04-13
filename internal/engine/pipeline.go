@@ -60,7 +60,7 @@ func (p *Pipeline) SetExclusions(exclusions []Exclusion) {
 // Execute runs each layer in order against the request context.
 // If any layer returns ActionBlock, execution stops immediately.
 // Findings and scores are accumulated across all layers.
-func (p *Pipeline) Execute(ctx *RequestContext) PipelineResult {
+func (p *Pipeline) Execute(ctx *RequestContext) (result PipelineResult) {
 	p.mu.RLock()
 	layers := p.layers
 	exclusions := p.exclusions
@@ -68,10 +68,17 @@ func (p *Pipeline) Execute(ctx *RequestContext) PipelineResult {
 
 	start := time.Now()
 	timing := timingMapPool.Get().(map[string]time.Duration)
+	// Return pooled map to pool even if a layer panics
+	defer func() {
+		if r := recover(); r != nil {
+			timingMapPool.Put(timing)
+			panic(r) // re-panic after cleanup
+		}
+	}()
 	for k := range timing {
 		delete(timing, k)
 	}
-	result := PipelineResult{
+	result = PipelineResult{
 		Action: ActionPass,
 	}
 

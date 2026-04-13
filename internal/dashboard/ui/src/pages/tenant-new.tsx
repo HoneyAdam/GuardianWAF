@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -111,6 +112,7 @@ const PLANS: Plan[] = [
 ]
 
 export default function TenantNewPage() {
+  const navigate = useNavigate()
   const [step, setStep] = useState<Step>(1)
   const [loading, setLoading] = useState(false)
   const [, setCreated] = useState(false)
@@ -144,12 +146,14 @@ export default function TenantNewPage() {
         }
         return true
       case 2:
-        const validDomains = form.domains.filter(d => d.trim() && d.includes('.'))
-        if (validDomains.length === 0) {
-          toast({ title: 'Error', description: 'At least one valid domain is required', variant: 'destructive' })
-          return false
+        {
+          const validDomains = form.domains.filter(d => d.trim() && d.includes('.'))
+          if (validDomains.length === 0) {
+            toast({ title: 'Error', description: 'At least one valid domain is required', variant: 'destructive' })
+            return false
+          }
+          return true
         }
-        return true
       case 3:
         return true
       case 4:
@@ -226,10 +230,10 @@ export default function TenantNewPage() {
         title: 'Success',
         description: 'Tenant created successfully'
       })
-    } catch (error: any) {
+    } catch (error: unknown) {
       toast({
         title: 'Error',
-        description: error.message || 'Failed to create tenant',
+        description: error instanceof Error ? error.message : 'Failed to create tenant',
         variant: 'destructive'
       })
     } finally {
@@ -695,7 +699,7 @@ Support: support@guardianwaf.com
       <div className="flex items-center gap-4 mb-6">
         <Button
           variant="ghost"
-          onClick={() => step === 5 ? window.location.href = '/tenants' : window.history.back()}
+          onClick={() => step === 5 ? navigate('/tenants') : window.history.back()}
         >
           <ArrowLeft className="w-4 h-4 mr-2" />
           {step === 5 ? 'Back to Tenants' : 'Back'}
@@ -742,7 +746,7 @@ Support: support@guardianwaf.com
       {/* Done Button */}
       {step === 5 && (
         <div className="flex justify-center mt-6">
-          <Button onClick={() => window.location.href = '/tenants'} size="lg">
+          <Button onClick={() => navigate('/tenants')} size="lg">
             Done
             <Check className="w-4 h-4 ml-2" />
           </Button>

@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import { Shield, ShieldOff, ShieldAlert, FileText, CheckCircle, Timer, BellRing } from 'lucide-react'
 import { cn, formatNumber, formatDuration } from '@/lib/utils'
 import type { Stats } from '@/lib/api'
@@ -14,7 +15,7 @@ const cards = [
   { key: 'passed_requests' as const, label: 'Passed', icon: CheckCircle, color: 'text-success', bg: 'bg-success/10' },
 ]
 
-export function StatsCards({ stats }: StatsCardsProps) {
+export const StatsCards = memo(function StatsCards({ stats }: StatsCardsProps) {
   const total = stats.total_requests || 1
   const hasAlerting = stats.alerting && (stats.alerting.webhook_count > 0 || stats.alerting.email_count > 0)
 
@@ -28,6 +29,8 @@ export function StatsCards({ stats }: StatsCardsProps) {
           <div
             key={key}
             className="rounded-lg border border-border bg-card p-4 transition-all hover:shadow-md hover:-translate-y-0.5"
+            role="status"
+            aria-label={`${label}: ${formatNumber(value)}${pct ? ` (${pct})` : ''}`}
           >
             <div className="flex items-center gap-2 mb-2">
               <div className={cn('flex h-8 w-8 items-center justify-center rounded-md', bg)}>
@@ -78,4 +81,4 @@ export function StatsCards({ stats }: StatsCardsProps) {
       )}
     </div>
   )
-}
+})

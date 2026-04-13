@@ -388,15 +388,19 @@ func (t *AttemptTracker) Stats() map[string]int {
 	now := time.Now()
 
 	for _, rec := range t.ipAttempts {
+		rec.mu.RLock()
 		if now.Before(rec.BlockedUntil) {
 			blockedIPs++
 		}
+		rec.mu.RUnlock()
 	}
 
 	for _, rec := range t.emailAttempts {
+		rec.mu.RLock()
 		if now.Before(rec.BlockedUntil) {
 			blockedEmails++
 		}
+		rec.mu.RUnlock()
 	}
 
 	return map[string]int{

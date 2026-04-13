@@ -15,12 +15,13 @@ func NewDLPHandler(d *Dashboard) *DLPHandler {
 	return &DLPHandler{dashboard: d}
 }
 
-// RegisterRoutes registers DLP management routes.
+// RegisterRoutes registers DLP management routes with authentication.
 func (h *DLPHandler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("/api/dlp/alerts", h.handleAlerts)
-	mux.HandleFunc("/api/dlp/patterns", h.handlePatterns)
-	mux.HandleFunc("/api/dlp/patterns/", h.handlePatternDetail)
-	mux.HandleFunc("/api/dlp/test", h.handleTestPattern)
+	auth := h.dashboard.authWrap
+	mux.HandleFunc("/api/dlp/alerts", auth(h.handleAlerts))
+	mux.HandleFunc("/api/dlp/patterns", auth(h.handlePatterns))
+	mux.HandleFunc("/api/dlp/patterns/", auth(h.handlePatternDetail))
+	mux.HandleFunc("/api/dlp/test", auth(h.handleTestPattern))
 }
 
 // handleAlerts handles GET /api/dlp/alerts

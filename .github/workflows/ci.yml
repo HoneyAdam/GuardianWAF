@@ -7,62 +7,7 @@ on:
     branches: [main]
 
 jobs:
-  test:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: 'go.mod'
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-          cache-dependency-path: internal/dashboard/ui/package-lock.json
-
-      - name: Build dashboard
-        working-directory: internal/dashboard/ui
-        run: npm ci --no-audit --no-fund && npm run build
-
-      - name: Copy dashboard assets
-        run: mkdir -p internal/dashboard/dist && cp -r internal/dashboard/ui/dist/* internal/dashboard/dist/
-
-      - name: Vet
-        run: go vet ./...
-
-      - name: Test
-        run: go test -count=1 ./...
-
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-go@v5
-        with:
-          go-version-file: 'go.mod'
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-          cache-dependency-path: internal/dashboard/ui/package-lock.json
-
-      - name: Build dashboard
-        working-directory: internal/dashboard/ui
-        run: npm ci --no-audit --no-fund && npm run build
-
-      - name: Copy dashboard assets
-        run: mkdir -p internal/dashboard/dist && cp -r internal/dashboard/ui/dist/* internal/dashboard/dist/
-
-      - name: golangci-lint
-        uses: golangci/golangci-lint-action@v7
-        with:
-          version: v2.11
-
-  dashboard:
+  build-dashboard:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -77,6 +22,111 @@ jobs:
         working-directory: internal/dashboard/ui
         run: npm ci --no-audit --no-fund && npm run build
 
+      - name: Test
+        working-directory: internal/dashboard/ui
+        run: npm test
+
       - name: Audit
         working-directory: internal/dashboard/ui
         run: npm audit --audit-level=high
+
+      - name: Lint
+        working-directory: internal/dashboard/ui
+        run: npm run lint
+
+      - name: Upload dashboard assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: dashboard-dist
+          path: internal/dashboard/ui/dist/
+          retention-days: 1
+
+  test:
+    needs: build-dashboard
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        go-version: ['1.25.0', '1.24']
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go-version }}
+
+      - name: Download dashboard assets
+        uses: actions/download-artifact@v4
+        with:
+          name: dashboard-dist
+          path: internal/dashboard/dist/
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test -race -count=1 -coverprofile=coverage.txt -covermode=atomic ./...
+
+      - name: Upload coverage
+        if: matrix.go-version == '1.25.0'
+        uses: codecov/codecov-action@v5
+        with:
+          files: ./coverage.txt
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+
+  lint:
+    needs: build-dashboard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Download dashboard assets
+        uses: actions/download-artifact@v4
+        with:
+          name: dashboard-dist
+          path: internal/dashboard/dist/
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: v2.11
+
+  benchmark:
+    needs: build-dashboard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: 'go.mod'
+
+      - name: Download dashboard assets
+        uses: actions/download-artifact@v4
+        with:
+          name: dashboard-dist
+          path: internal/dashboard/dist/
+
+      - name: Run benchmarks
+        run: |
+          go test -bench=. -benchmem -run=^$ -count=3 ./... 2>&1 | tee benchmark-new.txt
+
+      - name: Compare with base branch
+        if: github.event_name == 'pull_request'
+        run: |
+          git stash
+          git checkout origin/${{ github.base_ref }}
+          go test -bench=. -benchmem -run=^$ -count=3 ./... 2>&1 | tee benchmark-base.txt || true
+          git checkout -
+          git stash pop || true
+          if [ -f benchmark-base.txt ] && [ -s benchmark-base.txt ]; then
+            go install golang.org/x/perf/cmd/benchstat@latest
+            benchstat benchmark-base.txt benchmark-new.txt || true
+          fi

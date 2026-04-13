@@ -73,7 +73,8 @@ func NewExporter(cfg *Config) *Exporter {
 	// Validate endpoint URL to prevent SSRF
 	if cfg.Endpoint != "" {
 		if err := validateSIEMEndpoint(cfg.Endpoint); err != nil {
-			log.Printf("[siem] WARNING: endpoint URL validation failed: %v", err)
+			log.Printf("[siem] ERROR: endpoint URL validation failed: %v", err)
+			return nil
 		}
 	}
 
@@ -162,8 +163,17 @@ func (e *Exporter) ExportBatch(events []*Event) {
 // batchProcessor processes events in batches.
 func (e *Exporter) batchProcessor() {
 	defer e.wg.Done()
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[siem] goroutine panic: %v", r)
+		}
+	}()
 
-	ticker := time.NewTicker(e.config.FlushInterval)
+	flushInterval := e.config.FlushInterval
+	if flushInterval <= 0 {
+		flushInterval = 30 * time.Second
+	}
+	ticker := time.NewTicker(flushInterval)
 	defer ticker.Stop()
 
 	batch := make([]*Event, 0, e.config.BatchSize)
@@ -225,6 +235,10 @@ func (e *Exporter) sendBatch(events []*Event) error {
 		contentType = "application/json"
 	}
 
+	if data == nil {
+		return fmt.Errorf("failed to format SIEM batch")
+	}
+
 	// Send HTTP request
 	req, err := http.NewRequest("POST", e.config.Endpoint, bytes.NewReader(data))
 	if err != nil {
@@ -255,7 +269,7 @@ func (e *Exporter) sendBatch(events []*Event) error {
 		return fmt.Errorf("SIEM returned error: %s", resp.Status)
 	}
 
-	_, _ = io.Copy(io.Discard, resp.Body)
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 
 	return nil
 }

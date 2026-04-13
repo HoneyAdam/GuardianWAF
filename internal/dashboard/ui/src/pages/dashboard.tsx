@@ -94,9 +94,9 @@ export default function DashboardPage() {
 
       consecutiveErrors.current = 0
       setLastError(null)
-    } catch (err: any) {
+    } catch (err: unknown) {
       consecutiveErrors.current++
-      setLastError(err.message || 'Connection error')
+      setLastError(err instanceof Error ? err.message : 'Connection error')
 
       if (consecutiveErrors.current >= 3) {
         setSystemHealth(prev => ({
@@ -119,17 +119,21 @@ export default function DashboardPage() {
 
   // Initial data load
   useEffect(() => {
+    let cancelled = false
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsLoading(true)
     Promise.all([
       api.getStats(),
       api.getUpstreams()
     ])
       .then(([statsData, upstreamsData]) => {
+        if (cancelled) return
         setStats(statsData)
         setUpstreams(upstreamsData)
         setIsLoading(false)
       })
       .catch((err) => {
+        if (cancelled) return
         setLastError(err.message)
         setIsLoading(false)
         toast({
@@ -138,6 +142,7 @@ export default function DashboardPage() {
           variant: 'destructive'
         })
       })
+    return () => { cancelled = true }
   }, [toast])
 
   // Polling with adaptive interval
@@ -151,6 +156,7 @@ export default function DashboardPage() {
   // SSE connection is managed by the layout's useSSE hook via EventsProvider.
   // Mark connected since the layout handles reconnection.
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSseConnected(true)
   }, [])
 
@@ -190,6 +196,12 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
+      {/* Screen reader live region for dynamic status */}
+      <div className="sr-only" aria-live="polite" aria-atomic="true">
+        {sseConnected ? 'Real-time connection established' : 'Real-time connection lost'}
+        {systemHealth.status !== 'healthy' ? `. System status: ${systemHealth.status}. ${systemHealth.message}` : ''}
+      </div>
+
       {/* Header with System Health */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
         <div className="flex items-center gap-3">
@@ -204,7 +216,7 @@ export default function DashboardPage() {
 
         <div className="flex items-center gap-3">
           {/* Health Status */}
-          <div className={`flex items-center gap-2 px-3 py-2 rounded-lg border ${getHealthColor(systemHealth.status)}`}>
+          <div role="status" aria-label={`System health: ${systemHealth.status}`} className={`flex items-center gap-2 px-3 py-2 rounded-lg border ${getHealthColor(systemHealth.status)}`}>
             {getHealthIcon(systemHealth.status)}
             <div className="text-sm">
               <div className="font-medium capitalize">{systemHealth.status}</div>

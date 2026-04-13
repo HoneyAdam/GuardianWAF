@@ -149,6 +149,8 @@ func (c *Config) Validate() error {
 
 // ShouldRouteToCanary determines if request should go to canary version.
 func (c *Canary) ShouldRouteToCanary(r *http.Request) bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	if !c.config.Enabled || c.haltCanary.Load() {
 		return false
 	}
@@ -283,7 +285,12 @@ func (c *Canary) RecordResult(isCanary bool, statusCode int, latency time.Durati
 
 // checkCanaryHealth evaluates if canary should be halted.
 func (c *Canary) checkCanaryHealth() {
-	if !c.config.AutoRollback {
+	c.mu.RLock()
+	autoRollback := c.config.AutoRollback
+	errorThreshold := c.config.ErrorThreshold
+	latencyThreshold := c.config.LatencyThreshold
+	c.mu.RUnlock()
+	if !autoRollback {
 		return
 	}
 
@@ -295,7 +302,7 @@ func (c *Canary) checkCanaryHealth() {
 
 	// Check error rate
 	errorRate := float64(c.stats.CanaryErrors.Load()) / float64(canaryReqs) * 100
-	if errorRate > c.config.ErrorThreshold {
+	if errorRate > errorThreshold {
 		c.haltCanary.Store(true)
 		c.stats.Healthy.Store(false)
 		return
@@ -303,7 +310,7 @@ func (c *Canary) checkCanaryHealth() {
 
 	// Check latency
 	avgLatency := time.Duration(c.stats.CanaryLatency.Load() / canaryReqs)
-	if avgLatency > c.config.LatencyThreshold {
+	if avgLatency > latencyThreshold {
 		c.haltCanary.Store(true)
 		c.stats.Healthy.Store(false)
 	}
@@ -312,7 +319,16 @@ func (c *Canary) checkCanaryHealth() {
 // healthCheckLoop periodically checks canary health.
 func (c *Canary) healthCheckLoop() {
 	defer c.wg.Done()
-	ticker := time.NewTicker(c.config.HealthCheck.Interval)
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Printf("[canary] goroutine panic: %v", r)
+		}
+	}()
+	tickerInterval := c.config.HealthCheck.Interval
+	if tickerInterval <= 0 {
+		tickerInterval = 30 * time.Second
+	}
+	ticker := time.NewTicker(tickerInterval)
 	defer ticker.Stop()
 
 	for {
@@ -380,6 +396,13 @@ func (c *Canary) GetUpstream(r *http.Request) string {
 
 // GetStats returns current canary statistics.
 func (c *Canary) GetStats() map[string]any {
+	c.mu.RLock()
+	enabled := c.config.Enabled
+	strategy := c.config.Strategy
+	percentage := c.config.Percentage
+	canaryVersion := c.config.CanaryVersion
+	c.mu.RUnlock()
+
 	total := c.stats.TotalRequests.Load()
 	canary := c.stats.CanaryRequests.Load()
 
@@ -392,10 +415,10 @@ func (c *Canary) GetStats() map[string]any {
 	}
 
 	return map[string]any{
-		"enabled":          c.config.Enabled,
-		"strategy":         c.config.Strategy,
-		"percentage":       c.config.Percentage,
-		"canary_version":   c.config.CanaryVersion,
+		"enabled":          enabled,
+		"strategy":         strategy,
+		"percentage":       percentage,
+		"canary_version":   canaryVersion,
 		"total_requests":   total,
 		"canary_requests":  canary,
 		"canary_rate":      canaryRate,

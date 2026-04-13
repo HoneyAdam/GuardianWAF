@@ -255,12 +255,17 @@ func (r *Recorder) encodeBinary(record *RecordedRequest) ([]byte, error) {
 
 // rotateFile switches to a new output file.
 func (r *Recorder) rotateFile() error {
+	var firstErr error
 	if r.buffer != nil {
-		r.buffer.Flush()
+		if err := r.buffer.Flush(); err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("flush: %w", err)
+		}
 	}
 
 	if r.currentFile != nil {
-		r.currentFile.Close()
+		if err := r.currentFile.Close(); err != nil && firstErr == nil {
+			firstErr = fmt.Errorf("close: %w", err)
+		}
 		r.fileIndex++
 	}
 
@@ -279,7 +284,7 @@ func (r *Recorder) rotateFile() error {
 	r.buffer = bufio.NewWriter(f)
 	r.currentSize = 0
 
-	return nil
+	return firstErr
 }
 
 // cleanupOldFiles removes files exceeding retention.
@@ -333,6 +338,7 @@ func (r *Recorder) cleanupOldFiles() {
 // cleanupRoutine periodically cleans up old files.
 func (r *Recorder) cleanupRoutine() {
 	defer r.wg.Done()
+	defer func() { recover() }()
 	ticker := time.NewTicker(1 * time.Hour)
 	defer ticker.Stop()
 

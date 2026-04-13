@@ -103,9 +103,9 @@ func (fs *FileStore) Close() error {
 		return nil
 	}
 	fs.closed = true
+	close(fs.ch) // close channel under the same lock that guards the flag
 	fs.mu.Unlock()
 
-	close(fs.ch)
 	<-fs.done // wait for writeLoop to finish
 
 	fs.mu.Lock()
@@ -167,9 +167,11 @@ func (fs *FileStore) writeEvent(ev engine.Event) {
 	defer fs.mu.Unlock()
 
 	if _, err := fs.writer.WriteString(line); err != nil {
+		fs.dropped.Add(1)
 		return
 	}
 	if err := fs.writer.WriteByte('\n'); err != nil {
+		fs.dropped.Add(1)
 		return
 	}
 
@@ -216,11 +218,17 @@ func (fs *FileStore) checkRotation() {
 	rotatedName := base + "-" + ts + ext
 	if renameErr := os.Rename(fs.filePath, rotatedName); renameErr != nil {
 		// If rename fails, reopen the original file
-		f, _ := os.OpenFile(fs.filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
-		if f != nil {
-			fs.file = f
-			fs.writer = bufio.NewWriterSize(f, 32*1024)
+		f, reopenErr := os.OpenFile(fs.filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+		if reopenErr != nil {
+			// Cannot reopen — close channel to stop accepting events
+			if !fs.closed {
+				fs.closed = true
+				close(fs.ch)
+			}
+			return
 		}
+		fs.file = f
+		fs.writer = bufio.NewWriterSize(f, 32*1024)
 		return
 	}
 

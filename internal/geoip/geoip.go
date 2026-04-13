@@ -184,7 +184,11 @@ func (db *DB) StartAutoRefresh(path, downloadURL string, interval time.Duration)
 				fmt.Printf("[ERROR] GeoIP auto-refresh panic: %v\n", r)
 			}
 		}()
-		ticker := time.NewTicker(interval)
+		tickerInterval := interval
+		if tickerInterval <= 0 {
+			tickerInterval = 24 * time.Hour
+		}
+		ticker := time.NewTicker(tickerInterval)
 		defer ticker.Stop()
 		for {
 			select {
@@ -280,7 +284,7 @@ func downloadDB(downloadURL, path string) error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != 200 {
-		_, _ = io.Copy(io.Discard, resp.Body)
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 		return fmt.Errorf("HTTP %d from %s", resp.StatusCode, downloadURL)
 	}
 
@@ -295,7 +299,6 @@ func downloadDB(downloadURL, path string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
 
 	// Limit download to 500MB to prevent disk exhaustion
 	const maxDownloadSize = 500 * 1024 * 1024
@@ -305,14 +308,19 @@ func downloadDB(downloadURL, path string) error {
 	if strings.HasSuffix(downloadURL, ".gz") || strings.Contains(resp.Header.Get("Content-Type"), "gzip") {
 		gz, gzErr := gzip.NewReader(reader)
 		if gzErr != nil {
+			f.Close()
 			return fmt.Errorf("gzip decode: %w", gzErr)
 		}
 		defer gz.Close()
 		reader = io.LimitReader(gz, maxDownloadSize)
 	}
 
-	_, err = io.Copy(f, reader)
-	return err
+	_, copyErr := io.Copy(f, reader)
+	closeErr := f.Close()
+	if copyErr != nil {
+		return copyErr
+	}
+	return closeErr
 }
 
 // --- Helpers ---

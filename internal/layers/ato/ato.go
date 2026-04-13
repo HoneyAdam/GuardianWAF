@@ -428,6 +428,17 @@ func (l *Layer) Cleanup() {
 			delete(l.lastLogin, email)
 		}
 	}
+	// Cap travel maps to prevent memory exhaustion from unique emails
+	const maxTravelEntries = 100000
+	if len(l.lastTime) > maxTravelEntries {
+		aggressiveCutoff := time.Now().Add(-1 * time.Hour)
+		for email, t := range l.lastTime {
+			if t.Before(aggressiveCutoff) {
+				delete(l.lastTime, email)
+				delete(l.lastLogin, email)
+			}
+		}
+	}
 	l.travelMu.Unlock()
 }
 

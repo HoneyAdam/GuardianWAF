@@ -513,7 +513,7 @@ func TestHTTP_handleHealthHTTP(t *testing.T) {
 		t.Errorf("status = %d, want 200", w.Code)
 	}
 
-	var health map[string]interface{}
+	var health map[string]any
 	if err := json.Unmarshal(w.Body.Bytes(), &health); err != nil {
 		t.Fatalf("failed to decode response: %v", err)
 	}
@@ -688,7 +688,7 @@ func TestMessageHandlers_IPBan(t *testing.T) {
 		t.Fatal("IP ban handler should exist")
 	}
 
-	payload, _ := json.Marshal(map[string]interface{}{
+	payload, _ := json.Marshal(map[string]any{
 		"ip":  "5.6.7.8",
 		"ttl": 3600.0,
 	})

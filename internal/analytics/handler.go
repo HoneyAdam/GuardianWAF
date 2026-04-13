@@ -229,7 +229,7 @@ func parseTimeRange(r *http.Request) (time.Time, time.Time) {
 	return from, to
 }
 
-// parseInterval parses duration string.
+// parseInterval parses duration string with bounds clamping.
 func parseInterval(s string, defaultVal time.Duration) time.Duration {
 	if s == "" {
 		return defaultVal
@@ -237,7 +237,14 @@ func parseInterval(s string, defaultVal time.Duration) time.Duration {
 
 	// Try to parse as number of minutes
 	if minutes, err := strconv.Atoi(s); err == nil {
-		return time.Duration(minutes) * time.Minute
+		d := time.Duration(minutes) * time.Minute
+		if d < time.Minute {
+			return time.Minute
+		}
+		if d > 24*time.Hour {
+			return 24 * time.Hour
+		}
+		return d
 	}
 
 	// Try to parse as duration
@@ -246,6 +253,12 @@ func parseInterval(s string, defaultVal time.Duration) time.Duration {
 		return defaultVal
 	}
 
+	if d < time.Minute {
+		return time.Minute
+	}
+	if d > 24*time.Hour {
+		return 24 * time.Hour
+	}
 	return d
 }
 

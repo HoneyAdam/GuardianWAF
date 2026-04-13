@@ -168,15 +168,15 @@ func (db *Database) GetPatch(patchID string) *VirtualPatch {
 	return db.patches[patchID]
 }
 
-// GetActivePatches returns all active patches.
-func (db *Database) GetActivePatches() []*VirtualPatch {
+// GetActivePatches returns copies of all active patches (safe for concurrent use).
+func (db *Database) GetActivePatches() []VirtualPatch {
 	db.mu.RLock()
 	defer db.mu.RUnlock()
 
-	var active []*VirtualPatch
+	var active []VirtualPatch
 	for _, patch := range db.patches {
 		if patch.Enabled {
-			active = append(active, patch)
+			active = append(active, *patch)
 		}
 	}
 	return active

@@ -33,10 +33,10 @@ func TestIsGraphQLRequest(t *testing.T) {
 			expected:    true,
 		},
 		{
-			name:     "Query parameter",
+			name:     "Query parameter alone (not GraphQL without path or content type)",
 			path:     "/api",
 			query:    "{users{id}}",
-			expected: true,
+			expected: false,
 		},
 		{
 			name:     "Not GraphQL",

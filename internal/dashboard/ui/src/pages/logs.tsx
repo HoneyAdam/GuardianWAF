@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { api } from '@/lib/api'
 import type { LogEntry } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import { useToast } from '@/components/ui/toast'
 import { RefreshCw } from 'lucide-react'
 
 const levelStyles: Record<string, string> = {
@@ -22,6 +23,7 @@ export default function LogsPage() {
   const [level, setLevel] = useState('')
   const [loading, setLoading] = useState(false)
   const [autoRefresh, setAutoRefresh] = useState(true)
+  const { toast } = useToast()
 
   const fetchLogs = () => {
     setLoading(true)
@@ -32,16 +34,24 @@ export default function LogsPage() {
         setLogs(data.logs || [])
         setTotal(data.total || 0)
       })
-      .catch(() => {})
+      .catch(() => toast({ title: 'Failed to load logs', variant: 'warning' }))
       .finally(() => setLoading(false))
   }
 
-  useEffect(() => { fetchLogs() }, [level])
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    fetchLogs()
+  }, [level])
 
   useEffect(() => {
     if (!autoRefresh) return
-    const interval = setInterval(fetchLogs, 3000)
-    return () => clearInterval(interval)
+    const interval = setInterval(() => {
+      if (document.hidden) return
+      fetchLogs()
+    }, 3000)
+    function onVis() { if (!document.hidden && autoRefresh) fetchLogs() }
+    document.addEventListener('visibilitychange', onVis)
+    return () => { clearInterval(interval); document.removeEventListener('visibilitychange', onVis) }
   }, [autoRefresh, level])
 
   return (

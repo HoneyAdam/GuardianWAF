@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { api } from '@/lib/api'
 import type { WafConfig, IpAclData, BanEntry } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import { useToast } from '@/components/ui/toast'
 import { Section } from '@/components/config/section'
 import { Switch } from '@/components/ui/switch'
 import { Input } from '@/components/ui/input'
@@ -65,6 +66,7 @@ export default function ConfigPage() {
   const [banIP, setBanIP] = useState('')
   const [banDuration, setBanDuration] = useState('1h')
   const [banReason, setBanReason] = useState('')
+  const { toast } = useToast()
 
   const fetchData = useCallback(() => {
     api.getConfig().then((data) => {
@@ -72,8 +74,8 @@ export default function ConfigPage() {
       setOriginal(JSON.stringify(data))
     }).catch(() => setError('Failed to load configuration'))
 
-    api.getIPACL().then(setIpacl).catch(() => {})
-    api.getBans().then(d => setBans(d.bans || [])).catch(() => {})
+    api.getIPACL().then(setIpacl).catch(() => toast({ title: 'Failed to load IP ACL', variant: 'warning' }))
+    api.getBans().then(d => setBans(d.bans || [])).catch(() => toast({ title: 'Failed to load bans', variant: 'warning' }))
   }, [])
 
   useEffect(() => { fetchData() }, [fetchData])

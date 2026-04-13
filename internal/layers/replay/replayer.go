@@ -301,6 +301,7 @@ func (r *Replayer) replayBatch(ctx context.Context, records []*RecordedRequest) 
 		go func(idx int, record *RecordedRequest) {
 			defer wg.Done()
 			defer func() { <-sem }()
+			defer func() { recover() }()
 
 			// Dry run mode
 			if r.config.DryRun {
@@ -406,7 +407,7 @@ func (r *Replayer) replayRequest(ctx context.Context, rec *RecordedRequest) erro
 	defer resp.Body.Close()
 
 	// Drain body
-	_, _ = io.Copy(io.Discard, resp.Body)
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 
 	return nil
 }

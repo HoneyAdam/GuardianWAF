@@ -243,14 +243,14 @@ Links to GitHub, website.
 All badges use [shields.io](https://shields.io) unless otherwise noted.
 
 ```markdown
-[![Go Version](https://img.shields.io/github/go-mod/go-version/guardianwaf/guardianwafwaf?style=flat-square)](https://go.dev/)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/guardianwaf/guardianwaf?style=flat-square)](https://go.dev/)
 [![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](LICENSE)
 [![Go Report Card](https://goreportcard.com/badge/github.com/guardianwaf/guardianwaf?style=flat-square)](https://goreportcard.com/report/github.com/guardianwaf/guardianwaf)
-[![Test Coverage](https://img.shields.io/codecov/c/github/guardianwaf/guardianwafwaf?style=flat-square)](https://codecov.io/guardianwaf/guardianwafianwaf)
-[![Release](https://img.shields.io/github/v/release/guardianwaf/guardianwafwaf?style=flat-square)](https://github.com/guardianwaf/guardianwaf/releases)
-[![Docker Pulls](https://img.shields.io/docker/pulls/guardianwaf/guardianwafwaf?style=flat-square)](https://hub.docker.comguardianwaf/guardianwafianwaf)
-[![GitHub Stars](https://img.shields.io/github/stars/guardianwaf/guardianwafwaf?style=flat-square)](https://github.com/guardianwaf/guardianwaf/stargazers)
-[![Build Status](https://img.shields.io/github/actions/workflow/status/guardianwaf/guardianwafwaf/ci.yml?branch=main&style=flat-square)](https://github.com/guardianwaf/guardianwaf/actions)
+[![Test Coverage](https://img.shields.io/codecov/c/github/guardianwaf/guardianwaf?style=flat-square)](https://codecov.io/guardianwaf/guardianwafianwaf)
+[![Release](https://img.shields.io/github/v/release/guardianwaf/guardianwaf?style=flat-square)](https://github.com/guardianwaf/guardianwaf/releases)
+[![Docker Pulls](https://img.shields.io/docker/pulls/guardianwaf/guardianwaf?style=flat-square)](https://hub.docker.comguardianwaf/guardianwafianwaf)
+[![GitHub Stars](https://img.shields.io/github/stars/guardianwaf/guardianwaf?style=flat-square)](https://github.com/guardianwaf/guardianwaf/stargazers)
+[![Build Status](https://img.shields.io/github/actions/workflow/status/guardianwaf/guardianwaf/ci.yml?branch=main&style=flat-square)](https://github.com/guardianwaf/guardianwaf/actions)
 [![Go Reference](https://pkg.go.dev/badge/github.com/guardianwaf/guardianwaf.svg)](https://pkg.go.dev/github.com/guardianwaf/guardianwaf)
 [![Security Headers](https://img.shields.io/security-headers?url=https%3A%2F%2Fguardianwaf.com&style=flat-square)](https://securityheaders.com/?q=guardianwaf.com)
 ```

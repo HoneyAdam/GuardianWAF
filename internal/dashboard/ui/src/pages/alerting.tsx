@@ -42,8 +42,8 @@ export default function AlertingPage() {
       const res = await api.getAlertingStatus()
       setStatus(res)
       setError(null)
-    } catch (err: any) {
-      setError(err.message || 'Failed to fetch alerting status')
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to fetch alerting status')
     } finally {
       setLoading(false)
     }
@@ -58,8 +58,8 @@ export default function AlertingPage() {
       await api.addWebhook(newWebhook as WebhookConfig)
       setNewWebhook({ type: 'generic', events: ['block'], min_score: 50, cooldown: '30s' })
       fetchStatus()
-    } catch (err: any) {
-      setError(err.message || 'Failed to add webhook')
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to add webhook')
     }
   }
 
@@ -67,8 +67,8 @@ export default function AlertingPage() {
     try {
       await api.deleteWebhook(name)
       fetchStatus()
-    } catch (err: any) {
-      setError(err.message || 'Failed to remove webhook')
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to remove webhook')
     }
   }
 
@@ -81,8 +81,8 @@ export default function AlertingPage() {
       await api.addEmail(newEmail as EmailConfig)
       setNewEmail({ smtp_port: 587, use_tls: true, events: ['block'], min_score: 50, cooldown: '5m', to: [] })
       fetchStatus()
-    } catch (err: any) {
-      setError(err.message || 'Failed to add email target')
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to add email target')
     }
   }
 
@@ -90,8 +90,8 @@ export default function AlertingPage() {
     try {
       await api.deleteEmail(name)
       fetchStatus()
-    } catch (err: any) {
-      setError(err.message || 'Failed to remove email target')
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to remove email target')
     }
   }
 
@@ -99,8 +99,8 @@ export default function AlertingPage() {
     try {
       await api.testAlert(target)
       alert(`Test alert sent to ${target}`)
-    } catch (err: any) {
-      setError(err.message || 'Failed to send test alert')
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Failed to send test alert')
     }
   }
 
@@ -235,7 +235,7 @@ export default function AlertingPage() {
                   <select
                     className="w-full h-10 px-3 rounded-md border border-input bg-background"
                     value={newWebhook.type}
-                    onChange={(e) => setNewWebhook({ ...newWebhook, type: e.target.value as any })}
+                    onChange={(e) => setNewWebhook({ ...newWebhook, type: e.target.value as WebhookConfig['type'] })}
                   >
                     <option value="generic">Generic</option>
                     <option value="slack">Slack</option>

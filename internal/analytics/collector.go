@@ -487,7 +487,11 @@ func (c *Collector) GetAllMetrics() map[string]any {
 // flushLoop periodically flushes metrics to disk.
 func (c *Collector) flushLoop() {
 	defer c.wg.Done()
-	ticker := time.NewTicker(c.config.FlushInterval)
+	flushInterval := c.config.FlushInterval
+	if flushInterval <= 0 {
+		flushInterval = 30 * time.Second
+	}
+	ticker := time.NewTicker(flushInterval)
 	defer ticker.Stop()
 
 	for {
@@ -522,9 +526,12 @@ func (c *Collector) Flush() error {
 	encoder := json.NewEncoder(file)
 	encoder.SetIndent("", "  ")
 	encErr := encoder.Encode(data)
-	file.Close()
+	closeErr := file.Close()
 	if encErr != nil {
 		return encErr
+	}
+	if closeErr != nil {
+		return closeErr
 	}
 	return os.Rename(tmpFile, filename)
 }

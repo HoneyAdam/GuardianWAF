@@ -9,6 +9,7 @@ import (
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/sha512"
+	"crypto/x509"
 	"encoding/base64"
 	"hash"
 	"encoding/json"
@@ -1997,10 +1998,50 @@ func TestParseValue_MalformedLength(t *testing.T) {
 // --- parseRSAPublicKey ---
 
 func TestParseRSAPublicKey_LongDER(t *testing.T) {
+	// Zero bytes should fail (not valid ASN.1)
 	der := make([]byte, 40)
 	key := parseRSAPublicKey(der)
 	if key != nil {
-		t.Error("expected nil for stub RSA parser")
+		t.Error("expected nil for zero-filled DER")
+	}
+}
+
+func TestParseRawRSAPublicKey_ValidPKCS1(t *testing.T) {
+	// Generate a real RSA key and export as PKCS#1 DER
+	priv, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	pubDER := x509.MarshalPKCS1PublicKey(&priv.PublicKey)
+
+	key := parseRawRSAPublicKey(pubDER)
+	if key == nil {
+		t.Fatal("expected non-nil key for valid PKCS#1 DER")
+	}
+	if key.N.Cmp(priv.PublicKey.N) != 0 {
+		t.Error("modulus mismatch")
+	}
+	if key.E != priv.PublicKey.E {
+		t.Error("exponent mismatch")
+	}
+}
+
+func TestParseRawRSAPublicKey_InvalidInputs(t *testing.T) {
+	tests := []struct {
+		name string
+		data []byte
+	}{
+		{"nil", nil},
+		{"empty", []byte{}},
+		{"too short", []byte{0x30, 0x05}},
+		{"wrong tag", []byte{0x02, 0x01, 0x00}}, // INTEGER, not SEQUENCE
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if key := parseRawRSAPublicKey(tt.data); key != nil {
+				t.Error("expected nil for invalid input")
+			}
+		})
 	}
 }
 

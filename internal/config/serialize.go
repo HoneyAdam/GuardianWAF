@@ -100,7 +100,7 @@ func marshalField(b *strings.Builder, prefix, key string, fv reflect.Value, inde
 		if fv.IsNil() {
 			return
 		}
-		// For any/interface{} values, marshal the concrete value
+		// For any values, marshal the concrete value
 		marshalField(b, prefix, key, fv.Elem(), indent)
 	}
 }

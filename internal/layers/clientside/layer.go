@@ -173,7 +173,7 @@ func (l *Layer) analyzeResponseBody(body []byte) DetectionResult {
 	// Check for obfuscated JavaScript
 	if l.config.MagecartDetection.DetectObfuscatedJS {
 		for _, pattern := range l.patterns.ObfuscationPatterns {
-			if matches := pattern.FindAllStringIndex(bodyStr, -1); matches != nil {
+			if matches := pattern.FindAllStringIndex(bodyStr, 100); matches != nil {
 				for _, match := range matches {
 					matchedText := bodyStr[match[0]:minInt(match[1], match[0]+50)]
 					result.Matches = append(result.Matches, PatternMatch{
@@ -191,7 +191,7 @@ func (l *Layer) analyzeResponseBody(body []byte) DetectionResult {
 	// Check for suspicious domains
 	if l.config.MagecartDetection.DetectSuspiciousDomains {
 		for _, pattern := range l.patterns.SkimmingPatterns {
-			if matches := pattern.FindAllStringIndex(bodyStr, -1); matches != nil {
+			if matches := pattern.FindAllStringIndex(bodyStr, 100); matches != nil {
 				for _, match := range matches {
 					matched := bodyStr[match[0]:minInt(match[1], match[0]+100)]
 					severity := "medium"
@@ -216,7 +216,7 @@ func (l *Layer) analyzeResponseBody(body []byte) DetectionResult {
 	// Check for keyloggers
 	if l.config.MagecartDetection.DetectKeyloggers {
 		for _, pattern := range l.patterns.KeyloggerPatterns {
-			if matches := pattern.FindAllStringIndex(bodyStr, -1); matches != nil {
+			if matches := pattern.FindAllStringIndex(bodyStr, 100); matches != nil {
 				for _, match := range matches {
 					matchedText := bodyStr[match[0]:minInt(match[1], match[0]+50)]
 					result.Matches = append(result.Matches, PatternMatch{
@@ -234,7 +234,7 @@ func (l *Layer) analyzeResponseBody(body []byte) DetectionResult {
 	// Check for form exfiltration
 	if l.config.MagecartDetection.DetectFormExfiltration {
 		for _, pattern := range l.patterns.FormExfilPatterns {
-			if matches := pattern.FindAllStringIndex(bodyStr, -1); matches != nil {
+			if matches := pattern.FindAllStringIndex(bodyStr, 100); matches != nil {
 				for _, match := range matches {
 					matchedText := bodyStr[match[0]:minInt(match[1], match[0]+50)]
 					result.Matches = append(result.Matches, PatternMatch{

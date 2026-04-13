@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -75,12 +76,12 @@ func (h *Handler) handleSync(w http.ResponseWriter, r *http.Request) {
 	// Limit request body to 10MB to prevent OOM from malicious nodes
 	r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
 	if err := json.NewDecoder(r.Body).Decode(&event); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, sanitizeErr(err), http.StatusBadRequest)
 		return
 	}
 
 	if err := h.manager.ReceiveEvent(&event); err != nil {
-		http.Error(w, err.Error(), http.StatusConflict)
+		http.Error(w, sanitizeErr(err), http.StatusConflict)
 		return
 	}
 
@@ -193,7 +194,7 @@ func (h *Handler) createCluster(w http.ResponseWriter, r *http.Request) {
 	var cluster Cluster
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1MB limit
 	if err := json.NewDecoder(r.Body).Decode(&cluster); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, sanitizeErr(err), http.StatusBadRequest)
 		return
 	}
 
@@ -203,7 +204,7 @@ func (h *Handler) createCluster(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.manager.AddCluster(&cluster); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, sanitizeErr(err), http.StatusInternalServerError)
 		return
 	}
 
@@ -287,7 +288,7 @@ func (h *Handler) deleteCluster(w http.ResponseWriter, r *http.Request, clusterI
 	}
 
 	if err := h.manager.RemoveCluster(clusterID); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, sanitizeErr(err), http.StatusInternalServerError)
 		return
 	}
 
@@ -303,7 +304,7 @@ func (h *Handler) joinCluster(w http.ResponseWriter, r *http.Request, clusterID 
 	var node Node
 	r.Body = http.MaxBytesReader(w, r.Body, 1<<20) // 1MB limit
 	if err := json.NewDecoder(r.Body).Decode(&node); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		http.Error(w, sanitizeErr(err), http.StatusBadRequest)
 		return
 	}
 
@@ -312,7 +313,7 @@ func (h *Handler) joinCluster(w http.ResponseWriter, r *http.Request, clusterID 
 	}
 
 	if err := h.manager.AddNodeToCluster(clusterID, &node); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, sanitizeErr(err), http.StatusInternalServerError)
 		return
 	}
 
@@ -343,7 +344,7 @@ func (h *Handler) leaveCluster(w http.ResponseWriter, r *http.Request, clusterID
 	}
 
 	if err := h.manager.RemoveNodeFromCluster(clusterID, nodeID); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, sanitizeErr(err), http.StatusInternalServerError)
 		return
 	}
 
@@ -430,4 +431,19 @@ func (h *Handler) checkAuth(r *http.Request) bool {
 	}
 
 	return false
+}
+
+// sanitizeErr strips potentially sensitive details from error messages.
+func sanitizeErr(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "/") || strings.Contains(msg, "\\") {
+		return "internal error"
+	}
+	if len(msg) > 200 {
+		msg = msg[:200]
+	}
+	return msg
 }

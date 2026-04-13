@@ -18,7 +18,7 @@ spec:
           ports:
             - containerPort: 3000
         - name: guardianwaf
-          image: guardianwaf/guardianwafwaf:latest
+          image: ghcr.io/guardianwaf/guardianwaf:latest
           args: ["sidecar", "--upstream", "http://localhost:3000", "--listen", ":8088"]
           ports:
             - containerPort: 8088

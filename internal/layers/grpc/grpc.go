@@ -239,6 +239,7 @@ func (s *Security) Stop() {
 // cleanupLoop periodically cleans up stale streams.
 func (s *Security) cleanupLoop() {
 	defer s.wg.Done()
+	defer func() { recover() }()
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 

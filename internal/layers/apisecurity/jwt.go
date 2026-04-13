@@ -360,6 +360,11 @@ func verifyHMACSignature(key crypto.PublicKey, hashFunc func() hash.Hash, data s
 }
 
 func (v *JWTValidator) fetchJWKS() {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[jwt] fetchJWKS panic: %v", r)
+		}
+	}()
 	if v.config.JWKSURL == "" {
 		return
 	}
@@ -390,10 +395,10 @@ func (v *JWTValidator) fetchJWKS() {
 		} `json:"keys"`
 	}
 
-	if err := json.NewDecoder(resp.Body).Decode(&jwks); err != nil {
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&jwks); err != nil {
 		return
 	}
-	_, _ = io.Copy(io.Discard, resp.Body)
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 
 	for _, key := range jwks.Keys {
 		var pubKey crypto.PublicKey
@@ -437,6 +442,11 @@ func (v *JWTValidator) fetchJWKS() {
 }
 
 func (v *JWTValidator) refreshJWKSPeriodically(interval time.Duration) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[jwt] refreshJWKSPeriodically panic: %v", r)
+		}
+	}()
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
@@ -643,14 +653,41 @@ func parseRSAPublicKey(der []byte) *rsa.PublicKey {
 	return nil
 }
 
-// parseRawRSAPublicKey parses raw RSA public key bytes.
+// parseRawRSAPublicKey parses a bare PKCS#1 RSAPublicKey DER structure:
+//
+//	SEQUENCE { modulus INTEGER, publicExponent INTEGER }
+//
+// This handles keys that lack the PKIX SubjectPublicKeyInfo wrapper.
 func parseRawRSAPublicKey(der []byte) *rsa.PublicKey {
-	if len(der) < 30 {
+	// Must start with SEQUENCE tag (0x30)
+	if len(der) < 30 || der[0] != 0x30 {
 		return nil
 	}
-	// Simple heuristic: look for RSA key structure
-	// This is a simplified parser for common formats
-	return nil
+
+	seq, err := parseASN1Sequence(der)
+	if err != nil || len(seq) < 2 {
+		return nil
+	}
+
+	modulus, err := parseASN1Integer(seq[0])
+	if err != nil || modulus == nil || modulus.Sign() <= 0 {
+		return nil
+	}
+
+	exponent, err := parseASN1Integer(seq[1])
+	if err != nil || exponent == nil || exponent.Sign() <= 0 {
+		return nil
+	}
+
+	e := int(exponent.Int64())
+	if e <= 0 {
+		return nil
+	}
+
+	return &rsa.PublicKey{
+		N: modulus,
+		E: e,
+	}
 }
 
 // parsePKIXRSAPublicKey parses RSA public key from PKIX SubjectPublicKeyInfo DER.
@@ -980,7 +1017,18 @@ var (
 	openFile  = func(path string) (any, error) { return nil, fmt.Errorf("file operations require runtime") }
 	closeFile = func(any) {}
 	readFile  = func(any, []byte) (int, error) { return 0, fmt.Errorf("file operations require runtime") }
+	fileOpsMu sync.Mutex
 )
+
+// SetFileOps allows the main package to inject file operations.
+// Protected by mutex to prevent races with concurrent file reads during JWKS key loading.
+func SetFileOps(openFn func(string) (any, error), closeFn func(any), readFn func(any, []byte) (int, error)) {
+	fileOpsMu.Lock()
+	openFile = openFn
+	closeFile = closeFn
+	readFile = readFn
+	fileOpsMu.Unlock()
+}
 
 // GenerateToken generates a test JWT token (for testing only).
 func GenerateToken(claims JWTClaims, secret []byte, alg string) (string, error) {
@@ -1004,11 +1052,4 @@ func GenerateToken(claims JWTClaims, secret []byte, alg string) (string, error) 
 	}
 
 	return signingInput + "." + base64.RawURLEncoding.EncodeToString(sig), nil
-}
-
-// SetFileOps allows the main package to inject file operations.
-func SetFileOps(openFn func(string) (any, error), closeFn func(any), readFn func(any, []byte) (int, error)) {
-	openFile = openFn
-	closeFile = closeFn
-	readFile = readFn
 }

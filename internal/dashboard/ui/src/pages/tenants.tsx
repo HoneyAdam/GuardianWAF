@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -9,6 +10,7 @@ import type { AdminTenant } from '@/lib/api'
 import { Plus, Search, Edit, Trash2, Copy, RefreshCw, BarChart3 } from 'lucide-react'
 
 export default function TenantsPage() {
+  const navigate = useNavigate()
   const [tenants, setTenants] = useState<AdminTenant[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
@@ -22,7 +24,7 @@ export default function TenantsPage() {
     try {
       const response = await api.adminGetTenants()
       setTenants(response.tenants || [])
-    } catch (error) {
+    } catch {
       toast({
         title: 'Error',
         description: 'Failed to load tenants',
@@ -40,7 +42,7 @@ export default function TenantsPage() {
       await api.adminDeleteTenant(id)
       toast({ title: 'Success', description: 'Tenant deleted' })
       loadTenants()
-    } catch (error) {
+    } catch {
       toast({
         title: 'Error',
         description: 'Failed to delete tenant',
@@ -59,7 +61,7 @@ export default function TenantsPage() {
       const response = await api.adminRegenerateKey(id)
       toast({ title: 'Success', description: 'New API key: ' + response.api_key })
       loadTenants()
-    } catch (error) {
+    } catch {
       toast({
         title: 'Error',
         description: 'Failed to regenerate API key',
@@ -96,7 +98,7 @@ export default function TenantsPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold">Tenant Management</h1>
-        <Button onClick={() => window.location.href = '/tenants/new'}>
+        <Button onClick={() => navigate('/tenants/new')}>
           <Plus className="w-4 h-4 mr-2" />
           New Tenant
         </Button>
@@ -125,14 +127,15 @@ export default function TenantsPage() {
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full">
+                <caption className="sr-only">List of tenants with name, domains, plan, status, usage, and actions columns</caption>
                 <thead>
                   <tr className="border-b border-gray-200 dark:border-gray-700">
-                    <th className="text-left py-3 px-4 font-medium">Tenant</th>
-                    <th className="text-left py-3 px-4 font-medium">Domains</th>
-                    <th className="text-left py-3 px-4 font-medium">Plan</th>
-                    <th className="text-left py-3 px-4 font-medium">Status</th>
-                    <th className="text-left py-3 px-4 font-medium">Usage</th>
-                    <th className="text-left py-3 px-4 font-medium">Actions</th>
+                    <th scope="col" className="text-left py-3 px-4 font-medium">Tenant</th>
+                    <th scope="col" className="text-left py-3 px-4 font-medium">Domains</th>
+                    <th scope="col" className="text-left py-3 px-4 font-medium">Plan</th>
+                    <th scope="col" className="text-left py-3 px-4 font-medium">Status</th>
+                    <th scope="col" className="text-left py-3 px-4 font-medium">Usage</th>
+                    <th scope="col" className="text-left py-3 px-4 font-medium">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -196,7 +199,7 @@ export default function TenantsPage() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => window.location.href = `/tenants/${tenant.id}/analytics`}
+                            onClick={() => navigate(`/tenants/${tenant.id}/analytics`)}
                             title="Analytics"
                           >
                             <BarChart3 className="w-4 h-4" />
@@ -204,7 +207,7 @@ export default function TenantsPage() {
                           <Button
                             variant="ghost"
                             size="sm"
-                            onClick={() => window.location.href = `/tenants/${tenant.id}`}
+                            onClick={() => navigate(`/tenants/${tenant.id}`)}
                             title="Edit"
                           >
                             <Edit className="w-4 h-4" />

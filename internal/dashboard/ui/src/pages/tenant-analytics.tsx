@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useParams } from 'react-router'
+import { useParams, useNavigate } from 'react-router'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -65,6 +65,7 @@ const OVERAGE_RATES = {
 
 export default function TenantAnalyticsPage() {
   const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
   const [loading, setLoading] = useState(true)
   const [tenant, setTenant] = useState<Tenant | null>(null)
   const [usage, setUsage] = useState<TenantUsageType | null>(null)
@@ -85,7 +86,7 @@ export default function TenantAnalyticsPage() {
       // Generate mock history data for demonstration
       const mockHistory: UsageHistory[] = generateMockHistory(timeRange)
       setHistory(mockHistory)
-    } catch (error) {
+    } catch {
       toast({
         title: 'Error',
         description: 'Failed to load tenant analytics',
@@ -211,7 +212,7 @@ export default function TenantAnalyticsPage() {
     return (
       <div className="max-w-4xl mx-auto text-center py-8">
         <h1 className="text-2xl font-bold mb-4">Tenant Not Found</h1>
-        <Button onClick={() => window.location.href = '/tenants'}>
+        <Button onClick={() => navigate('/tenants')}>
           <ArrowLeft className="w-4 h-4 mr-2" />
           Back to Tenants
         </Button>
@@ -242,7 +243,7 @@ export default function TenantAnalyticsPage() {
       {/* Header */}
       <div className="flex items-center justify-between flex-wrap gap-4">
         <div className="flex items-center gap-4">
-          <Button variant="ghost" onClick={() => window.location.href = '/tenants'}>
+          <Button variant="ghost" onClick={() => navigate('/tenants')}>
             <ArrowLeft className="w-4 h-4 mr-2" />
             Back
           </Button>
@@ -281,7 +282,7 @@ export default function TenantAnalyticsPage() {
             <Download className="w-4 h-4 mr-2" />
             Export
           </Button>
-          <Button onClick={() => window.location.href = `/tenants/${id}`}>
+          <Button onClick={() => navigate(`/tenants/${id}`)}>
             Edit Tenant
           </Button>
         </div>

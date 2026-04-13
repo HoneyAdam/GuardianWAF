@@ -225,7 +225,7 @@ func FetchCatalog(catalogURL string) (*Catalog, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		_, _ = io.Copy(io.Discard, resp.Body)
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 		return nil, fmt.Errorf("catalog HTTP %d", resp.StatusCode)
 	}
 

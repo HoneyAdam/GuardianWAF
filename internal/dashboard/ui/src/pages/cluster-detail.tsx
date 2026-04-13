@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useParams } from 'react-router'
+import { useParams, useNavigate } from 'react-router'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -11,6 +11,7 @@ import { ArrowLeft, Plus, Trash2, RefreshCw, Server, CheckCircle, XCircle, Activ
 
 export default function ClusterDetailPage() {
   const { id } = useParams<{ id: string }>()
+  const navigate = useNavigate()
   const [cluster, setCluster] = useState<Cluster | null>(null)
   const [nodes, setNodes] = useState<ClusterNode[]>([])
   const [allNodes, setAllNodes] = useState<ClusterNode[]>([])
@@ -41,7 +42,7 @@ export default function ClusterDetailPage() {
       const clusterNodeIds = new Set(clusterData.nodes)
       const clusterNodes = nodesData.filter(n => clusterNodeIds.has(n.id))
       setNodes(clusterNodes)
-    } catch (error) {
+    } catch {
       toast({
         title: 'Error',
         description: 'Failed to load cluster details',
@@ -72,7 +73,7 @@ export default function ClusterDetailPage() {
       setNewNode({ id: '', name: '', address: '' })
       setShowAddNode(false)
       loadData()
-    } catch (error) {
+    } catch {
       toast({
         title: 'Error',
         description: 'Failed to add node',
@@ -88,7 +89,7 @@ export default function ClusterDetailPage() {
       await api.leaveCluster(id!, nodeId)
       toast({ title: 'Success', description: 'Node removed from cluster' })
       loadData()
-    } catch (error) {
+    } catch {
       toast({
         title: 'Error',
         description: 'Failed to remove node',
@@ -133,7 +134,7 @@ export default function ClusterDetailPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <Button variant="outline" onClick={() => window.location.href = '/clusters'}>
+          <Button variant="outline" onClick={() => navigate('/clusters')}>
             <ArrowLeft className="w-4 h-4 mr-2" />
             Back
           </Button>
@@ -222,14 +223,15 @@ export default function ClusterDetailPage() {
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full">
+                <caption className="sr-only">Cluster nodes with name, address, health status, version, last seen time, and actions columns</caption>
                 <thead>
                   <tr className="border-b border-gray-200 dark:border-gray-700">
-                    <th className="text-left py-3 px-4 font-medium">Node</th>
-                    <th className="text-left py-3 px-4 font-medium">Address</th>
-                    <th className="text-left py-3 px-4 font-medium">Status</th>
-                    <th className="text-left py-3 px-4 font-medium">Version</th>
-                    <th className="text-left py-3 px-4 font-medium">Last Seen</th>
-                    <th className="text-left py-3 px-4 font-medium">Actions</th>
+                    <th scope="col" className="text-left py-3 px-4 font-medium">Node</th>
+                    <th scope="col" className="text-left py-3 px-4 font-medium">Address</th>
+                    <th scope="col" className="text-left py-3 px-4 font-medium">Status</th>
+                    <th scope="col" className="text-left py-3 px-4 font-medium">Version</th>
+                    <th scope="col" className="text-left py-3 px-4 font-medium">Last Seen</th>
+                    <th scope="col" className="text-left py-3 px-4 font-medium">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -355,12 +357,13 @@ export default function ClusterDetailPage() {
         <CardContent>
           <div className="overflow-x-auto">
             <table className="w-full">
+              <caption className="sr-only">All known nodes with name, address, health status, and cluster membership columns</caption>
               <thead>
                 <tr className="border-b border-gray-200 dark:border-gray-700">
-                  <th className="text-left py-3 px-4 font-medium">Node</th>
-                  <th className="text-left py-3 px-4 font-medium">Address</th>
-                  <th className="text-left py-3 px-4 font-medium">Status</th>
-                  <th className="text-left py-3 px-4 font-medium">In Cluster</th>
+                  <th scope="col" className="text-left py-3 px-4 font-medium">Node</th>
+                  <th scope="col" className="text-left py-3 px-4 font-medium">Address</th>
+                  <th scope="col" className="text-left py-3 px-4 font-medium">Status</th>
+                  <th scope="col" className="text-left py-3 px-4 font-medium">In Cluster</th>
                 </tr>
               </thead>
               <tbody>

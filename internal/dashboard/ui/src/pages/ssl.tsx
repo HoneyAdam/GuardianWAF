@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { useNavigate } from 'react-router'
 import { api } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { Section } from '@/components/config/section'
@@ -24,6 +25,7 @@ interface CertStatus {
 }
 
 export default function SSLPage() {
+  const navigate = useNavigate()
   const [certStatus, setCertStatus] = useState<CertStatus | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -34,7 +36,7 @@ export default function SSLPage() {
       const data = await api.getSSL()
       setCertStatus(data)
       setError(null)
-    } catch (err) {
+    } catch {
       setError('Failed to load SSL certificates')
     } finally {
       setLoading(false)
@@ -240,7 +242,7 @@ export default function SSLPage() {
           <div className="text-xs text-muted-foreground">
             TLS configuration is managed via the WAF Config page.
           </div>
-          <Button variant="outline" onClick={() => window.location.href = '/config'}>
+          <Button variant="outline" onClick={() => navigate('/config')}>
             <Shield className="h-4 w-4 mr-2" />
             Open WAF Config
           </Button>

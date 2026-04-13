@@ -89,7 +89,7 @@ guardianwaf serve -c guardianwaf.yaml --mode monitor --log-level debug
 docker run -d \
   -p 8088:8088 -p 9443:9443 \
   -v ./guardianwaf.yaml:/etc/guardianwaf/guardianwaf.yaml:ro \
-  guardianwaf/guardianwafwaf:latest \
+  guardianwaf/guardianwaf:latest \
   serve -c /etc/guardianwaf/guardianwaf.yaml
 ```
 
@@ -248,7 +248,7 @@ guardianwaf sidecar --upstream http://app:3000 --mode monitor --listen :8088
 version: "3.9"
 services:
   waf:
-    image: guardianwaf/guardianwafwaf:latest
+    image: guardianwaf/guardianwaf:latest
     command: ["sidecar", "--upstream", "http://app:3000"]
     ports:
       - "8088:8088"
@@ -281,7 +281,7 @@ spec:
             - containerPort: 3000
 
         - name: waf
-          image: guardianwaf/guardianwafwaf:latest
+          image: guardianwaf/guardianwaf:latest
           args: ["sidecar", "--upstream", "http://localhost:3000", "--listen", ":8088"]
           ports:
             - containerPort: 8088

@@ -71,16 +71,16 @@ func (m *Manager) SendEmail(target *EmailTarget, event *engine.Event) {
 
 	if err != nil {
 		emailFailed.Add(1)
-		m.logFn("error", fmt.Sprintf("failed to send email alert: %v", err))
+		m.logFn.Load().(func(string, string))("error", fmt.Sprintf("failed to send email alert: %v", err))
 	} else {
 		emailSent.Add(1)
-		m.logFn("info", fmt.Sprintf("email alert sent to %s for event %s", strings.Join(cfg.To, ", "), event.ID))
+		m.logFn.Load().(func(string, string))("info", fmt.Sprintf("email alert sent to %s for event %s", strings.Join(cfg.To, ", "), event.ID))
 	}
 }
 
 // sendTLS sends email with TLS encryption.
 func (m *Manager) sendTLS(addr string, auth smtp.Auth, from string, to []string, msg []byte) error {
-	conn, err := tls.Dial("tcp", addr, &tls.Config{ServerName: addr[:strings.LastIndex(addr, ":")]})
+	conn, err := tls.Dial("tcp", addr, &tls.Config{ServerName: addr[:strings.LastIndex(addr, ":")], MinVersion: tls.VersionTLS12})
 	if err != nil {
 		return fmt.Errorf("TLS dial failed: %w", err)
 	}

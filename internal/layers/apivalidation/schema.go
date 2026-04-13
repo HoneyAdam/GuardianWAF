@@ -3,12 +3,15 @@
 package apivalidation
 
 import (
+	"context"
 	"fmt"
+	"net"
 	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // Pre-compiled regex patterns for format validation (avoids recompilation per request).
@@ -394,7 +397,7 @@ func (v *SchemaValidator) validateString(data any, schema *Schema, path string, 
 	// Pattern
 	if schema.Pattern != "" {
 		re, err := getCachedPattern(schema.Pattern)
-		if err == nil && !re.MatchString(str) {
+		if err == nil && !matchPatternSafe(re, str) {
 			result.Valid = false
 			result.Errors = append(result.Errors, ValidationError{
 				Field:    path,
@@ -731,8 +734,14 @@ func validateIPv4(ip string) bool {
 }
 
 func validateIPv6(ip string) bool {
-	// Simplified IPv6 validation
-	return strings.Contains(ip, ":")
+	// Proper IPv6 validation using net.ParseIP
+	for i := 0; i < len(ip); i++ {
+		if ip[i] == ':' {
+			parsed := net.ParseIP(ip)
+			return parsed != nil && parsed.To4() == nil
+		}
+	}
+	return false
 }
 
 func validateHostname(host string) bool {
@@ -759,3 +768,29 @@ func getCachedPattern(pattern string) (*regexp.Regexp, error) {
 	}
 	return re, nil
 }
+
+// matchPatternSafe runs a regex match with a timeout to prevent ReDoS
+// from user-provided patterns in OpenAPI schemas.
+func matchPatternSafe(re *regexp.Regexp, s string) bool {
+	const patternTimeout = 2 * time.Second
+	type matchResult struct {
+		matched bool
+	}
+	done := make(chan matchResult, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		matched := re.MatchString(s)
+		select {
+		case <-ctx.Done():
+		case done <- matchResult{matched: matched}:
+		}
+	}()
+	select {
+	case r := <-done:
+		return r.matched
+	case <-time.After(patternTimeout):
+		return false
+	}
+}
+

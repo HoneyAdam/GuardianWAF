@@ -2,6 +2,7 @@ package cache
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -82,9 +83,10 @@ func (rb *RedisBackend) selectDB(db int) error {
 	return rb.sendCommand("SELECT", strconv.Itoa(db))
 }
 
-// sendCommand sends a Redis command.
+// sendCommand sends a Redis command using binary-safe RESP protocol.
+// Arguments are encoded as bulk strings to prevent RESP injection via \r\n in values.
 func (rb *RedisBackend) sendCommand(args ...string) error {
-	// Build RESP command
+	// Build RESP command using bulk strings for all arguments
 	cmd := fmt.Sprintf("*%d\r\n", len(args))
 	for _, arg := range args {
 		cmd += fmt.Sprintf("$%d\r\n%s\r\n", len(arg), arg)
@@ -155,11 +157,23 @@ func (rb *RedisBackend) Set(ctx context.Context, key string, value []byte, ttl t
 	rb.mu.Lock()
 	defer rb.mu.Unlock()
 
+	// Validate value doesn't contain RESP protocol delimiters
+	if bytes.ContainsAny(value, "\r\n") {
+		return fmt.Errorf("cache value contains illegal \\r\\n characters")
+	}
+
 	if ttl > 0 {
 		seconds := int(ttl.Seconds())
-		return rb.sendCommand("SETEX", key, strconv.Itoa(seconds), string(value))
+		if err := rb.sendCommand("SETEX", key, strconv.Itoa(seconds), string(value)); err != nil {
+			return err
+		}
+	} else {
+		if err := rb.sendCommand("SET", key, string(value)); err != nil {
+			return err
+		}
 	}
-	return rb.sendCommand("SET", key, string(value))
+	_, err := rb.readResponse()
+	return err
 }
 
 // Delete removes a key from Redis.
@@ -167,7 +181,11 @@ func (rb *RedisBackend) Delete(ctx context.Context, key string) error {
 	rb.mu.Lock()
 	defer rb.mu.Unlock()
 
-	return rb.sendCommand("DEL", key)
+	if err := rb.sendCommand("DEL", key); err != nil {
+		return err
+	}
+	_, err := rb.readResponse()
+	return err
 }
 
 // Exists checks if a key exists in Redis.
@@ -197,6 +215,12 @@ func (rb *RedisBackend) Keys(ctx context.Context, pattern string) ([]string, err
 		return nil, err
 	}
 
+	// Read and discard the response to prevent protocol desync
+	_, err := rb.readResponse()
+	if err != nil {
+		return nil, err
+	}
+
 	// Simplified implementation - returns empty
 	return []string{}, nil
 }
@@ -206,7 +230,11 @@ func (rb *RedisBackend) Clear(ctx context.Context) error {
 	rb.mu.Lock()
 	defer rb.mu.Unlock()
 
-	return rb.sendCommand("FLUSHDB")
+	if err := rb.sendCommand("FLUSHDB"); err != nil {
+		return err
+	}
+	_, err := rb.readResponse()
+	return err
 }
 
 // Close closes the Redis connection.

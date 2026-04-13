@@ -8,50 +8,16 @@ import {
   ChevronDown, Lock, Activity, ExternalLink, Cpu, RefreshCw,
 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-
-// --- Types ---
-
-interface ProviderSummary {
-  id: string; name: string; api: string; doc: string; model_count: number
-  models: ModelSummary[]
-}
-
-interface ModelSummary {
-  id: string; name: string; family: string; reasoning: boolean; tool_call: boolean
-  cost_input_per_m: number; cost_output_per_m: number; context_window: number; max_output: number
-}
-
-interface AIConfig {
-  enabled: boolean; provider_id: string; provider_name: string; model_id: string
-  model_name: string; base_url: string; api_key_set: boolean; api_key_mask: string
-}
-
-interface AIStats {
-  enabled: boolean; tokens_used_hour: number; tokens_used_day: number
-  requests_hour: number; requests_day: number; total_tokens_used: number
-  total_requests: number; total_cost_usd: number; blocks_triggered: number; monitors_triggered: number
-}
-
-interface Verdict { ip: string; action: string; reason: string; confidence: number }
-
-interface AnalysisResult {
-  id: string; timestamp: string; event_count: number; verdicts: Verdict[]
-  summary: string; threats_detected: string[]; tokens_used: number
-  cost_usd: number; duration_ms: number; model: string; error?: string
-}
-
-// --- API ---
-
-const aiApi = {
-  getProviders: () => fetch('/api/v1/ai/providers').then(r => r.json()),
-  getConfig: () => fetch('/api/v1/ai/config').then(r => r.json()),
-  setConfig: (data: Record<string, string>) =>
-    fetch('/api/v1/ai/config', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) }).then(r => r.json()),
-  getHistory: (limit = 20) => fetch(`/api/v1/ai/history?limit=${limit}`).then(r => r.json()),
-  getStats: () => fetch('/api/v1/ai/stats').then(r => r.json()),
-  analyze: (limit = 20) => fetch(`/api/v1/ai/analyze?limit=${limit}`, { method: 'POST' }).then(r => r.json()),
-  test: () => fetch('/api/v1/ai/test', { method: 'POST' }).then(r => r.json()),
-}
+import { api } from '@/lib/api'
+import type {
+  AIProviderSummary as ProviderSummary,
+  AIModelSummary as ModelSummary,
+  AIConfig,
+  AIStats,
+  AIAnalysisResult as AnalysisResult,
+  AIVerdict as Verdict,
+} from '@/lib/api'
+import { useToast } from '@/components/ui/toast'
 
 // --- Page ---
 
@@ -64,6 +30,7 @@ export default function AIPage() {
   const [loadingProviders, setLoadingProviders] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
+  const { toast } = useToast()
 
   // Provider selection
   const [selectedProvider, setSelectedProvider] = useState<ProviderSummary | null>(null)
@@ -79,9 +46,9 @@ export default function AIPage() {
 
   const refresh = useCallback(() => {
     Promise.all([
-      aiApi.getConfig().catch(() => null),
-      aiApi.getStats().catch(() => null),
-      aiApi.getHistory().catch(() => ({ history: [] })),
+      api.getAIConfig().catch(() => null),
+      api.getAIStats().catch(() => null),
+      api.getAIHistory().catch(() => ({ history: [] })),
     ]).then(([cfg, st, hist]) => {
       if (cfg) setConfig(cfg)
       if (st) setStats(st)
@@ -92,9 +59,9 @@ export default function AIPage() {
 
   const fetchProviders = useCallback(() => {
     setLoadingProviders(true)
-    aiApi.getProviders().then(data => {
+    api.getAIProviders().then(data => {
       setProviders(data.providers || [])
-    }).catch(() => {}).finally(() => setLoadingProviders(false))
+    }).catch(() => toast({ title: 'Failed to load AI providers', variant: 'warning' })).finally(() => setLoadingProviders(false))
   }, [])
 
   useEffect(() => { refresh(); fetchProviders() }, [refresh, fetchProviders])
@@ -126,7 +93,7 @@ export default function AIPage() {
     }
     setSaving(true); setError(null)
     try {
-      const res = await aiApi.setConfig({
+      const res = await api.setAIConfig({
         provider_id: selectedProvider.id,
         provider_name: selectedProvider.name,
         model_id: selectedModel.id,
@@ -138,22 +105,22 @@ export default function AIPage() {
       setSuccess('AI provider configured: ' + selectedProvider.name + ' / ' + selectedModel.name)
       setApiKey('')
       refresh()
-    } catch (e: any) { setError(e.message) } finally { setSaving(false) }
+    } catch (e: unknown) { setError(e instanceof Error ? e.message : 'Save failed') } finally { setSaving(false) }
   }
 
   const handleTest = async () => {
     setTesting(true); setTestResult(null)
-    try { setTestResult(await aiApi.test()) } catch { setTestResult({ status: 'error', message: 'Connection failed' }) }
+    try { setTestResult(await api.testAI()) } catch { setTestResult({ status: 'error', message: 'Connection failed' }) }
     finally { setTesting(false) }
   }
 
   const handleAnalyze = async () => {
     setAnalyzing(true); setAnalyzeResult(null); setError(null)
     try {
-      const res = await aiApi.analyze(20)
+      const res = await api.analyzeAI(20)
       if (res.error && !res.summary) setError(res.error)
       else { setAnalyzeResult(res); refresh() }
-    } catch (e: any) { setError(e.message) } finally { setAnalyzing(false) }
+    } catch (e: unknown) { setError(e instanceof Error ? e.message : 'Analysis failed') } finally { setAnalyzing(false) }
   }
 
   if (loading) return <div className="flex items-center justify-center py-20"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div>
@@ -373,7 +340,7 @@ export default function AIPage() {
 
 // --- Sub-components ---
 
-function StatCard({ icon: Icon, label, value, max, sub }: { icon: any; label: string; value: any; max?: string; sub?: string }) {
+function StatCard({ icon: Icon, label, value, max, sub }: { icon: React.ComponentType<{ size?: number; className?: string }>; label: string; value: string | number; max?: string; sub?: string }) {
   return (
     <div className="rounded-lg border border-border bg-card/50 px-3 py-2.5">
       <div className="flex items-center gap-1.5 mb-1">

@@ -35,6 +35,7 @@ type FeedManager struct {
 	config   FeedConfig
 	client   *http.Client
 	stopCh   chan struct{}
+	mu       sync.Mutex
 	onUpdate func([]ThreatEntry)
 	wg       sync.WaitGroup
 }
@@ -57,7 +58,11 @@ type ThreatInfo struct {
 
 // NewFeedManager creates a new feed manager.
 func NewFeedManager(config *FeedConfig) *FeedManager {
-	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport, ok := http.DefaultTransport.(*http.Transport)
+	if !ok {
+		transport = &http.Transport{}
+	}
+	transport = transport.Clone()
 	if config.SkipSSLVerify {
 		log.Printf("[threat-intel] WARNING: SkipSSLVerify is deprecated and ignored — TLS verification is always enforced for feed URLs")
 	}
@@ -73,7 +78,9 @@ func NewFeedManager(config *FeedConfig) *FeedManager {
 
 // SetUpdateCallback sets the callback for when new entries are loaded.
 func (f *FeedManager) SetUpdateCallback(fn func([]ThreatEntry)) {
+	f.mu.Lock()
 	f.onUpdate = fn
+	f.mu.Unlock()
 }
 
 // LoadOnce loads the feed once without starting a refresh loop.
@@ -92,8 +99,13 @@ func (f *FeedManager) LoadOnce(ctx context.Context) ([]ThreatEntry, error) {
 func (f *FeedManager) Start() {
 	// Initial load
 	entries, err := f.LoadOnce(context.Background())
-	if err == nil && f.onUpdate != nil {
-		f.onUpdate(entries)
+	if err == nil {
+		f.mu.Lock()
+		cb := f.onUpdate
+		f.mu.Unlock()
+		if cb != nil {
+			cb(entries)
+		}
 	}
 
 	// Start refresh loop
@@ -116,7 +128,16 @@ func (f *FeedManager) Stop() {
 
 func (f *FeedManager) refreshLoop() {
 	defer f.wg.Done()
-	ticker := time.NewTicker(f.config.Refresh)
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[threatintel] goroutine panic: %v", r)
+		}
+	}()
+	refresh := f.config.Refresh
+	if refresh <= 0 {
+		refresh = 5 * time.Minute
+	}
+	ticker := time.NewTicker(refresh)
 	defer ticker.Stop()
 
 	for {
@@ -125,8 +146,13 @@ func (f *FeedManager) refreshLoop() {
 			return
 		case <-ticker.C:
 			entries, err := f.LoadOnce(context.Background())
-			if err == nil && f.onUpdate != nil {
-				f.onUpdate(entries)
+			if err == nil {
+				f.mu.Lock()
+				cb := f.onUpdate
+				f.mu.Unlock()
+				if cb != nil {
+					cb(entries)
+				}
 			}
 		}
 	}
@@ -167,7 +193,7 @@ func (f *FeedManager) loadURL(ctx context.Context) ([]ThreatEntry, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		_, _ = io.Copy(io.Discard, resp.Body)
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 		return nil, fmt.Errorf("feed returned status %d", resp.StatusCode)
 	}
 

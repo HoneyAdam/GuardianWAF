@@ -245,9 +245,6 @@ func (p *Proxy) validateGRPCRequest(r *http.Request) error {
 	if len(body) > maxSize {
 		return fmt.Errorf("request body exceeds maximum size (%d bytes)", maxSize)
 	}
-	if err != nil {
-		return fmt.Errorf("failed to read body: %w", err)
-	}
 	r.Body.Close()
 
 	// Parse gRPC length-prefixed messages

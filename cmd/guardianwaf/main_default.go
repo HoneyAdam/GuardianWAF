@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -809,7 +810,12 @@ func cmdServe(args []string) {
 			chCfg.SecretKey = []byte(cfg.WAF.Challenge.SecretKey)
 		}
 		chCfg.ClientIPExtractor = engine.ExtractClientIP
-		challengeSvc = challenge.NewService(chCfg)
+		var svcErr error
+			challengeSvc, svcErr = challenge.NewService(chCfg)
+			if svcErr != nil {
+				fmt.Fprintf(os.Stderr, "Error creating challenge service: %v\n", svcErr)
+				return
+			}
 		eng.SetChallengeService(challengeSvc)
 	}
 
@@ -984,10 +990,18 @@ func cmdServe(args []string) {
 			if idx := strings.LastIndex(host, ":"); idx > 0 {
 				host = host[:idx]
 			}
+			// Sanitize host to prevent open redirect via Host header injection
+			if strings.ContainsAny(host, "@/") {
+				host = ""
+			}
 			uri := r.URL.RequestURI()
 			// Prevent open redirect via protocol-relative URLs (//evil.com)
 			if strings.HasPrefix(uri, "//") {
 				uri = "/" + strings.TrimLeft(uri, "/")
+			}
+			if host == "" {
+				w.WriteHeader(http.StatusBadRequest)
+				return
 			}
 			target := "https://" + host + uri
 			http.Redirect(w, r, target, http.StatusMovedPermanently)
@@ -1265,6 +1279,11 @@ func cmdServe(args []string) {
 		alertCh := make(chan engine.Event, 256)
 		eventBus.Subscribe(alertCh)
 		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					// prevent crash
+				}
+			}()
 			for event := range alertCh {
 				alertMgr.HandleEvent(&event)
 			}
@@ -1326,6 +1345,11 @@ func cmdServe(args []string) {
 		eventCh := make(chan engine.Event, 256)
 		eventBus.Subscribe(eventCh)
 		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					// prevent crash
+				}
+			}()
 			for event := range eventCh {
 				sseBroadcaster.BroadcastEvent(event)
 			}
@@ -1463,7 +1487,12 @@ func cmdServe(args []string) {
 		aiAnalyzer.Stop()
 	}
 
-	// 5. Close engine (flushes pending events, closes event bus and store)
+	// 5. Close dashboard (stops login bucket cleanup goroutine)
+		if dash != nil {
+			dash.Close()
+		}
+
+		// 6. Close engine (flushes pending events, closes event bus and store)
 	eng.Close()
 	fmt.Println("GuardianWAF stopped.")
 }
@@ -1590,7 +1619,11 @@ func cmdSidecar(args []string) {
 			chCfg.SecretKey = []byte(cfg.WAF.Challenge.SecretKey)
 		}
 		chCfg.ClientIPExtractor = engine.ExtractClientIP
-		svc := challenge.NewService(chCfg)
+		svc, svcErr := challenge.NewService(chCfg)
+		if svcErr != nil {
+			fmt.Fprintf(os.Stderr, "Error creating challenge service: %v\n", svcErr)
+			return
+		}
 		eng.SetChallengeService(svc)
 	}
 
@@ -3067,13 +3100,7 @@ func (a *mcpEngineAdapter) GetTopIPs(n int) any {
 		stats = append(stats, ipStat{IP: ip, Requests: count, Score: ipScores[ip]})
 	}
 	// Sort descending by request count
-	for i := 0; i < len(stats); i++ {
-		for j := i + 1; j < len(stats); j++ {
-			if stats[j].Requests > stats[i].Requests {
-				stats[i], stats[j] = stats[j], stats[i]
-			}
-		}
-	}
+	sort.Slice(stats, func(i, j int) bool { return stats[i].Requests > stats[j].Requests })
 	if n > 0 && n < len(stats) {
 		stats = stats[:n]
 	}

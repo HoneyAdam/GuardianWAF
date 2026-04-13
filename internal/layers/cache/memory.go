@@ -205,6 +205,7 @@ func (mb *MemoryBackend) Close() error {
 // cleanupExpired periodically removes expired items.
 func (mb *MemoryBackend) cleanupExpired() {
 	defer mb.wg.Done()
+	defer func() { recover() }()
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 

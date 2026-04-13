@@ -3208,7 +3208,11 @@ func TestChallengeService_Integration(t *testing.T) {
 		CookieName: cfg.WAF.Challenge.CookieName,
 		SecretKey:  []byte(cfg.WAF.Challenge.SecretKey),
 	}
-	svc := challenge.NewService(chCfg)
+	svc, err := challenge.NewService(chCfg)
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+
 	if svc == nil {
 		t.Fatal("expected non-nil challenge service")
 	}
@@ -3523,7 +3527,11 @@ func TestServeHandler_WithChallengeAndMetrics(t *testing.T) {
 		CookieTTL:  cfg.WAF.Challenge.CookieTTL,
 		CookieName: cfg.WAF.Challenge.CookieName,
 	}
-	svc := challenge.NewService(chCfg)
+	svc, err := challenge.NewService(chCfg)
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
+
 	eng.SetChallengeService(svc)
 
 	// Create serve mux with healthz, metrics, and challenge endpoints

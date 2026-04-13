@@ -180,7 +180,7 @@ func (h *Handlers) createTenant(w http.ResponseWriter, r *http.Request) {
 
 	tenant, err := h.manager.CreateTenant(req.Name, req.Description, req.Domains, req.Quota)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusConflict)
+		http.Error(w, sanitizeErr(err), http.StatusConflict)
 		return
 	}
 
@@ -258,7 +258,7 @@ func (h *Handlers) updateTenant(w http.ResponseWriter, r *http.Request, tenantID
 	}
 
 	if err := h.manager.UpdateTenant(tenantID, update); err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		http.Error(w, sanitizeErr(err), http.StatusNotFound)
 		return
 	}
 
@@ -272,7 +272,7 @@ func (h *Handlers) updateTenant(w http.ResponseWriter, r *http.Request, tenantID
 
 func (h *Handlers) deleteTenant(w http.ResponseWriter, r *http.Request, tenantID string) {
 	if err := h.manager.DeleteTenant(tenantID); err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		http.Error(w, sanitizeErr(err), http.StatusNotFound)
 		return
 	}
 
@@ -330,7 +330,7 @@ func (h *Handlers) updateTenantWAFConfig(w http.ResponseWriter, r *http.Request,
 	}
 
 	if err := h.manager.UpdateTenant(tenantID, update); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		http.Error(w, sanitizeErr(err), http.StatusInternalServerError)
 		return
 	}
 
@@ -365,7 +365,7 @@ func (h *Handlers) RegenerateAPIKeyHandler(w http.ResponseWriter, r *http.Reques
 
 	apiKey, err := h.manager.RegenerateAPIKey(tenantID)
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusNotFound)
+		http.Error(w, sanitizeErr(err), http.StatusNotFound)
 		return
 	}
 
@@ -521,4 +521,23 @@ func (h *Handlers) GetAllUsage(w http.ResponseWriter, r *http.Request) {
 		// Client disconnected, error ignored
 		_ = err
 	}
+}
+
+
+// sanitizeErr strips potentially sensitive details from error messages.
+func sanitizeErr(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+	if strings.Contains(msg, "/") || strings.Contains(msg, "\\") {
+		return "internal error"
+	}
+	if strings.Contains(msg, "goroutine") || strings.Contains(msg, "runtime/") {
+		return "internal error"
+	}
+	if len(msg) > 200 {
+		msg = msg[:200]
+	}
+	return msg
 }

@@ -87,7 +87,7 @@ type RequestContext struct {
 	Headers     map[string][]string
 	Cookies     map[string]string
 	Body        []byte
-	BodyString  string
+	BodyString  string // Lazy: populated on first access via GetBodyString(). Allocated to avoid per-request string([]byte) if no body.
 	ContentType string
 
 	// Normalized versions (populated by sanitizer layer)
@@ -220,7 +220,9 @@ func AcquireContext(r *http.Request, paranoiaLevel int, maxBodySize int64) *Requ
 			}
 
 			ctx.Body = inspectData
-			ctx.BodyString = string(inspectData)
+			if len(inspectData) > 0 {
+				ctx.BodyString = string(inspectData)
+			}
 		}
 		ctx.bodyRead = true
 	}

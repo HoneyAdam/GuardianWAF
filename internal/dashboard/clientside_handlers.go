@@ -15,12 +15,13 @@ func NewClientSideHandler(d *Dashboard) *ClientSideHandler {
 	return &ClientSideHandler{dashboard: d}
 }
 
-// RegisterRoutes registers client-side protection routes.
+// RegisterRoutes registers client-side protection routes with authentication.
 func (h *ClientSideHandler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("/api/clientside/stats", h.handleStats)
-	mux.HandleFunc("/api/clientside/config", h.handleConfig)
-	mux.HandleFunc("/api/clientside/skimming-domains", h.handleSkimmingDomains)
-	mux.HandleFunc("/api/clientside/csp-reports", h.handleCSPReports)
+	auth := h.dashboard.authWrap
+	mux.HandleFunc("/api/clientside/stats", auth(h.handleStats))
+	mux.HandleFunc("/api/clientside/config", auth(h.handleConfig))
+	mux.HandleFunc("/api/clientside/skimming-domains", auth(h.handleSkimmingDomains))
+	mux.HandleFunc("/api/clientside/csp-reports", auth(h.handleCSPReports))
 }
 
 // handleStats handles GET /api/clientside/stats

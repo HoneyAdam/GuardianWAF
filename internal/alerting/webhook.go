@@ -51,7 +51,7 @@ type Manager struct {
 	webhooks     []webhook
 	emailTargets []*EmailTarget
 	httpClient   *http.Client
-	logFn        func(level, msg string)
+	logFn        atomic.Value // func(level, msg string)
 
 	// Semaphore to limit concurrent webhook/email goroutines
 	sem chan struct{}
@@ -80,7 +80,6 @@ type Stats struct {
 func NewManager(targets []WebhookTarget) *Manager {
 	m := &Manager{
 		httpClient: &http.Client{Timeout: 10 * time.Second},
-		logFn:      func(_, _ string) {},
 		sem:        make(chan struct{}, 32), // max 32 concurrent webhook/email sends
 	}
 
@@ -97,6 +96,7 @@ func NewManager(targets []WebhookTarget) *Manager {
 		m.webhooks = append(m.webhooks, wh)
 	}
 
+	m.logFn.Store(func(_, _ string) {})
 	return m
 }
 
@@ -115,7 +115,7 @@ func NewManagerWithEmail(targets []WebhookTarget, emails []config.EmailConfig) *
 
 // SetLogger sets the log callback.
 func (m *Manager) SetLogger(fn func(level, msg string)) {
-	m.logFn = fn
+	m.logFn.Store(fn)
 }
 
 // GetStats returns alerting statistics.
@@ -191,6 +191,12 @@ func (m *Manager) HandleEvent(event *engine.Event) {
 		case m.sem <- struct{}{}:
 			go func(wc *WebhookTarget, a *Alert) {
 				defer func() { <-m.sem }()
+				defer func() {
+					if r := recover(); r != nil {
+						m.failed.Add(1)
+						m.logFn.Load().(func(string, string))("error", fmt.Sprintf("webhook goroutine panic: %v", r))
+					}
+				}()
 				m.send(wc, a)
 			}(&wh.config, &alert)
 		default:
@@ -240,6 +246,12 @@ func (m *Manager) HandleEvent(event *engine.Event) {
 		case m.sem <- struct{}{}:
 			go func(et *EmailTarget, ev *engine.Event) {
 				defer func() { <-m.sem }()
+				defer func() {
+					if r := recover(); r != nil {
+						m.failed.Add(1)
+						m.logFn.Load().(func(string, string))("error", fmt.Sprintf("email goroutine panic: %v", r))
+					}
+				}()
 				m.SendEmail(et, ev)
 			}(et, event)
 		default:
@@ -285,15 +297,15 @@ func (m *Manager) send(wc *WebhookTarget, alert *Alert) {
 	resp, err := m.httpClient.Do(req)
 	if err != nil {
 		m.failed.Add(1)
-		m.logFn("warn", fmt.Sprintf("Webhook %s failed: %v", wc.Name, err))
+		m.logFn.Load().(func(string, string))("warn", fmt.Sprintf("Webhook %s failed: %v", wc.Name, err))
 		return
 	}
 	defer resp.Body.Close()
-	_, _ = io.Copy(io.Discard, resp.Body)
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 
 	if resp.StatusCode >= 400 {
 		m.failed.Add(1)
-		m.logFn("warn", fmt.Sprintf("Webhook %s returned %d", wc.Name, resp.StatusCode))
+		m.logFn.Load().(func(string, string))("warn", fmt.Sprintf("Webhook %s returned %d", wc.Name, resp.StatusCode))
 		return
 	}
 
@@ -437,7 +449,7 @@ func pagerdutyPayload(a *Alert) map[string]any {
 // AddWebhook adds a new webhook target at runtime.
 func (m *Manager) AddWebhook(target WebhookTarget) {
 	if err := ValidateWebhookURL(target.URL); err != nil {
-		m.logFn("error", fmt.Sprintf("webhook %q rejected: %v", target.Name, err))
+		m.logFn.Load().(func(string, string))("error", fmt.Sprintf("webhook %q rejected: %v", target.Name, err))
 		return
 	}
 	wh := webhook{
@@ -451,7 +463,7 @@ func (m *Manager) AddWebhook(target WebhookTarget) {
 	m.mu.Lock()
 	m.webhooks = append(m.webhooks, wh)
 	m.mu.Unlock()
-	m.logFn("info", fmt.Sprintf("Webhook target added: %s", target.Name))
+	m.logFn.Load().(func(string, string))("info", fmt.Sprintf("Webhook target added: %s", target.Name))
 }
 
 // RemoveWebhook removes a webhook target by name. Returns true if found and removed.
@@ -461,7 +473,7 @@ func (m *Manager) RemoveWebhook(name string) bool {
 	for i, wh := range m.webhooks {
 		if wh.config.Name == name {
 			m.webhooks = append(m.webhooks[:i], m.webhooks[i+1:]...)
-			m.logFn("info", fmt.Sprintf("Webhook target removed: %s", name))
+			m.logFn.Load().(func(string, string))("info", fmt.Sprintf("Webhook target removed: %s", name))
 			return true
 		}
 	}
@@ -474,7 +486,7 @@ func (m *Manager) AddEmailTarget(cfg config.EmailConfig) {
 		m.mu.Lock()
 		m.emailTargets = append(m.emailTargets, NewEmailTarget(cfg))
 		m.mu.Unlock()
-		m.logFn("info", fmt.Sprintf("Email target added: %s", cfg.Name))
+		m.logFn.Load().(func(string, string))("info", fmt.Sprintf("Email target added: %s", cfg.Name))
 	}
 }
 
@@ -485,7 +497,7 @@ func (m *Manager) RemoveEmailTarget(name string) bool {
 	for i, et := range m.emailTargets {
 		if et.config.Name == name {
 			m.emailTargets = append(m.emailTargets[:i], m.emailTargets[i+1:]...)
-			m.logFn("info", fmt.Sprintf("Email target removed: %s", name))
+			m.logFn.Load().(func(string, string))("info", fmt.Sprintf("Email target removed: %s", name))
 			return true
 		}
 	}

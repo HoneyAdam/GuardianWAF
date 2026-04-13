@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -8,6 +9,7 @@ import { api, Cluster, SyncStats, SyncStatusResponse } from '@/lib/api'
 import { Plus, Search, Trash2, RefreshCw, Server, Activity, ArrowRight } from 'lucide-react'
 
 export default function ClustersPage() {
+  const navigate = useNavigate()
   const [clusters, setClusters] = useState<Cluster[]>([])
   const [nodes, setNodes] = useState<Record<string, { healthy?: boolean; last_seen?: string }>>({})
   const [syncStats, setSyncStats] = useState<SyncStats | null>(null)
@@ -40,7 +42,7 @@ export default function ClustersPage() {
         nodesMap[node.id] = { healthy: node.healthy, last_seen: node.last_seen }
       })
       setNodes(nodesMap)
-    } catch (error) {
+    } catch {
       toast({
         title: 'Error',
         description: 'Failed to load cluster data',
@@ -58,7 +60,7 @@ export default function ClustersPage() {
       await api.deleteCluster(id)
       toast({ title: 'Success', description: 'Cluster deleted' })
       loadData()
-    } catch (error) {
+    } catch {
       toast({
         title: 'Error',
         description: 'Failed to delete cluster',
@@ -108,7 +110,7 @@ export default function ClustersPage() {
             <RefreshCw className="w-4 h-4 mr-2" />
             Refresh
           </Button>
-          <Button onClick={() => window.location.href = '/clusters/new'}>
+          <Button onClick={() => navigate('/clusters/new')}>
             <Plus className="w-4 h-4 mr-2" />
             New Cluster
           </Button>
@@ -189,14 +191,15 @@ export default function ClustersPage() {
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full">
+                <caption className="sr-only">List of clusters with name, sync scope, nodes, health, created date, and actions columns</caption>
                 <thead>
                   <tr className="border-b border-gray-200 dark:border-gray-700">
-                    <th className="text-left py-3 px-4 font-medium">Cluster</th>
-                    <th className="text-left py-3 px-4 font-medium">Sync Scope</th>
-                    <th className="text-left py-3 px-4 font-medium">Nodes</th>
-                    <th className="text-left py-3 px-4 font-medium">Health</th>
-                    <th className="text-left py-3 px-4 font-medium">Created</th>
-                    <th className="text-left py-3 px-4 font-medium">Actions</th>
+                    <th scope="col" className="text-left py-3 px-4 font-medium">Cluster</th>
+                    <th scope="col" className="text-left py-3 px-4 font-medium">Sync Scope</th>
+                    <th scope="col" className="text-left py-3 px-4 font-medium">Nodes</th>
+                    <th scope="col" className="text-left py-3 px-4 font-medium">Health</th>
+                    <th scope="col" className="text-left py-3 px-4 font-medium">Created</th>
+                    <th scope="col" className="text-left py-3 px-4 font-medium">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -206,7 +209,7 @@ export default function ClustersPage() {
                       <tr
                         key={cluster.id}
                         className="border-b border-gray-100 dark:border-gray-800 hover:bg-gray-50 dark:hover:bg-gray-800 cursor-pointer"
-                        onClick={() => window.location.href = `/clusters/${cluster.id}`}
+                        onClick={() => navigate(`/clusters/${cluster.id}`)}
                       >
                         <td className="py-3 px-4">
                           <div>
@@ -247,7 +250,7 @@ export default function ClustersPage() {
                               size="sm"
                               onClick={(e) => {
                                 e.stopPropagation()
-                                window.location.href = `/clusters/${cluster.id}`
+                                navigate(`/clusters/${cluster.id}`)
                               }}
                             >
                               <ArrowRight className="w-4 h-4" />
@@ -283,13 +286,14 @@ export default function ClustersPage() {
           <CardContent>
             <div className="overflow-x-auto">
               <table className="w-full">
+                <caption className="sr-only">Node replication status with node ID, last sync time, lag, pending events, and failed attempts columns</caption>
                 <thead>
                   <tr className="border-b border-gray-200 dark:border-gray-700">
-                    <th className="text-left py-3 px-4 font-medium">Node ID</th>
-                    <th className="text-left py-3 px-4 font-medium">Last Sync</th>
-                    <th className="text-left py-3 px-4 font-medium">Lag</th>
-                    <th className="text-left py-3 px-4 font-medium">Pending</th>
-                    <th className="text-left py-3 px-4 font-medium">Failed</th>
+                    <th scope="col" className="text-left py-3 px-4 font-medium">Node ID</th>
+                    <th scope="col" className="text-left py-3 px-4 font-medium">Last Sync</th>
+                    <th scope="col" className="text-left py-3 px-4 font-medium">Lag</th>
+                    <th scope="col" className="text-left py-3 px-4 font-medium">Pending</th>
+                    <th scope="col" className="text-left py-3 px-4 font-medium">Failed</th>
                   </tr>
                 </thead>
                 <tbody>

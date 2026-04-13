@@ -1,4 +1,4 @@
-import { useMemo } from 'react'
+import { useMemo, memo } from 'react'
 import { cn } from '@/lib/utils'
 import type { WafEvent } from '@/lib/api'
 import { Activity } from 'lucide-react'
@@ -17,8 +17,9 @@ interface Bucket {
   passed: number
 }
 
-export function TrafficChart({ events, minutes = 30 }: TrafficChartProps) {
+export const TrafficChart = memo(function TrafficChart({ events, minutes = 30 }: TrafficChartProps) {
   const buckets = useMemo(() => {
+    // eslint-disable-next-line react-hooks/purity
     const now = Date.now()
     const bucketSize = 60_000 // 1 minute
     const count = minutes
@@ -69,7 +70,7 @@ export function TrafficChart({ events, minutes = 30 }: TrafficChartProps) {
         </div>
       </div>
 
-      <div className="px-4 py-3">
+      <div className="px-4 py-3" role="img" aria-label={`Traffic chart for last ${minutes} minutes: ${buckets[buckets.length - 1]?.total || 0} current requests per minute`}>
         <div className="flex items-end gap-[2px] h-32">
           {buckets.map((b, i) => {
             const totalH = (b.total / maxVal) * 100
@@ -117,4 +118,4 @@ export function TrafficChart({ events, minutes = 30 }: TrafficChartProps) {
       </div>
     </div>
   )
-}
+})

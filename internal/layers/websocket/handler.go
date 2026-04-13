@@ -52,7 +52,7 @@ func (h *Handler) handleConnections(w http.ResponseWriter, r *http.Request) {
 
 	conns := h.security.GetAllConnections()
 
-	// Build response with connection info
+	// Build response from lock-free snapshots
 	type connInfo struct {
 		ID         string `json:"id"`
 		RemoteAddr string `json:"remote_addr"`
@@ -66,7 +66,6 @@ func (h *Handler) handleConnections(w http.ResponseWriter, r *http.Request) {
 
 	info := make([]connInfo, 0, len(conns))
 	for _, conn := range conns {
-		conn.mu.RLock()
 		info = append(info, connInfo{
 			ID:         conn.ID,
 			RemoteAddr: conn.RemoteAddr,
@@ -77,7 +76,6 @@ func (h *Handler) handleConnections(w http.ResponseWriter, r *http.Request) {
 			MsgCount:   conn.MsgCount,
 			ByteCount:  conn.ByteCount,
 		})
-		conn.mu.RUnlock()
 	}
 
 	w.Header().Set("Content-Type", "application/json")

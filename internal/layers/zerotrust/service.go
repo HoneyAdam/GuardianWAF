@@ -223,11 +223,15 @@ func (s *Service) VerifyDeviceAttestation(deviceID string, attestationData []byt
 	// 3. Check device integrity
 	// 4. Verify device is not compromised
 
+	// Copy attestation data to prevent caller mutations from corrupting stored data
+	dataCopy := make([]byte, len(attestationData))
+	copy(dataCopy, attestationData)
+
 	// Simplified implementation
 	device := &DeviceInfo{
 		DeviceID:        deviceID,
 		Fingerprint:     calculateDeviceFingerprintFromData(attestationData),
-		AttestationData: attestationData,
+		AttestationData: dataCopy,
 		AttestedAt:      time.Now(),
 		TrustLevel:      TrustLevelHigh,
 		LastSeenAt:      time.Now(),
@@ -257,8 +261,21 @@ func (s *Service) GetClientIdentity(sessionID string) *ClientIdentity {
 		return nil
 	}
 
-	// Return a copy to prevent data races when callers read fields after lock release
+	// Return a deep copy to prevent data races when callers read fields after lock release.
+	// The Device pointer is shared with the session map and can be mutated by
+	// VerifyClientCertificate (LastSeenAt, TrustLevel) while callers read it.
 	cp := *identity
+	if identity.Device != nil {
+		cp.Device = &DeviceInfo{
+			DeviceID:        identity.Device.DeviceID,
+			Fingerprint:     identity.Device.Fingerprint,
+			AttestationData: identity.Device.AttestationData, // read-only after creation
+			AttestedAt:      identity.Device.AttestedAt,
+			TrustLevel:      identity.Device.TrustLevel,
+			LastSeenAt:      identity.Device.LastSeenAt,
+			Metadata:        identity.Device.Metadata, // read-only after creation
+		}
+	}
 	return &cp
 }
 

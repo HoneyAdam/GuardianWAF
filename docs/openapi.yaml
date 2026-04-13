@@ -1,0 +1,1298 @@
+openapi: 3.1.0
+info:
+  title: GuardianWAF API
+  description: GuardianWAF REST API for security monitoring, configuration, and management.
+  version: 1.0.0
+  contact:
+    name: GuardianWAF
+    url: https://github.com/guardianwaf/guardianwaf
+  license:
+    name: MIT
+
+servers:
+  - url: https://localhost:9443
+    description: Default dashboard endpoint
+
+security:
+  - ApiKeyAuth: []
+  - SessionAuth: []
+
+tags:
+  - name: Auth
+    description: Authentication and session management
+  - name: Health
+    description: Health checks and metrics (public)
+  - name: Stats
+    description: WAF engine statistics
+  - name: Events
+    description: Security event queries and streaming
+  - name: Config
+    description: WAF configuration management
+  - name: Routing
+    description: Upstream and virtual host routing
+  - name: IP ACL
+    description: IP whitelist and blacklist management
+  - name: Bans
+    description: Temporary IP ban management
+  - name: Rules
+    description: Custom WAF rule CRUD
+  - name: AI
+    description: AI threat analysis
+  - name: Alerting
+    description: Webhook and email alerting
+  - name: Docker
+    description: Docker auto-discovery
+  - name: Analytics
+    description: Traffic analytics and reporting
+  - name: Tenants
+    description: Multi-tenant administration
+  - name: SSL
+    description: SSL certificate status
+
+components:
+  securitySchemes:
+    ApiKeyAuth:
+      type: apiKey
+      in: header
+      name: X-API-Key
+    SessionAuth:
+      type: apiKey
+      in: cookie
+      name: gwaf_session
+    AdminKeyAuth:
+      type: apiKey
+      in: header
+      name: X-Admin-Key
+
+paths:
+  # ── Auth ──────────────────────────────────────────────
+  /login:
+    get:
+      tags: [Auth]
+      summary: Serve login page
+      security: []
+      responses:
+        '200':
+          description: HTML login page
+          content:
+            text/html: {}
+    post:
+      tags: [Auth]
+      summary: Authenticate with API key
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [key]
+              properties:
+                key:
+                  type: string
+                  description: API key
+      responses:
+        '302':
+          description: Redirect to dashboard on success
+        '401':
+          description: Invalid API key
+
+  /logout:
+    get:
+      tags: [Auth]
+      summary: Clear session and redirect to login
+      security: []
+      responses:
+        '302':
+          description: Redirect to login page
+
+  # ── Health (public) ───────────────────────────────────
+  /api/v1/health:
+    get:
+      tags: [Health]
+      summary: Engine health check
+      security: []
+      responses:
+        '200':
+          description: Health status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  engine:
+                    type: boolean
+                  eventStore:
+                    type: boolean
+
+  /healthz:
+    get:
+      tags: [Health]
+      summary: Kubernetes liveness/readiness probe
+      security: []
+      responses:
+        '200':
+          description: JSON status summary
+
+  /metrics:
+    get:
+      tags: [Health]
+      summary: Prometheus metrics endpoint
+      security: []
+      responses:
+        '200':
+          description: Prometheus text format metrics
+          content:
+            text/plain: {}
+
+  # ── Stats ─────────────────────────────────────────────
+  /api/v1/stats:
+    get:
+      tags: [Stats]
+      summary: Get engine statistics
+      responses:
+        '200':
+          description: Engine statistics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total_requests:
+                    type: integer
+                  blocked_requests:
+                    type: integer
+                  challenged_requests:
+                    type: integer
+                  logged_requests:
+                    type: integer
+                  passed_requests:
+                    type: integer
+                  avg_latency_us:
+                    type: integer
+                  alerting:
+                    type: object
+                    properties:
+                      sent:
+                        type: integer
+                      failed:
+                        type: integer
+                      webhook_count:
+                        type: integer
+                      email_count:
+                        type: integer
+
+  # ── Events ────────────────────────────────────────────
+  /api/v1/events:
+    get:
+      tags: [Events]
+      summary: Query security events
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+        - name: action
+          in: query
+          schema:
+            type: string
+            enum: [block, challenge, log, pass]
+        - name: client_ip
+          in: query
+          schema:
+            type: string
+        - name: path
+          in: query
+          schema:
+            type: string
+        - name: min_score
+          in: query
+          schema:
+            type: integer
+        - name: since
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: until
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: sort_by
+          in: query
+          schema:
+            type: string
+            enum: [timestamp, score]
+            default: timestamp
+        - name: sort_order
+          in: query
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+      responses:
+        '200':
+          description: List of events
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WafEvent'
+
+  /api/v1/events/export:
+    get:
+      tags: [Events]
+      summary: Export events as JSON or CSV
+      parameters:
+        - name: format
+          in: query
+          schema:
+            type: string
+            enum: [json, csv]
+            default: json
+      responses:
+        '200':
+          description: Exported events
+
+  /api/v1/events/{id}:
+    get:
+      tags: [Events]
+      summary: Get event by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Event detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WafEvent'
+        '404':
+          description: Event not found
+
+  /api/v1/sse:
+    get:
+      tags: [Events]
+      summary: Server-Sent Events stream
+      responses:
+        '200':
+          description: SSE stream of real-time events
+          content:
+            text/event-stream: {}
+
+  # ── Config ────────────────────────────────────────────
+  /api/v1/config:
+    get:
+      tags: [Config]
+      summary: Get full WAF configuration
+      responses:
+        '200':
+          description: WAF configuration
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  mode:
+                    type: string
+                    enum: [enforce, monitor, disabled]
+                  tls:
+                    type: object
+                  waf:
+                    type: object
+                  docker:
+                    type: object
+                  ai_analysis:
+                    type: object
+                  alerting:
+                    type: object
+    put:
+      tags: [Config]
+      summary: Update WAF configuration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Configuration updated
+        '400':
+          description: Invalid configuration
+
+  # ── Routing ───────────────────────────────────────────
+  /api/v1/routing:
+    get:
+      tags: [Routing]
+      summary: Get routing configuration
+      responses:
+        '200':
+          description: Routing configuration
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  upstreams:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/UpstreamConfig'
+                  virtual_hosts:
+                    type: array
+                    items:
+                      type: object
+                  routes:
+                    type: array
+                    items:
+                      type: object
+    put:
+      tags: [Routing]
+      summary: Update routing and rebuild proxy
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Routing updated and proxy rebuilt
+
+  /api/v1/upstreams:
+    get:
+      tags: [Routing]
+      summary: Get upstream health status
+      responses:
+        '200':
+          description: Upstream health data
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UpstreamStatus'
+
+  /api/v1/ssl:
+    get:
+      tags: [SSL]
+      summary: Get SSL certificate status
+      responses:
+        '200':
+          description: SSL certificate information
+
+  # ── IP ACL ────────────────────────────────────────────
+  /api/v1/ipacl:
+    get:
+      tags: [IP ACL]
+      summary: Get whitelist and blacklist
+      responses:
+        '200':
+          description: IP ACL entries
+    post:
+      tags: [IP ACL]
+      summary: Add IP to list
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [list, ip]
+              properties:
+                list:
+                  type: string
+                  enum: [whitelist, blacklist]
+                ip:
+                  type: string
+      responses:
+        '200':
+          description: IP added
+    delete:
+      tags: [IP ACL]
+      summary: Remove IP from list
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [list, ip]
+              properties:
+                list:
+                  type: string
+                  enum: [whitelist, blacklist]
+                ip:
+                  type: string
+      responses:
+        '200':
+          description: IP removed
+
+  # ── Bans ──────────────────────────────────────────────
+  /api/v1/bans:
+    get:
+      tags: [Bans]
+      summary: List active temporary bans
+      responses:
+        '200':
+          description: List of bans
+    post:
+      tags: [Bans]
+      summary: Add temporary IP ban
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ip]
+              properties:
+                ip:
+                  type: string
+                reason:
+                  type: string
+                duration:
+                  type: string
+                  description: Duration (e.g. "1h", "30m")
+      responses:
+        '200':
+          description: Ban added
+    delete:
+      tags: [Bans]
+      summary: Remove temporary ban
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ip]
+              properties:
+                ip:
+                  type: string
+      responses:
+        '200':
+          description: Ban removed
+
+  # ── Rules ─────────────────────────────────────────────
+  /api/v1/rules:
+    get:
+      tags: [Rules]
+      summary: List custom WAF rules
+      responses:
+        '200':
+          description: List of rules
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rules:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/CustomRule'
+    post:
+      tags: [Rules]
+      summary: Add a custom rule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CustomRule'
+      responses:
+        '200':
+          description: Rule created
+
+  /api/v1/rules/{id}:
+    put:
+      tags: [Rules]
+      summary: Update a rule
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CustomRule'
+      responses:
+        '200':
+          description: Rule updated
+    delete:
+      tags: [Rules]
+      summary: Delete a rule
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Rule deleted
+
+  # ── GeoIP ─────────────────────────────────────────────
+  /api/v1/geoip/lookup:
+    get:
+      tags: [Health]
+      summary: Look up country for IP
+      parameters:
+        - name: ip
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: GeoIP lookup result
+
+  # ── Logs ──────────────────────────────────────────────
+  /api/v1/logs:
+    get:
+      tags: [Health]
+      summary: Get recent engine logs
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+        - name: level
+          in: query
+          schema:
+            type: string
+            enum: [debug, info, warn, error]
+      responses:
+        '200':
+          description: Log entries
+
+  # ── AI ────────────────────────────────────────────────
+  /api/v1/ai/providers:
+    get:
+      tags: [AI]
+      summary: Get AI provider catalog
+      responses:
+        '200':
+          description: Provider catalog from models.dev
+
+  /api/v1/ai/config:
+    get:
+      tags: [AI]
+      summary: Get AI configuration
+      responses:
+        '200':
+          description: Current AI config (masked API key)
+    put:
+      tags: [AI]
+      summary: Set AI configuration
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                provider_id:
+                  type: string
+                model_id:
+                  type: string
+                api_key:
+                  type: string
+                base_url:
+                  type: string
+      responses:
+        '200':
+          description: AI config updated
+
+  /api/v1/ai/history:
+    get:
+      tags: [AI]
+      summary: Get AI analysis history
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: Analysis results
+
+  /api/v1/ai/stats:
+    get:
+      tags: [AI]
+      summary: Get AI usage statistics
+      responses:
+        '200':
+          description: Token usage, request counts, cost
+
+  /api/v1/ai/analyze:
+    post:
+      tags: [AI]
+      summary: Trigger manual AI analysis
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Analysis triggered
+
+  /api/v1/ai/test:
+    post:
+      tags: [AI]
+      summary: Test AI provider connection
+      responses:
+        '200':
+          description: Connection test result
+
+  # ── Alerting ──────────────────────────────────────────
+  /api/v1/alerting/status:
+    get:
+      tags: [Alerting]
+      summary: Get alerting status
+      responses:
+        '200':
+          description: Alerting status with webhook/email counts
+
+  /api/v1/alerting/webhooks:
+    get:
+      tags: [Alerting]
+      summary: List webhooks
+      responses:
+        '200':
+          description: List of configured webhooks
+    post:
+      tags: [Alerting]
+      summary: Add a webhook
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, url, type]
+              properties:
+                name:
+                  type: string
+                url:
+                  type: string
+                type:
+                  type: string
+                  enum: [slack, discord, pagerduty, generic]
+                events:
+                  type: array
+                  items:
+                    type: string
+                min_score:
+                  type: integer
+                cooldown:
+                  type: string
+      responses:
+        '200':
+          description: Webhook added
+
+  /api/v1/alerting/webhooks/{name}:
+    delete:
+      tags: [Alerting]
+      summary: Delete a webhook
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Webhook deleted
+
+  /api/v1/alerting/emails:
+    get:
+      tags: [Alerting]
+      summary: List email targets
+      responses:
+        '200':
+          description: List of email targets
+    post:
+      tags: [Alerting]
+      summary: Add email target
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, smtp_host, to]
+              properties:
+                name:
+                  type: string
+                smtp_host:
+                  type: string
+                smtp_port:
+                  type: integer
+                from:
+                  type: string
+                to:
+                  type: string
+      responses:
+        '200':
+          description: Email target added
+
+  /api/v1/alerting/emails/{name}:
+    delete:
+      tags: [Alerting]
+      summary: Delete email target
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Email target deleted
+
+  /api/v1/alerting/test:
+    post:
+      tags: [Alerting]
+      summary: Send test alert
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [target]
+              properties:
+                target:
+                  type: string
+      responses:
+        '200':
+          description: Test alert sent
+
+  # ── Docker ────────────────────────────────────────────
+  /api/v1/docker/services:
+    get:
+      tags: [Docker]
+      summary: Get discovered Docker services
+      responses:
+        '200':
+          description: Docker service list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  enabled:
+                    type: boolean
+                  services:
+                    type: array
+                    items:
+                      type: object
+
+  # ── Analytics ─────────────────────────────────────────
+  /api/v1/analytics/dashboard:
+    get:
+      tags: [Analytics]
+      summary: Get analytics dashboard data
+      responses:
+        '200':
+          description: Aggregate dashboard data
+
+  /api/v1/analytics/traffic:
+    get:
+      tags: [Analytics]
+      summary: Get traffic statistics
+      parameters:
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Traffic statistics
+
+  /api/v1/analytics/trends:
+    get:
+      tags: [Analytics]
+      summary: Get trend analysis
+      parameters:
+        - name: metric
+          in: query
+          schema:
+            type: string
+        - name: interval
+          in: query
+          schema:
+            type: string
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Trend data
+
+  /api/v1/analytics/geo:
+    get:
+      tags: [Analytics]
+      summary: Get geographic distribution
+      parameters:
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Geo distribution data
+
+  /api/v1/analytics/comparison:
+    get:
+      tags: [Analytics]
+      summary: Compare two time periods
+      parameters:
+        - name: current_from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: current_to
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: previous_from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: previous_to
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Period comparison data
+
+  /api/v1/analytics/metrics:
+    get:
+      tags: [Analytics]
+      summary: Get all current metrics
+      responses:
+        '200':
+          description: Metrics data
+
+  /api/v1/analytics/timeseries:
+    get:
+      tags: [Analytics]
+      summary: Get time series data
+      parameters:
+        - name: name
+          in: query
+          schema:
+            type: string
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+      responses:
+        '200':
+          description: Time series data
+
+  # ── Multi-Tenant Admin ────────────────────────────────
+  /api/admin/tenants:
+    get:
+      tags: [Tenants]
+      summary: List all tenants
+      security:
+        - AdminKeyAuth: []
+      responses:
+        '200':
+          description: Tenant list
+    post:
+      tags: [Tenants]
+      summary: Create a tenant
+      security:
+        - AdminKeyAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                description:
+                  type: string
+                domains:
+                  type: array
+                  items:
+                    type: string
+                quota:
+                  type: object
+      responses:
+        '200':
+          description: Tenant created
+
+  /api/admin/tenants/{id}:
+    get:
+      tags: [Tenants]
+      summary: Get tenant details
+      security:
+        - AdminKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Tenant details
+    put:
+      tags: [Tenants]
+      summary: Update tenant
+      security:
+        - AdminKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+      responses:
+        '200':
+          description: Tenant updated
+    delete:
+      tags: [Tenants]
+      summary: Delete tenant
+      security:
+        - AdminKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Tenant deleted
+
+  /api/admin/tenants/{id}/regenerate-key:
+    post:
+      tags: [Tenants]
+      summary: Regenerate tenant API key
+      security:
+        - AdminKeyAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: New API key generated
+
+  /api/admin/stats:
+    get:
+      tags: [Tenants]
+      summary: Get platform statistics
+      security:
+        - AdminKeyAuth: []
+      responses:
+        '200':
+          description: Platform statistics
+
+  /api/admin/billing:
+    get:
+      tags: [Tenants]
+      summary: List all invoices
+      security:
+        - AdminKeyAuth: []
+      responses:
+        '200':
+          description: Invoice list
+
+  /api/admin/billing/{tenantID}:
+    get:
+      tags: [Tenants]
+      summary: Get tenant invoices
+      security:
+        - AdminKeyAuth: []
+      parameters:
+        - name: tenantID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Tenant invoices and usage
+    post:
+      tags: [Tenants]
+      summary: Generate tenant invoice
+      security:
+        - AdminKeyAuth: []
+      parameters:
+        - name: tenantID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Invoice generated
+
+  /api/admin/alerts:
+    get:
+      tags: [Tenants]
+      summary: Get cross-tenant alerts
+      security:
+        - AdminKeyAuth: []
+      responses:
+        '200':
+          description: Alert list
+
+  /api/admin/usage:
+    get:
+      tags: [Tenants]
+      summary: Get all tenant usage
+      security:
+        - AdminKeyAuth: []
+      responses:
+        '200':
+          description: Usage data
+
+  /api/admin/usage/{tenantID}:
+    get:
+      tags: [Tenants]
+      summary: Get tenant usage
+      security:
+        - AdminKeyAuth: []
+      parameters:
+        - name: tenantID
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Tenant usage data
+
+components:
+  schemas:
+    WafEvent:
+      type: object
+      properties:
+        id:
+          type: string
+        request_id:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        client_ip:
+          type: string
+        method:
+          type: string
+        path:
+          type: string
+        query:
+          type: string
+        action:
+          type: string
+          enum: [block, challenge, log, pass]
+        score:
+          type: integer
+        duration_ns:
+          type: integer
+        host:
+          type: string
+        user_agent:
+          type: string
+        content_type:
+          type: string
+        referer:
+          type: string
+        status_code:
+          type: integer
+        browser:
+          type: string
+        browser_version:
+          type: string
+        os:
+          type: string
+        device_type:
+          type: string
+        is_bot:
+          type: boolean
+        tls_version:
+          type: string
+        tls_cipher:
+          type: string
+        sni:
+          type: string
+        ja3_hash:
+          type: string
+        ja4_fingerprint:
+          type: string
+        country:
+          type: string
+        findings:
+          type: array
+          items:
+            type: object
+            properties:
+              detector:
+                type: string
+              severity:
+                type: string
+              score:
+                type: integer
+              description:
+                type: string
+              matched_value:
+                type: string
+              location:
+                type: string
+              confidence:
+                type: number
+              category:
+                type: string
+
+    UpstreamConfig:
+      type: object
+      properties:
+        name:
+          type: string
+        load_balancer:
+          type: string
+          enum: [round_robin, weighted, least_conn, ip_hash]
+        targets:
+          type: array
+          items:
+            type: object
+            properties:
+              url:
+                type: string
+              weight:
+                type: integer
+        health_check:
+          type: object
+          properties:
+            enabled:
+              type: boolean
+            interval:
+              type: string
+            timeout:
+              type: string
+            path:
+              type: string
+
+    UpstreamStatus:
+      type: object
+      properties:
+        name:
+          type: string
+        strategy:
+          type: string
+        healthy_count:
+          type: integer
+        total_count:
+          type: integer
+        targets:
+          type: array
+          items:
+            type: object
+            properties:
+              url:
+                type: string
+              healthy:
+                type: boolean
+              circuit_state:
+                type: string
+                enum: [closed, open, half-open]
+              active_conns:
+                type: integer
+              weight:
+                type: integer
+
+    CustomRule:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        priority:
+          type: integer
+        action:
+          type: string
+          enum: [block, challenge, log, pass]
+        score:
+          type: integer
+        enabled:
+          type: boolean
+        conditions:
+          type: array
+          items:
+            type: object
+            properties:
+              field:
+                type: string
+              op:
+                type: string
+              value: {}

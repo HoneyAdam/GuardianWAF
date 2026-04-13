@@ -130,11 +130,24 @@ type Fragment struct {
 	SelectionSet  []Selection
 }
 
+// maxParseDepth limits recursion depth during GraphQL query parsing to prevent
+// stack overflow DoS from deeply nested queries. 256 is well above any
+// legitimate query depth but well below Go's default stack limit (~1M frames).
+const maxParseDepth = 256
+
+// maxQueryLength limits the size of a GraphQL query string accepted by the parser.
+// Prevents excessive memory allocation from huge query strings.
+const maxQueryLength = 256 * 1024 // 256KB
+
 // ParseQuery parses a GraphQL query string into an AST.
 // This is a simplified parser - production version would use a proper lexer/parser.
 func ParseQuery(query string) (*AST, error) {
 	if query == "" {
 		return nil, fmt.Errorf("empty query")
+	}
+
+	if len(query) > maxQueryLength {
+		return nil, fmt.Errorf("query exceeds maximum length of %d bytes", maxQueryLength)
 	}
 
 	// Normalize query
@@ -149,11 +162,64 @@ func ParseQuery(query string) (*AST, error) {
 		},
 	}
 
+	// Extract fragment definitions before parsing the operation.
+	// Fragment definitions have the form: fragment FragmentName on TypeName { ... }
+	// They must be parsed so that depth calculation can resolve fragment spreads.
+	operationQuery := query
+	for {
+		idx := strings.Index(operationQuery, "fragment ")
+		if idx == -1 {
+			break
+		}
+
+		// Find the opening brace of the fragment body
+		braceStart := strings.Index(operationQuery[idx:], "{")
+		if braceStart == -1 {
+			break
+		}
+		braceStart += idx
+
+		// Find the matching closing brace
+		braceEnd := findMatchingBrace(operationQuery, braceStart)
+		if braceEnd == -1 {
+			break
+		}
+
+		// Parse fragment header: "fragment FragmentName on TypeName"
+		header := strings.TrimSpace(operationQuery[idx:braceStart])
+		header = strings.TrimPrefix(header, "fragment ")
+		parts := strings.SplitN(header, " on ", 2)
+		fragName := strings.TrimSpace(parts[0])
+		typeCond := ""
+		if len(parts) == 2 {
+			typeCond = strings.TrimSpace(parts[1])
+		}
+
+		// Parse fragment body
+		body := operationQuery[braceStart+1 : braceEnd]
+		selections, err := parseSelectionSetDepth("{"+body+"}", maxParseDepth)
+		if err != nil {
+			// Skip malformed fragments but continue parsing
+			operationQuery = operationQuery[:idx] + operationQuery[braceEnd+1:]
+			continue
+		}
+
+		ast.Document.Fragments = append(ast.Document.Fragments, Fragment{
+			Name:          fragName,
+			TypeCondition: typeCond,
+			SelectionSet:  selections,
+		})
+
+		// Remove fragment from query string for operation parsing
+		operationQuery = operationQuery[:idx] + operationQuery[braceEnd+1:]
+	}
+
 	// Detect operation type
 	opType := "query"
-	if strings.HasPrefix(query, "mutation") {
+	opQuery := strings.TrimSpace(operationQuery)
+	if strings.HasPrefix(opQuery, "mutation") {
 		opType = "mutation"
-	} else if strings.HasPrefix(query, "subscription") {
+	} else if strings.HasPrefix(opQuery, "subscription") {
 		opType = "subscription"
 	}
 
@@ -164,7 +230,7 @@ func ParseQuery(query string) (*AST, error) {
 	}
 
 	// Extract selection set
-	selections, err := parseSelectionSet(query)
+	selections, err := parseSelectionSetDepth(opQuery, maxParseDepth)
 	if err != nil {
 		return nil, err
 	}
@@ -176,7 +242,17 @@ func ParseQuery(query string) (*AST, error) {
 }
 
 // parseSelectionSet parses a GraphQL selection set.
+// Deprecated: use parseSelectionSetDepth to prevent unbounded recursion.
 func parseSelectionSet(query string) ([]Selection, error) {
+	return parseSelectionSetDepth(query, maxParseDepth)
+}
+
+// parseSelectionSetDepth parses a GraphQL selection set with a depth limit.
+func parseSelectionSetDepth(query string, depth int) ([]Selection, error) {
+	if depth <= 0 {
+		return nil, fmt.Errorf("query exceeds maximum nesting depth of %d", maxParseDepth)
+	}
+
 	selections := []Selection{}
 
 	// Find the selection set (content between { and })
@@ -211,7 +287,7 @@ func parseSelectionSet(query string) ([]Selection, error) {
 		}
 
 		// Parse field
-		field, err := parseField(fieldStr)
+		field, err := parseFieldDepth(fieldStr, depth)
 		if err != nil {
 			continue // Skip malformed fields
 		}
@@ -223,6 +299,11 @@ func parseSelectionSet(query string) ([]Selection, error) {
 
 // parseField parses a single field.
 func parseField(fieldStr string) (*Field, error) {
+	return parseFieldDepth(fieldStr, maxParseDepth)
+}
+
+// parseFieldDepth parses a single field with a depth limit.
+func parseFieldDepth(fieldStr string, depth int) (*Field, error) {
 	field := &Field{
 		Arguments:    []Argument{},
 		Directives:   []Directive{},
@@ -272,10 +353,11 @@ func parseField(fieldStr string) (*Field, error) {
 	// Parse sub-selection if present
 	if strings.HasPrefix(fieldStr, "{") {
 		subQuery := field.Name + fieldStr // Reconstruct for parsing
-		selections, err := parseSelectionSet(subQuery)
-		if err == nil {
-			field.SelectionSet = selections
+		selections, err := parseSelectionSetDepth(subQuery, depth-1)
+		if err != nil {
+			return nil, err
 		}
+		field.SelectionSet = selections
 	}
 
 	return field, nil

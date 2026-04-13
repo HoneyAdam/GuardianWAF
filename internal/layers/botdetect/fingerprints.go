@@ -75,20 +75,32 @@ var ja4FingerprintDB = map[string]FingerprintInfo{
 	"t13d1512h2_6beb6e9a1c59_99f097b25b27": {Name: "Safari 17", Category: FingerprintGood, Score: 0},
 
 	// Known bad tools (score 80)
-	// Python requests - typically simpler TLS config
-	"t12d0500_123456789abc_def456789abc": {Name: "Python requests", Category: FingerprintBad, Score: 80},
-	// Go http client
-	"t13d0500_abcdef123456_789abc123456": {Name: "Go http client", Category: FingerprintBad, Score: 80},
-	// curl
-	"t12d0300_111111111111_222222222222": {Name: "curl", Category: FingerprintBad, Score: 40},
-	// OpenSSL s_client
-	"t12d0200_333333333333_444444444444": {Name: "OpenSSL", Category: FingerprintBad, Score: 80},
+	// Python requests/urllib3 - TLS 1.2, 5 ciphers, no ALPN
+	"t12d050500_3b1e5fb35cf3_0a497f3a4ef1": {Name: "Python requests", Category: FingerprintBad, Score: 80},
+	// Python botocore
+	"t12d050500_4895fe22fd83_e5a9e7e1e0d3": {Name: "Python botocore", Category: FingerprintBad, Score: 80},
+	// Go net/http - TLS 1.3, 5 ciphers, h2 ALPN
+	"t13d0507h2_b3ebd7b19e79_e5a9e7e1e0d3": {Name: "Go http client", Category: FingerprintBad, Score: 80},
+	// curl - TLS 1.3, 3 ciphers, h2 ALPN
+	"t13d0303h2_c5b89428ddb0_ea6a18458c7a": {Name: "curl", Category: FingerprintBad, Score: 40},
+	// OpenSSL s_client - TLS 1.2, 2 ciphers, no ALPN
+	"t12d0200_1b495ea70c4a_6f9a2e2d0afd": {Name: "OpenSSL", Category: FingerprintBad, Score: 80},
+	// sqlmap - typically uses Python TLS with custom configuration
+	"t12d050500_4895fe22fd83_ea6a18458c7a": {Name: "sqlmap (Python)", Category: FingerprintBad, Score: 80},
+	// Nmap NSE scripts - custom TLS, very few ciphers
+	"t12d0100_3b1e5fb35cf3_000000000000": {Name: "Nmap", Category: FingerprintBad, Score: 80},
+	// Java HttpsURLConnection
+	"t12d0600_eb676416c667_2e5c2e05b576": {Name: "Java HttpClient", Category: FingerprintBad, Score: 60},
 
 	// Suspicious - headless browsers (score 40)
-	// Headless Chrome typically has different ALPN or extensions
+	// Headless Chrome - same TLS stack as Chrome but often missing h2 ALPN or certain extensions
 	"t13d1515h2_9daaf6152771_f5627efa2ab1": {Name: "Headless Chrome", Category: FingerprintSuspicious, Score: 40},
-	// PhantomJS (older TLS)
-	"t11d0800_555555555555_666666666666": {Name: "PhantomJS", Category: FingerprintSuspicious, Score: 40},
+	// Headless Chrome (HTTP/1.1 only)
+	"t13d1515_9daaf6152771_f5627efa2ab1": {Name: "Headless Chrome (no h2)", Category: FingerprintSuspicious, Score: 50},
+	// PhantomJS - old TLS 1.0/1.1, minimal extensions
+	"t11d0800_eb676416c667_2e5c2e05b576": {Name: "PhantomJS", Category: FingerprintSuspicious, Score: 40},
+	// Puppeteer/Playwright headless Chrome
+	"t13d1516h2_8daaf6152771_f5627efa2ab1": {Name: "Puppeteer/Playwright", Category: FingerprintSuspicious, Score: 40},
 }
 
 // LookupFingerprint returns the fingerprint info for a JA3 hash.

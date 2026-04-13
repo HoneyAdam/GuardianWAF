@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"net/http/pprof"
 	"strconv"
 	"strings"
@@ -20,6 +21,7 @@ import (
 	"github.com/guardianwaf/guardianwaf/internal/config"
 	"github.com/guardianwaf/guardianwaf/internal/engine"
 	"github.com/guardianwaf/guardianwaf/internal/events"
+	"github.com/guardianwaf/guardianwaf/internal/proxy"
 )
 
 //go:embed dist
@@ -85,6 +87,24 @@ type Dashboard struct {
 	dockerWatcher   dockerWatcherInterface        // Docker auto-discovery (optional)
 	tenantManager   tenantManagerInterface        // Multi-tenant manager (optional)
 	certFn          func() any                    // returns SSL cert status (optional)
+
+	// Login rate limiting: per-IP token buckets
+	loginBuckets sync.Map // map[string]*loginBucket
+	loginStopCh  chan struct{}
+}
+
+const (
+	loginMaxAttempts = 5               // max failed login attempts before lockout
+	loginWindow      = 5 * time.Minute  // window for counting attempts
+	loginLockout     = 15 * time.Minute // lockout duration after max attempts
+)
+
+type loginBucket struct {
+	mu       sync.Mutex
+	attempts int
+	lastFail time.Time
+	locked   bool
+	lockUntil time.Time
 }
 
 // New creates a new Dashboard wired to the given engine and event store.
@@ -95,7 +115,10 @@ func New(eng *engine.Engine, store events.EventStore, apiKey string) *Dashboard 
 		sse:        NewSSEBroadcaster(),
 		mux:        http.NewServeMux(),
 		apiKey:     apiKey,
+		loginStopCh: make(chan struct{}),
 	}
+
+	go d.cleanupLoginBuckets()
 
 	// Login/logout (always accessible)
 	d.mux.HandleFunc("GET /login", d.handleLoginPage)
@@ -247,19 +270,131 @@ func (d *Dashboard) handleLoginSubmit(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/", http.StatusFound)
 		return
 	}
+
+	// Rate limit check
+	clientIP, _, _ := net.SplitHostPort(r.RemoteAddr)
+	if clientIP == "" {
+		clientIP = r.RemoteAddr
+	}
+	if !d.checkLoginRateLimit(clientIP) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = w.Write([]byte(loginPage("Too many failed attempts. Please try again later.")))
+		return
+	}
+
 	r.Body = http.MaxBytesReader(w, r.Body, 4096) // API keys are short
 	key := r.FormValue("key")
 	if subtle.ConstantTimeCompare([]byte(key), []byte(d.apiKey)) != 1 {
+		d.recordLoginFailure(clientIP)
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.WriteHeader(http.StatusUnauthorized)
 		_, _ = w.Write([]byte(loginPage("Invalid API key. Please try again.")))
 		return
 	}
+	d.resetLoginAttempts(clientIP)
 	setSessionCookie(w, r)
 	http.Redirect(w, r, "/", http.StatusFound)
 }
 
+// checkLoginRateLimit returns false if the IP is currently locked out.
+func (d *Dashboard) checkLoginRateLimit(ip string) bool {
+	val, ok := d.loginBuckets.Load(ip)
+	if !ok {
+		return true
+	}
+	b := val.(*loginBucket)
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	// If locked out, check if lockout has expired
+	if b.locked {
+		if time.Now().After(b.lockUntil) {
+			b.locked = false
+			b.attempts = 0
+			return true
+		}
+		return false
+	}
+
+	// Reset attempts if outside the window
+	if b.attempts > 0 && time.Since(b.lastFail) > loginWindow {
+		b.attempts = 0
+	}
+	return true
+}
+
+// recordLoginFailure records a failed login attempt and locks out if threshold exceeded.
+func (d *Dashboard) recordLoginFailure(ip string) {
+	val, _ := d.loginBuckets.LoadOrStore(ip, &loginBucket{})
+	b := val.(*loginBucket)
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	// Reset if outside window
+	if b.attempts > 0 && time.Since(b.lastFail) > loginWindow {
+		b.attempts = 0
+	}
+
+	b.attempts++
+	b.lastFail = time.Now()
+
+	if b.attempts >= loginMaxAttempts {
+		b.locked = true
+		b.lockUntil = time.Now().Add(loginLockout)
+	}
+}
+
+// resetLoginAttempts clears the rate limit counter on successful login.
+func (d *Dashboard) resetLoginAttempts(ip string) {
+	d.loginBuckets.Delete(ip)
+}
+
+// cleanupLoginBuckets periodically removes expired login rate-limit entries
+// to prevent unbounded memory growth from unique attacker IPs.
+func (d *Dashboard) cleanupLoginBuckets() {
+	defer func() { recover() }()
+	ticker := time.NewTicker(loginLockout)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			now := time.Now()
+			d.loginBuckets.Range(func(key, value any) bool {
+				b := value.(*loginBucket)
+				b.mu.Lock()
+				expired := b.locked && now.After(b.lockUntil) || (!b.locked && now.Sub(b.lastFail) > loginWindow)
+				b.mu.Unlock()
+				if expired {
+					d.loginBuckets.Delete(key)
+				}
+				return true
+			})
+		case <-d.loginStopCh:
+			return
+		}
+	}
+}
+
+// Close stops background goroutines (login bucket cleanup).
+func (d *Dashboard) Close() {
+	select {
+	case <-d.loginStopCh:
+		return
+	default:
+		close(d.loginStopCh)
+	}
+}
+
 func (d *Dashboard) handleLogout(w http.ResponseWriter, r *http.Request) {
+	// CSRF protection: verify Origin/Referer for non-GET requests.
+	// GET logout is allowed (user clicking a link), but verify referrer when present.
+	if origin := r.Header.Get("Origin"); origin != "" {
+		if !verifySameOrigin(r) {
+			http.Error(w, "forbidden", http.StatusForbidden)
+			return
+		}
+	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
 		Value:    "",
@@ -563,7 +698,7 @@ func (d *Dashboard) handleUpdateRouting(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	cfg := d.engine.Config()
+	cfg := deepCopyConfig(d.engine.Config())
 
 	// Parse upstreams from raw JSON maps
 	if body.Upstreams != nil {
@@ -584,6 +719,17 @@ func (d *Dashboard) handleUpdateRouting(w http.ResponseWriter, r *http.Request) 
 					}
 					tc := config.TargetConfig{Weight: 1}
 					if v, ok := tm["url"].(string); ok {
+						parsed, urlErr := url.Parse(v)
+						if urlErr != nil {
+							writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid target URL: "+urlErr.Error()})
+							return
+						}
+						if !proxy.PrivateTargetsAllowed() {
+						if ssrfErr := proxy.IsPrivateOrReservedIP(parsed.Hostname()); ssrfErr != nil {
+							writeJSON(w, http.StatusBadRequest, map[string]any{"error": "upstream target blocked: "+ssrfErr.Error()})
+							return
+						}
+					}
 						tc.URL = v
 					}
 					if v, ok := tm["weight"].(float64); ok {

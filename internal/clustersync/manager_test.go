@@ -308,7 +308,7 @@ func TestAddNodeToCluster(t *testing.T) {
 	node := &Node{
 		ID:      "node-2",
 		Name:    "Node 2",
-		Address: "http://localhost:9445",
+		Address: "https://localhost:9445",
 		Healthy: true,
 	}
 
@@ -343,7 +343,7 @@ func TestAddNodeToNonExistentCluster(t *testing.T) {
 	node := &Node{
 		ID:      "node-2",
 		Name:    "Node 2",
-		Address: "http://localhost:9445",
+		Address: "https://localhost:9445",
 	}
 
 	err := mgr.AddNodeToCluster("non-existent", node)
@@ -495,6 +495,7 @@ func TestGenerateNodeIDFromAddress(t *testing.T) {
 }
 
 func TestManagerStartStop(t *testing.T) {
+	AllowPlainHTTP()
 	config := &Config{
 		Enabled:       true,
 		NodeID:        "test-node",
@@ -659,7 +660,7 @@ func TestGetReplicationStatus(t *testing.T) {
 	mgr.nodes["remote-1"] = &Node{
 		ID:      "remote-1",
 		Name:    "Remote Node",
-		Address: "http://localhost:9445",
+		Address: "https://localhost:9445",
 		Healthy: true,
 		IsLocal: false,
 	}
@@ -788,6 +789,7 @@ func BenchmarkReceiveEvent(b *testing.B) {
 
 // Integration test
 func TestClusterSyncIntegration(t *testing.T) {
+	AllowPlainHTTP()
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}

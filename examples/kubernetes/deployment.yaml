@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: guardianwaf
-          image: guardianwaf/guardianwafwaf:latest
+          image: ghcr.io/guardianwaf/guardianwaf:latest
           args: ["serve", "-c", "/etc/guardianwaf/guardianwaf.yaml"]
           ports:
             - containerPort: 8088

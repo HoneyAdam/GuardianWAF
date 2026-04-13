@@ -100,8 +100,9 @@ type Manager struct {
 	store *Store
 
 	// Cluster sync for multi-node replication
-	clusterSync ClusterSync
+	clusterSync   ClusterSync
 	clusterSyncMu sync.RWMutex
+	broadcastSem  chan struct{}
 }
 
 // NewManager creates a new tenant manager.
@@ -120,6 +121,7 @@ func NewManagerWithStore(maxTenants int, storePath string) *Manager {
 		billingManager: NewBillingManager(""),
 		alertManager:   NewAlertManager(),
 		store:          NewStore(storePath),
+		broadcastSem:   make(chan struct{}, 16),
 	}
 	return m
 }
@@ -372,7 +374,9 @@ func (m *Manager) UpdateTenant(id string, updates *TenantUpdate) error {
 		tenant.Quota = *updates.Quota
 	}
 	if updates.Config != nil {
+		tenant.mu.Lock()
 		tenant.Config = updates.Config
+		tenant.mu.Unlock()
 	}
 
 	// Update domains
@@ -769,12 +773,24 @@ func (m *Manager) broadcast(entityType, entityID, action string, data map[string
 	m.clusterSyncMu.RLock()
 	cs := m.clusterSync
 	m.clusterSyncMu.RUnlock()
-	if cs != nil {
+	if cs == nil {
+		return
+	}
+	select {
+	case m.broadcastSem <- struct{}{}:
 		go func() {
+			defer func() {
+				<-m.broadcastSem
+				if r := recover(); r != nil {
+					log.Printf("[tenant] warning: broadcast goroutine panic: %v", r)
+				}
+			}()
 			if err := cs.BroadcastEvent(entityType, entityID, action, data); err != nil {
 				log.Printf("[tenant] warning: failed to broadcast event: %v", err)
 			}
 		}()
+	default:
+		log.Printf("[tenant] warning: broadcast semaphore full, dropping %s/%s event", entityType, action)
 	}
 }
 

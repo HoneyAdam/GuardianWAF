@@ -209,6 +209,11 @@ func (c *Client) fetchDirectory() (*directory, error) {
 	}
 	defer resp.Body.Close()
 
+	if resp.StatusCode != http.StatusOK {
+		io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+		return nil, fmt.Errorf("directory request failed: HTTP %d", resp.StatusCode)
+	}
+
 	var dir directory
 	if err := json.NewDecoder(resp.Body).Decode(&dir); err != nil {
 		return nil, err
@@ -285,12 +290,18 @@ func (c *Client) completeAuthorization(authzURL string, handler *HTTP01Handler) 
 	if err != nil {
 		return err
 	}
-	io.Copy(io.Discard, io.LimitReader(challengeResp.Body, 1<<20))
-	challengeResp.Body.Close()
+	defer func() {
+		io.Copy(io.Discard, io.LimitReader(challengeResp.Body, 1<<20))
+		challengeResp.Body.Close()
+	}()
 
 	// Poll authorization until valid or invalid
 	for range 30 {
-		time.Sleep(2 * time.Second)
+		select {
+		case <-time.After(2 * time.Second):
+		case <-time.After(60 * time.Second):
+			return fmt.Errorf("authorization poll timeout")
+		}
 
 		pollResp, err := c.signedPost(authzURL, nil, false)
 		if err != nil {
@@ -338,21 +349,26 @@ func (c *Client) finalizeOrder(finalizeURL string, csr []byte) error {
 
 func (c *Client) pollCertificate(orderURL string) ([]byte, error) {
 	for range 30 {
-		time.Sleep(2 * time.Second)
+		select {
+		case <-time.After(2 * time.Second):
+		case <-time.After(60 * time.Second):
+			return nil, fmt.Errorf("certificate poll timeout")
+		}
 
 		resp, err := c.signedPost(orderURL, nil, false)
 		if err != nil {
 			return nil, err
 		}
 
-		var o order
-		if err := json.NewDecoder(resp.Body).Decode(&o); err != nil {
+		defer func() {
 			io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 			resp.Body.Close()
+		}()
+
+		var o order
+		if err := json.NewDecoder(resp.Body).Decode(&o); err != nil {
 			return nil, fmt.Errorf("failed to decode order response: %w", err)
 		}
-		io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
-		resp.Body.Close()
 
 		if o.Status == "valid" && o.Certificate != "" {
 			return c.fetchCertificateChain(o.Certificate)
@@ -395,8 +411,13 @@ func (c *Client) getNonce() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
-	resp.Body.Close()
+	defer func() {
+		io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
+		resp.Body.Close()
+	}()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		return "", fmt.Errorf("nonce request failed: HTTP %d", resp.StatusCode)
+	}
 	return resp.Header.Get("Replay-Nonce"), nil
 }
 

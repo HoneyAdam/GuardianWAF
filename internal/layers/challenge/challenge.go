@@ -11,7 +11,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"io"
-	"log"
 	"net"
 	"net/http"
 	"strconv"
@@ -36,12 +35,15 @@ type Config struct {
 
 // DefaultConfig returns a production-safe default configuration.
 func DefaultConfig() Config {
+	cfg, _ := DefaultConfigE()
+	return cfg
+}
+
+// DefaultConfigE returns a production-safe default configuration with error reporting.
+func DefaultConfigE() (Config, error) {
 	key := make([]byte, 32)
 	if _, err := rand.Read(key); err != nil {
-		// CSPRNG failure — log warning and continue with insecure key.
-		// This should never happen on a正常运行 system.
-		// The process is likely running in a broken/forked state.
-		log.Fatalf("FATAL: crypto/rand.Read failed — cannot generate secure challenge key: %v", err)
+		return Config{}, fmt.Errorf("crypto/rand.Read failed — cannot generate secure challenge key: %w", err)
 	}
 
 	return Config{
@@ -50,7 +52,7 @@ func DefaultConfig() Config {
 		CookieTTL:  1 * time.Hour,
 		CookieName: "__gwaf_challenge",
 		SecretKey:  key,
-	}
+	}, nil
 }
 
 // Service handles challenge page serving and solution verification.
@@ -59,12 +61,12 @@ type Service struct {
 }
 
 // NewService creates a new challenge service.
-func NewService(cfg Config) *Service {
+// Returns an error if the secret key cannot be generated.
+func NewService(cfg Config) (*Service, error) {
 	if len(cfg.SecretKey) == 0 {
 		key := make([]byte, 32)
 		if _, err := rand.Read(key); err != nil {
-			// CSPRNG failure — zero key is predictable, fail hard
-			log.Fatalf("FATAL: crypto/rand.Read failed — cannot generate secure challenge key: %v", err)
+			return nil, fmt.Errorf("crypto/rand.Read failed — cannot generate secure challenge key: %w", err)
 		}
 		cfg.SecretKey = key
 	}
@@ -77,7 +79,7 @@ func NewService(cfg Config) *Service {
 	if cfg.Difficulty == 0 {
 		cfg.Difficulty = 20
 	}
-	return &Service{config: cfg}
+	return &Service{config: cfg}, nil
 }
 
 // HasValidCookie checks whether the request carries a valid, non-expired challenge cookie.
@@ -93,7 +95,11 @@ func (s *Service) HasValidCookie(r *http.Request, clientIP net.IP) bool {
 // The page contains inline JavaScript that solves a SHA-256 proof-of-work
 // and submits the solution to the verification endpoint.
 func (s *Service) ServeChallengePage(w http.ResponseWriter, r *http.Request) {
-	challenge := s.generateChallenge()
+	challenge, err := s.generateChallenge()
+	if err != nil {
+		http.Error(w, "Internal server error", http.StatusInternalServerError)
+		return
+	}
 
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store, no-cache, must-revalidate")
@@ -150,7 +156,7 @@ func (s *Service) VerifyHandler() http.Handler {
 			Path:     "/",
 			MaxAge:   int(s.config.CookieTTL.Seconds()),
 			HttpOnly: true,
-			Secure:   r.TLS != nil,
+			Secure:   true,
 			SameSite: http.SameSiteLaxMode,
 		})
 
@@ -231,16 +237,15 @@ func (s *Service) computeHMAC(data string) string {
 // --- PoW challenge ---
 
 // generateChallenge creates a random challenge string for proof-of-work.
-func (s *Service) generateChallenge() string {
+func (s *Service) generateChallenge() (string, error) {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
 		// Fallback: read from crypto/rand reader directly
 		if _, err := io.ReadFull(rand.Reader, b); err != nil {
-			// crypto/rand unavailable — fail hard rather than using predictable nonce
-			log.Fatalf("FATAL: crypto/rand and io.ReadFull both failed — cannot generate secure nonce: %v", err)
+			return "", fmt.Errorf("crypto/rand unavailable — cannot generate secure nonce: %w", err)
 		}
 	}
-	return hex.EncodeToString(b)
+	return hex.EncodeToString(b), nil
 }
 
 // verifyPoW checks that SHA256(challenge + nonce) has the required leading zero bits.

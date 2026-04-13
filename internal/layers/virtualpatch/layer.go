@@ -72,8 +72,17 @@ func (l *Layer) startAutoUpdate() {
 	l.updateWg.Add(1)
 	go func() {
 		defer l.updateWg.Done()
+		defer func() {
+			if r := recover(); r != nil {
+				log.Printf("[virtualpatch] autoUpdate goroutine panic: %v", r)
+			}
+		}()
 
-		ticker := time.NewTicker(l.config.UpdateInterval)
+		interval := l.config.UpdateInterval
+			if interval <= 0 {
+				interval = 5 * time.Minute
+			}
+			ticker := time.NewTicker(interval)
 		defer ticker.Stop()
 
 		// Run initial update
@@ -282,7 +291,7 @@ func (l *Layer) Process(ctx *engine.RequestContext) engine.LayerResult {
 		}
 
 		// Match patch patterns
-		matched, details := l.matchPatch(ctx, patch)
+		matched, details := l.matchPatch(ctx, &patch)
 		if matched {
 			// Create finding
 			finding := engine.Finding{
@@ -547,8 +556,8 @@ func (l *Layer) GetPatch(patchID string) *VirtualPatch {
 	return l.database.GetPatch(patchID)
 }
 
-// GetActivePatches returns all active patches.
-func (l *Layer) GetActivePatches() []*VirtualPatch {
+// GetActivePatches returns all active patches as value copies (safe for concurrent use).
+func (l *Layer) GetActivePatches() []VirtualPatch {
 	return l.database.GetActivePatches()
 }
 

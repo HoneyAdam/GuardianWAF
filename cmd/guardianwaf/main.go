@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -668,25 +669,6 @@ func boolStr(b bool) string {
 	return "no"
 }
 
-// removeEmptyLines removes consecutive empty lines from config
-func removeEmptyLines(s string) string {
-	lines := strings.Split(s, "\n")
-	var result []string
-	emptyCount := 0
-	for _, line := range lines {
-		if strings.TrimSpace(line) == "" {
-			emptyCount++
-			if emptyCount <= 2 {
-				result = append(result, line)
-			}
-		} else {
-			emptyCount = 0
-			result = append(result, line)
-		}
-	}
-	return strings.Join(result, "\n")
-}
-
 // sanitizeLogField strips control characters (0x00-0x1F, 0x7F) from a string
 // to prevent log injection via ANSI escape sequences or other control chars
 // in user-controlled fields (path, user-agent, etc.).
@@ -826,7 +808,11 @@ func cmdServe(args []string) {
 			chCfg.SecretKey = []byte(cfg.WAF.Challenge.SecretKey)
 		}
 		chCfg.ClientIPExtractor = engine.ExtractClientIP
-		challengeSvc = challenge.NewService(chCfg)
+		var svcErr error
+		challengeSvc, svcErr = challenge.NewService(chCfg)
+		if svcErr != nil {
+			return fmt.Errorf("creating challenge service: %w", svcErr)
+		}
 		eng.SetChallengeService(challengeSvc)
 	}
 
@@ -1038,10 +1024,18 @@ func cmdServe(args []string) {
 			if idx := strings.LastIndex(host, ":"); idx > 0 {
 				host = host[:idx]
 			}
+			// Sanitize host to prevent open redirect via Host header injection
+			if strings.ContainsAny(host, "@/") {
+				host = ""
+			}
 			uri := r.URL.RequestURI()
 			// Prevent open redirect via protocol-relative URLs (//evil.com)
 			if strings.HasPrefix(uri, "//") {
 				uri = "/" + strings.TrimLeft(uri, "/")
+			}
+			if host == "" {
+				w.WriteHeader(http.StatusBadRequest)
+				return
 			}
 			target := "https://" + host + uri
 			http.Redirect(w, r, target, http.StatusMovedPermanently)
@@ -1319,6 +1313,11 @@ func cmdServe(args []string) {
 		alertCh := make(chan engine.Event, 256)
 		eventBus.Subscribe(alertCh)
 		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("[alert] event handler goroutine panic: %v", r)
+				}
+			}()
 			for event := range alertCh {
 				alertMgr.HandleEvent(&event)
 			}
@@ -1375,6 +1374,11 @@ func cmdServe(args []string) {
 		eventCh := make(chan engine.Event, 256)
 		eventBus.Subscribe(eventCh)
 		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("[sse] broadcaster goroutine panic: %v", r)
+				}
+			}()
 			for event := range eventCh {
 				sseBroadcaster.BroadcastEvent(event)
 			}
@@ -1517,7 +1521,12 @@ func cmdServe(args []string) {
 		aiAnalyzer.Stop()
 	}
 
-	// 7. Close engine (flushes pending events, closes event bus and store)
+	// 7. Close dashboard (stops login bucket cleanup goroutine)
+		if dash != nil {
+			dash.Close()
+		}
+
+		// 8. Close engine (flushes pending events, closes event bus and store)
 	eng.Close()
 	fmt.Println("GuardianWAF stopped.")
 }
@@ -1644,7 +1653,10 @@ func cmdSidecar(args []string) {
 			chCfg.SecretKey = []byte(cfg.WAF.Challenge.SecretKey)
 		}
 		chCfg.ClientIPExtractor = engine.ExtractClientIP
-		svc := challenge.NewService(chCfg)
+		svc, svcErr := challenge.NewService(chCfg)
+		if svcErr != nil {
+			return fmt.Errorf("creating challenge service: %w", svcErr)
+		}
 		eng.SetChallengeService(svc)
 	}
 
@@ -3141,13 +3153,7 @@ func (a *mcpEngineAdapter) GetTopIPs(n int) any {
 		stats = append(stats, ipStat{IP: ip, Requests: count, Score: ipScores[ip]})
 	}
 	// Sort descending by request count
-	for i := 0; i < len(stats); i++ {
-		for j := i + 1; j < len(stats); j++ {
-			if stats[j].Requests > stats[i].Requests {
-				stats[i], stats[j] = stats[j], stats[i]
-			}
-		}
-	}
+	sort.Slice(stats, func(i, j int) bool { return stats[i].Requests > stats[j].Requests })
 	if n > 0 && n < len(stats) {
 		stats = stats[:n]
 	}

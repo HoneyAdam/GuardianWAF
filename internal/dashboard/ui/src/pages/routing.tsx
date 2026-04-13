@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { api } from '@/lib/api'
-import type { RoutingConfig, UpstreamConfig, UpstreamStatus, VirtualHostConfig, RouteConfig, WafConfig } from '@/lib/api'
+import type { RoutingConfig, UpstreamConfig, UpstreamStatus, TargetStatus, VirtualHostConfig, RouteConfig, WafConfig, DockerService } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import { useToast } from '@/components/ui/toast'
 import { Section } from '@/components/config/section'
 import { Input } from '@/components/ui/input'
 import { Select, SelectOption } from '@/components/ui/select'
@@ -43,8 +44,9 @@ export default function RoutingPage() {
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState<string | null>(null)
   const [view, setView] = useState<'form' | 'graph' | 'services'>('graph')
-  const [dockerServices, setDockerServices] = useState<any[]>([])
+  const [dockerServices, setDockerServices] = useState<DockerService[]>([])
   const [dockerEnabled, setDockerEnabled] = useState(false)
+  const { toast } = useToast()
 
   // Domain add input per vhost
   const [domainInputs, setDomainInputs] = useState<Record<number, string>>({})
@@ -58,9 +60,9 @@ export default function RoutingPage() {
         setRouting(data)
       })
       .catch(() => setError('Failed to load routing configuration'))
-    api.getUpstreams().then(setUpstreamHealth).catch(() => {})
-    api.getConfig().then(setWafConfig).catch(() => {})
-    fetch('/api/v1/docker/services').then(r => r.json()).then(data => {
+    api.getUpstreams().then(setUpstreamHealth).catch(() => toast({ title: 'Failed to load upstream health', variant: 'warning' }))
+    api.getConfig().then(setWafConfig).catch(() => toast({ title: 'Failed to load WAF config', variant: 'warning' }))
+    api.getDockerServices().then(data => {
       setDockerEnabled(data.enabled ?? false)
       setDockerServices(data.services ?? [])
     }).catch(() => {})
@@ -338,7 +340,7 @@ export default function RoutingPage() {
                   name: u.name, strategy: u.load_balancer || 'round_robin',
                   targets: u.targets.map(t => ({ url: t.url, healthy: true, circuit_state: 'closed', active_conns: 0, weight: t.weight })),
                   healthy_count: u.targets.length, total_count: u.targets.length,
-                }))).map((u: any, ui: number) => (
+                }))).map((u: UpstreamStatus, ui: number) => (
                   <div key={ui} className="rounded-lg border border-border bg-card/30 overflow-hidden">
                     <div className="flex items-center gap-3 px-3 py-2 bg-muted/20">
                       <Server size={14} className={u.healthy_count === u.total_count ? 'text-cyan-400' : 'text-red-400'} />
@@ -350,7 +352,7 @@ export default function RoutingPage() {
                     </div>
                     <table className="w-full text-xs">
                       <tbody>
-                        {(u.targets || []).map((t: any, ti: number) => (
+                        {(u.targets || []).map((t: TargetStatus, ti: number) => (
                           <tr key={ti} className="border-t border-border/30 hover:bg-muted/10">
                             <td className="px-3 py-1.5 font-mono text-cyan-300 w-1/3">{t.url}</td>
                             <td className="px-3 py-1.5">
@@ -385,18 +387,19 @@ export default function RoutingPage() {
             ) : (
               <div className="rounded-lg border border-border overflow-hidden">
                 <table className="w-full text-xs">
+                  <caption className="sr-only">Docker discovered services with container, target, domain, upstream pool, health path, and status columns</caption>
                   <thead>
                     <tr className="border-b border-border bg-muted/30">
-                      <th className="text-left px-3 py-2 font-medium text-muted-foreground">Container</th>
-                      <th className="text-left px-3 py-2 font-medium text-muted-foreground">Target</th>
-                      <th className="text-left px-3 py-2 font-medium text-muted-foreground">Domain</th>
-                      <th className="text-left px-3 py-2 font-medium text-muted-foreground">Upstream Pool</th>
-                      <th className="text-left px-3 py-2 font-medium text-muted-foreground">Health</th>
-                      <th className="text-left px-3 py-2 font-medium text-muted-foreground">Status</th>
+                      <th scope="col" className="text-left px-3 py-2 font-medium text-muted-foreground">Container</th>
+                      <th scope="col" className="text-left px-3 py-2 font-medium text-muted-foreground">Target</th>
+                      <th scope="col" className="text-left px-3 py-2 font-medium text-muted-foreground">Domain</th>
+                      <th scope="col" className="text-left px-3 py-2 font-medium text-muted-foreground">Upstream Pool</th>
+                      <th scope="col" className="text-left px-3 py-2 font-medium text-muted-foreground">Health</th>
+                      <th scope="col" className="text-left px-3 py-2 font-medium text-muted-foreground">Status</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {dockerServices.map((svc: any, i: number) => (
+                    {dockerServices.map((svc: DockerService, i: number) => (
                       <tr key={i} className="border-b border-border/30 hover:bg-muted/10">
                         <td className="px-3 py-1.5">
                           <div className="flex items-center gap-1">

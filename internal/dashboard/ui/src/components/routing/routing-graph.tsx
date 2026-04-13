@@ -416,7 +416,7 @@ export function RoutingGraph({ routing, upstreams, wafConfig }: Props) {
   const [edges, , onEdgesChange] = useEdgesState(initialEdges)
 
   return (
-    <div className="h-[600px] w-full rounded-xl border border-border bg-slate-950/50">
+    <div className="h-[600px] w-full rounded-xl border border-border bg-slate-950/50" tabIndex={0} role="img" aria-label={`Routing topology graph showing ${initialNodes.length} nodes: client traffic through GuardianWAF to ${routing.virtual_hosts?.length || 0} virtual hosts and ${routing.upstreams?.length || 0} upstreams`}>
       <ReactFlow
         nodes={nodes}
         edges={edges}
@@ -459,6 +459,7 @@ export function RoutingGraph({ routing, upstreams, wafConfig }: Props) {
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-cyan-500" /> Upstream</span>
         <span className="flex items-center gap-1"><span className="w-2 h-2 rounded-full bg-green-500" /> Target</span>
         <span className="flex items-center gap-1 ml-auto"><Lock size={9} className="text-yellow-400" /> TLS/SSL</span>
+        <span className="text-slate-600">| Arrows: pan, +/-: zoom</span>
       </div>
     </div>
   )

@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import { Globe } from 'lucide-react'
 import type { WafEvent } from '@/lib/api'
 
@@ -5,7 +6,7 @@ interface TopIPsProps {
   events: WafEvent[]
 }
 
-export function TopIPs({ events }: TopIPsProps) {
+export const TopIPs = memo(function TopIPs({ events }: TopIPsProps) {
   // Count IPs from events
   const ipCounts = new Map<string, { total: number; blocked: number }>()
   for (const e of events) {
@@ -34,7 +35,7 @@ export function TopIPs({ events }: TopIPsProps) {
         {sorted.map(([ip, counts]) => (
           <div key={ip} className="flex items-center gap-3">
             <span className="text-xs font-mono w-32 shrink-0">{ip}</span>
-            <div className="flex-1 h-5 bg-background rounded overflow-hidden">
+            <div className="flex-1 h-5 bg-background rounded overflow-hidden" role="progressbar" aria-valuenow={counts.total} aria-valuemin={0} aria-valuemax={maxCount} aria-label={`${ip}: ${counts.total} requests`}>
               <div
                 className="h-full bg-accent/30 rounded transition-all"
                 style={{ width: `${(counts.total / maxCount) * 100}%` }}
@@ -49,4 +50,4 @@ export function TopIPs({ events }: TopIPsProps) {
       </div>
     </div>
   )
-}
+})

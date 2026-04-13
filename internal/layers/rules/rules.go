@@ -4,6 +4,7 @@
 package rules
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"regexp"
@@ -287,7 +288,7 @@ func (l *Layer) getFieldValue(field string, ctx *engine.RequestContext) string {
 		}
 		return ""
 	case field == "body_size":
-		return fmt.Sprintf("%d", len(ctx.Body))
+		return strconv.Itoa(len(ctx.Body))
 	case field == "host":
 		if ctx.Request != nil {
 			return ctx.Request.Host
@@ -297,7 +298,7 @@ func (l *Layer) getFieldValue(field string, ctx *engine.RequestContext) string {
 		return ctx.ContentType
 	case field == "score":
 		if ctx.Accumulator != nil {
-			return fmt.Sprintf("%d", ctx.Accumulator.Total())
+			return strconv.Itoa(ctx.Accumulator.Total())
 		}
 		return "0"
 	case strings.HasPrefix(field, "header:"):
@@ -316,6 +317,9 @@ func (l *Layer) getFieldValue(field string, ctx *engine.RequestContext) string {
 		return ""
 	}
 }
+
+// regexMatchTimeout limits regex execution time to prevent ReDoS attacks.
+const regexMatchTimeout = 5 * time.Second
 
 func (l *Layer) regexMatch(pattern, value string) bool {
 	l.mu.RLock()
@@ -340,7 +344,31 @@ func (l *Layer) regexMatch(pattern, value string) bool {
 		l.mu.Unlock()
 	}
 
-	return re.MatchString(value)
+	return regexMatchWithTimeout(re, value)
+}
+
+// regexMatchWithTimeout runs re.MatchString in a goroutine with a timeout.
+// Returns false on timeout or no match.
+func regexMatchWithTimeout(re *regexp.Regexp, s string) bool {
+	type result struct {
+		matched bool
+	}
+	done := make(chan result, 1)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go func() {
+		matched := re.MatchString(s)
+		select {
+		case <-ctx.Done():
+		case done <- result{matched: matched}:
+		}
+	}()
+	select {
+	case r := <-done:
+		return r.matched
+	case <-time.After(regexMatchTimeout):
+		return false
+	}
 }
 
 func (l *Layer) inList(value any, target string) bool {

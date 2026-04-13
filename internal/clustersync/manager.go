@@ -17,6 +17,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -45,6 +46,9 @@ type Manager struct {
 
 	// Shared HTTP client for node communication
 	httpClient *http.Client
+
+	// Semaphore to limit concurrent replication goroutines
+	replicateSem chan struct{}
 
 	// Background tasks
 	ctx    context.Context
@@ -81,7 +85,8 @@ func NewManager(config *Config) *Manager {
 		vectorClock: make(map[string]int64),
 		ctx:         ctx,
 		cancel:      cancel,
-		httpClient:  &http.Client{Timeout: 30 * time.Second},
+		httpClient:   &http.Client{Timeout: 30 * time.Second},
+		replicateSem: make(chan struct{}, 16),
 	}
 
 	// Create local node
@@ -192,8 +197,21 @@ func (m *Manager) BroadcastEvent(entityType, entityID, action string, data map[s
 		return fmt.Errorf("event queue full")
 	}
 
-	// Also replicate to peers immediately
-	go m.replicateEvent(event)
+	// Also replicate to peers immediately (bounded concurrency)
+	select {
+	case m.replicateSem <- struct{}{}:
+		go func() {
+			defer func() { <-m.replicateSem }()
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("[clustersync] warning: replication goroutine panic: %v", r)
+				}
+			}()
+			m.replicateEvent(event)
+		}()
+	default:
+		// All replication slots busy; event is still queued locally
+	}
 
 	m.statsMu.Lock()
 	m.stats.TotalEventsSent++
@@ -226,7 +244,9 @@ func (m *Manager) ReceiveEvent(event *SyncEvent) error {
 	}
 
 	// Apply the event
+	m.mu.RLock()
 	handler, ok := m.handlers[event.EntityType]
+	m.mu.RUnlock()
 	if !ok {
 		return fmt.Errorf("no handler for entity type: %s", event.EntityType)
 	}
@@ -427,7 +447,11 @@ func (m *Manager) healthChecker() {
 func (m *Manager) replicationWorker() {
 	defer m.wg.Done()
 
-	ticker := time.NewTicker(m.config.SyncInterval)
+	syncInterval := m.config.SyncInterval
+	if syncInterval <= 0 {
+		syncInterval = 30 * time.Second
+	}
+	ticker := time.NewTicker(syncInterval)
 	defer ticker.Stop()
 
 	for {
@@ -498,7 +522,7 @@ func (m *Manager) pingNode(node *Node) bool {
 	}
 	defer resp.Body.Close()
 
-	_, _ = io.Copy(io.Discard, resp.Body)
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 
 	return resp.StatusCode == http.StatusOK
 }
@@ -617,7 +641,7 @@ func (m *Manager) syncFromNode(node *Node) {
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 10<<20)).Decode(&events); err != nil {
 		return
 	}
-	_, _ = io.Copy(io.Discard, resp.Body)
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 
 	for _, event := range events {
 		if err := m.ReceiveEvent(event); err != nil {
@@ -739,6 +763,13 @@ func (m *Manager) isInScope(cluster *Cluster, entityType string) bool {
 
 // Utility functions
 
+// allowPlainHTTPForTests permits plain HTTP peer URLs in test environments.
+// Production code never sets this.
+var allowPlainHTTPForTests atomic.Bool
+
+// AllowPlainHTTP allows plain HTTP peer URLs (for tests only).
+func AllowPlainHTTP() { allowPlainHTTPForTests.Store(true) }
+
 // validatePeerURL checks that a peer node URL is valid and warns about
 // non-HTTPS endpoints. Unlike external URL validation, cluster peer URLs
 // are expected to be on private networks, so private IPs are allowed
@@ -755,9 +786,9 @@ func validatePeerURL(address string) error {
 	if host == "" {
 		return fmt.Errorf("peer URL has empty host")
 	}
-	// Warn on non-HTTPS peer URLs
-	if u.Scheme == "http" {
-		log.Printf("[clustersync] WARNING: peer %s uses HTTP — cluster traffic may be intercepted", address)
+	// Reject plain HTTP — cluster auth secret would be transmitted in cleartext
+	if u.Scheme == "http" && !allowPlainHTTPForTests.Load() {
+		return fmt.Errorf("peer URL must use HTTPS to protect cluster authentication secret, got %q", address)
 	}
 	// Warn on localhost/loopback (likely misconfiguration for cluster peers)
 	if host == "localhost" || strings.HasSuffix(host, ".local") {

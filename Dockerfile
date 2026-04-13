@@ -18,6 +18,7 @@ ARG TARGETARCH
 ARG VERSION=dev
 ARG COMMIT=none
 ARG DATE=unknown
+ARG IMAGE_VERSION=dev
 
 WORKDIR /app
 
@@ -45,7 +46,7 @@ LABEL org.opencontainers.image.title="GuardianWAF" \
       org.opencontainers.image.source="https://github.com/guardianwaf/guardianwaf" \
       org.opencontainers.image.licenses="MIT" \
       org.opencontainers.image vendors="GuardianWAF" \
-      org.opencontainers.image.version="1.1.0"
+      org.opencontainers.image.version="${IMAGE_VERSION}"
 
 # Install runtime dependencies
 RUN apk add --no-cache ca-certificates tzdata && \

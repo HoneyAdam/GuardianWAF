@@ -31,7 +31,10 @@ func TestDefaultConfig(t *testing.T) {
 
 func TestNewService(t *testing.T) {
 	// Empty config should get defaults
-	svc := NewService(Config{})
+	svc, err := NewService(Config{})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
 	if svc.config.Difficulty != 20 {
 		t.Errorf("expected default difficulty 20, got %d", svc.config.Difficulty)
 	}
@@ -99,10 +102,13 @@ func TestVerifyPoW(t *testing.T) {
 }
 
 func TestTokenGenerateAndVerify(t *testing.T) {
-	svc := NewService(Config{
+	svc, err := NewService(Config{
 		SecretKey: []byte("test-secret-key-32-bytes-long!!!"),
 		CookieTTL: 1 * time.Hour,
 	})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
 
 	ip := net.ParseIP("192.168.1.100")
 
@@ -140,10 +146,13 @@ func TestTokenGenerateAndVerify(t *testing.T) {
 }
 
 func TestTokenExpiration(t *testing.T) {
-	svc := NewService(Config{
+	svc, err := NewService(Config{
 		SecretKey: []byte("test-secret-key-32-bytes-long!!!"),
 		CookieTTL: -1 * time.Second, // already expired
 	})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
 
 	ip := net.ParseIP("192.168.1.100")
 	token := svc.generateToken(ip)
@@ -154,11 +163,14 @@ func TestTokenExpiration(t *testing.T) {
 }
 
 func TestHasValidCookie(t *testing.T) {
-	svc := NewService(Config{
+	svc, err := NewService(Config{
 		SecretKey:  []byte("test-secret-key-32-bytes-long!!!"),
 		CookieTTL:  1 * time.Hour,
 		CookieName: "__gwaf_test",
 	})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
 
 	ip := net.ParseIP("127.0.0.1")
 	token := svc.generateToken(ip)
@@ -187,10 +199,13 @@ func TestHasValidCookie(t *testing.T) {
 }
 
 func TestServeChallengePage(t *testing.T) {
-	svc := NewService(Config{
+	svc, err := NewService(Config{
 		SecretKey:  []byte("test-secret-key-32-bytes-long!!!"),
 		Difficulty: 16,
 	})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
 
 	req := httptest.NewRequest("GET", "/some/page?q=test", nil)
 	w := httptest.NewRecorder()
@@ -229,12 +244,15 @@ func TestServeChallengePage(t *testing.T) {
 }
 
 func TestVerifyHandler(t *testing.T) {
-	svc := NewService(Config{
+	svc, err := NewService(Config{
 		SecretKey:  []byte("test-secret-key-32-bytes-long!!!"),
 		Difficulty: 4, // very low for fast tests
 		CookieTTL:  1 * time.Hour,
 		CookieName: "__gwaf_test",
 	})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
 
 	handler := svc.VerifyHandler()
 
@@ -377,10 +395,13 @@ func TestVerifyHandler(t *testing.T) {
 }
 
 func TestVerifyHandlerParseFormError(t *testing.T) {
-	svc := NewService(Config{
+	svc, err := NewService(Config{
 		SecretKey:  []byte("test-secret-key-32-bytes-long!!!"),
 		Difficulty: 4,
 	})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
 	handler := svc.VerifyHandler()
 
 	// Send a body with invalid content-type that triggers ParseForm error
@@ -400,10 +421,13 @@ func TestVerifyHandlerParseFormError(t *testing.T) {
 }
 
 func TestVerifyTokenMalformedPayload(t *testing.T) {
-	svc := NewService(Config{
+	svc, err := NewService(Config{
 		SecretKey: []byte("test-secret-key-32-bytes-long!!!"),
 		CookieTTL: 1 * time.Hour,
 	})
+	if err != nil {
+		t.Fatalf("NewService: %v", err)
+	}
 
 	ip := net.ParseIP("192.168.1.1")
 
@@ -544,10 +568,13 @@ func BenchmarkVerifyPoW(b *testing.B) {
 }
 
 func BenchmarkTokenGenerate(b *testing.B) {
-	svc := NewService(Config{
+	svc, err := NewService(Config{
 		SecretKey: []byte("bench-secret-key-32-bytes-long!!"),
 		CookieTTL: 1 * time.Hour,
 	})
+	if err != nil {
+		b.Fatalf("NewService: %v", err)
+	}
 	ip := net.ParseIP("192.168.1.1")
 
 	b.ResetTimer()
@@ -557,10 +584,13 @@ func BenchmarkTokenGenerate(b *testing.B) {
 }
 
 func BenchmarkTokenVerify(b *testing.B) {
-	svc := NewService(Config{
+	svc, err := NewService(Config{
 		SecretKey: []byte("bench-secret-key-32-bytes-long!!"),
 		CookieTTL: 1 * time.Hour,
 	})
+	if err != nil {
+		b.Fatalf("NewService: %v", err)
+	}
 	ip := net.ParseIP("192.168.1.1")
 	token := svc.generateToken(ip)
 

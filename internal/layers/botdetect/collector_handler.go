@@ -352,12 +352,12 @@ func generateChallengePage(siteKey, provider string) string {
 }
 
 // challengeHMACKey is used to sign challenge-passed cookies.
-// In production this should come from config; here we use a process-stable random key.
+// Process-stable random key; crypto/rand failure is fatal for a WAF.
 var challengeHMACKey = func() []byte {
 	b := make([]byte, 32)
 	if _, err := cryptoRand.Read(b); err != nil {
-		// Fallback: use a fixed key (still better than unsigned "true")
-		return []byte("guardianwaf-challenge-hmac-key!!")
+		// A WAF must not operate with a predictable HMAC key.
+		panic("guardianwaf: crypto/rand failed — cannot generate secure challenge HMAC key: " + err.Error())
 	}
 	return b
 }()

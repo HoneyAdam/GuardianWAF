@@ -130,6 +130,21 @@ export const api = {
   getNodes: () => request<ClusterNode[]>('/api/nodes'),
   getSyncStats: () => request<SyncStats>('/api/sync/stats'),
   getSyncStatus: () => request<SyncStatusResponse>('/api/sync/status'),
+
+  // AI Threat Analysis
+  getAIProviders: () => request<{ providers: AIProviderSummary[] }>('/api/v1/ai/providers'),
+  getAIConfig: () => request<AIConfig>('/api/v1/ai/config'),
+  setAIConfig: (data: Record<string, string>) =>
+    request<ApiResult>('/api/v1/ai/config', { method: 'PUT', body: JSON.stringify(data) }),
+  getAIHistory: (limit = 20) =>
+    request<{ history: AIAnalysisResult[] }>(`/api/v1/ai/history?limit=${limit}`),
+  getAIStats: () => request<AIStats>('/api/v1/ai/stats'),
+  analyzeAI: (limit = 20) =>
+    request<AIAnalysisResult>(`/api/v1/ai/analyze?limit=${limit}`, { method: 'POST' }),
+  testAI: () => request<{ status: string; message: string }>('/api/v1/ai/test', { method: 'POST' }),
+
+  // Docker Services
+  getDockerServices: () => request<{ enabled: boolean; services: DockerService[] }>('/api/v1/docker/services'),
 }
 
 // --- Types ---
@@ -219,7 +234,7 @@ export interface TargetStatus {
   weight: number
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 export interface WafConfig {
   mode: string
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -472,4 +487,87 @@ export interface ReplicationStatus {
   failed_attempts: number
   lag_ms: number
   sync_status: Record<string, string>
+}
+
+// AI Types
+export interface AIProviderSummary {
+  id: string
+  name: string
+  api: string
+  doc: string
+  model_count: number
+  models: AIModelSummary[]
+}
+
+export interface AIModelSummary {
+  id: string
+  name: string
+  family: string
+  reasoning: boolean
+  tool_call: boolean
+  cost_input_per_m: number
+  cost_output_per_m: number
+  context_window: number
+  max_output: number
+}
+
+export interface AIConfig {
+  enabled: boolean
+  provider_id: string
+  provider_name: string
+  model_id: string
+  model_name: string
+  base_url: string
+  api_key_set: boolean
+  api_key_mask: string
+}
+
+export interface AIStats {
+  enabled: boolean
+  tokens_used_hour: number
+  tokens_used_day: number
+  requests_hour: number
+  requests_day: number
+  total_tokens_used: number
+  total_requests: number
+  total_cost_usd: number
+  blocks_triggered: number
+  monitors_triggered: number
+}
+
+export interface AIVerdict {
+  ip: string
+  action: string
+  reason: string
+  confidence: number
+}
+
+export interface AIAnalysisResult {
+  id: string
+  timestamp: string
+  event_count: number
+  verdicts: AIVerdict[]
+  summary: string
+  threats_detected: string[]
+  tokens_used: number
+  cost_usd: number
+  duration_ms: number
+  model: string
+  error?: string
+}
+
+// Docker Service Types
+export interface DockerService {
+  name: string
+  container_name: string
+  image: string
+  host: string
+  port: number
+  upstream: string
+  target: string
+  path: string
+  weight: number
+  health_path: string
+  status: string
+  labels: Record<string, string>
 }

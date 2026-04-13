@@ -11,6 +11,7 @@ import (
 	"github.com/guardianwaf/guardianwaf/internal/config"
 	"github.com/guardianwaf/guardianwaf/internal/engine"
 	"github.com/guardianwaf/guardianwaf/internal/events"
+	"github.com/guardianwaf/guardianwaf/internal/proxy"
 )
 
 // --- Test helpers ---
@@ -29,6 +30,7 @@ func newTestEngine(t *testing.T) *engine.Engine {
 
 func newTestDashboard(t *testing.T, apiKey string) *Dashboard {
 	t.Helper()
+	proxy.AllowPrivateTargets()
 	eng := newTestEngine(t)
 	store := events.NewMemoryStore(100)
 	if apiKey == "" {

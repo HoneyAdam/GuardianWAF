@@ -170,15 +170,15 @@ func (l *Layer) Process(ctx *engine.RequestContext) engine.LayerResult {
 }
 
 func (l *Layer) shouldSkipPath(path string) bool {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+
 	// Exact match
 	if l.skipPathMap[path] {
 		return true
 	}
 
 	// Prefix match for paths ending with *
-	l.mu.RLock()
-	defer l.mu.RUnlock()
-
 	for skipPath := range l.skipPathMap {
 		if strings.HasSuffix(skipPath, "*") {
 			prefix := strings.TrimSuffix(skipPath, "*")
@@ -299,6 +299,7 @@ func (l *Layer) Start() {
 
 // Stop stops any background processes.
 func (l *Layer) Stop() {
-	// Nothing to stop currently
-	_ = l
+	if l.jwtValidator != nil {
+		l.jwtValidator.Stop()
+	}
 }

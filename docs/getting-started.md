@@ -34,7 +34,7 @@ sudo mv guardianwaf /usr/local/bin/
 ### Docker
 
 ```bash
-docker pull guardianwaf/guardianwafwaf:latest
+docker pull guardianwaf/guardianwaf:latest
 ```
 
 ### Build from Source
@@ -133,14 +133,14 @@ Lightweight proxy without dashboard or MCP. Ideal for container environments.
 docker run -d \
   --name guardianwaf \
   -p 8088:8088 \
-  guardianwaf/guardianwafwaf:latest \
+  guardianwaf/guardianwaf:latest \
   sidecar --upstream http://app:3000
 
 # Or with a config file
 docker run -d \
   -v ./guardianwaf.yaml:/etc/guardianwaf/guardianwaf.yaml:ro \
   -p 8088:8088 \
-  guardianwaf/guardianwafwaf:latest \
+  guardianwaf/guardianwaf:latest \
   sidecar -c /etc/guardianwaf/guardianwaf.yaml
 ```
 
@@ -158,7 +158,7 @@ spec:
       ports:
         - containerPort: 3000
     - name: waf
-      image: guardianwaf/guardianwafwaf:latest
+      image: guardianwaf/guardianwaf:latest
       args: ["sidecar", "--upstream", "http://localhost:3000", "--listen", ":8088"]
       ports:
         - containerPort: 8088

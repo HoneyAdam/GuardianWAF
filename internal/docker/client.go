@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"net"
 	"net/http"
 	"os/exec"
@@ -279,6 +280,11 @@ func (c *Client) StreamEvents(ctx context.Context, labelPrefix string, ch chan<-
 	decoder := json.NewDecoder(stdout)
 	go func() {
 		defer func() { _ = cmd.Wait() }()
+		defer func() {
+			if r := recover(); r != nil {
+				fmt.Fprintf(os.Stderr, "[docker] warning: event decoder panic: %v\n", r)
+			}
+		}()
 		for {
 			var event Event
 			if decodeErr := decoder.Decode(&event); decodeErr != nil {

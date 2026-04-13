@@ -272,7 +272,7 @@ func (c *NVDClient) Search(opts SearchOptions) (*NVDResponse, error) {
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 50<<20)).Decode(&result); err != nil {
 		return nil, fmt.Errorf("decoding response: %w", err)
 	}
-	_, _ = io.Copy(io.Discard, resp.Body)
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 
 	return &result, nil
 }
@@ -318,7 +318,7 @@ func (c *NVDClient) GetCVE(cveID string) (*CVEEntry, error) {
 	if err := json.NewDecoder(io.LimitReader(resp.Body, 50<<20)).Decode(&result); err != nil {
 		return nil, fmt.Errorf("decoding response: %w", err)
 	}
-	_, _ = io.Copy(io.Discard, resp.Body)
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 
 	if len(result.Vulnerabilities) == 0 {
 		return nil, fmt.Errorf("CVE not found: %s", cveID)

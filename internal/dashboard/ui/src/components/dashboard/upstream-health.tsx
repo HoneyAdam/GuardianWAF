@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import { Server, Activity, CircleOff, CircleDot } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { UpstreamStatus } from '@/lib/api'
@@ -6,7 +7,7 @@ interface UpstreamHealthProps {
   upstreams: UpstreamStatus[]
 }
 
-export function UpstreamHealth({ upstreams }: UpstreamHealthProps) {
+export const UpstreamHealth = memo(function UpstreamHealth({ upstreams }: UpstreamHealthProps) {
   if (upstreams.length === 0) return null
 
   return (
@@ -22,7 +23,7 @@ export function UpstreamHealth({ upstreams }: UpstreamHealthProps) {
       </div>
     </div>
   )
-}
+})
 
 function UpstreamCard({ upstream: us }: { upstream: UpstreamStatus }) {
   const allHealthy = us.healthy_count === us.total_count
@@ -35,9 +36,10 @@ function UpstreamCard({ upstream: us }: { upstream: UpstreamStatus }) {
       <div className="flex items-center justify-between mb-3">
         <div>
           <div className="font-medium text-sm">{us.name}</div>
+          <div className="text-xs text-muted" aria-label={`${us.healthy_count} of ${us.total_count} targets healthy`}>{us.strategy}</div>
           <div className="text-xs text-muted">{us.strategy}</div>
         </div>
-        <span className={cn('text-xs font-medium px-2 py-0.5 rounded-full', statusBg, statusColor)}>
+        <span className={cn('text-xs font-medium px-2 py-0.5 rounded-full', statusBg, statusColor)} aria-label={`${us.healthy_count} of ${us.total_count} healthy`}>
           {us.healthy_count}/{us.total_count}
         </span>
       </div>

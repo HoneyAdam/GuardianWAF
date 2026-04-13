@@ -4,6 +4,7 @@ import type { WafEvent } from '@/lib/api'
 export function useSSE(onEvent: (event: WafEvent) => void) {
   const [connected, setConnected] = useState(false)
   const onEventRef = useRef(onEvent)
+  // eslint-disable-next-line react-hooks/refs
   onEventRef.current = onEvent
 
   useEffect(() => {
@@ -50,10 +51,20 @@ export function useSSE(onEvent: (event: WafEvent) => void) {
 
     connect()
 
+    // Reconnect when tab becomes visible after being hidden
+    function onVisibilityChange() {
+      if (!document.hidden && !es && !unmounted) {
+        backoff = 1000
+        connect()
+      }
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+
     return () => {
       unmounted = true
       es?.close()
       if (reconnectTimer) clearTimeout(reconnectTimer)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
     }
   }, [])
 

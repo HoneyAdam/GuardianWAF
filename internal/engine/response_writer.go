@@ -117,3 +117,18 @@ func (m *maskingResponseWriter) shouldCapture() bool {
 func (m *maskingResponseWriter) Unwrap() http.ResponseWriter {
 	return m.ResponseWriter
 }
+
+// Flush implements http.Flusher. Flushes buffered content to the underlying writer.
+// For streaming responses (SSE, chunked), buffered content is flushed unmasked and
+// subsequent writes switch to passthrough since incremental masking is not possible.
+func (m *maskingResponseWriter) Flush() {
+	if m.capture && !m.direct && m.buf.Len() > 0 {
+		// Cannot mask streaming content incrementally — flush buffered as-is
+		_, _ = m.ResponseWriter.Write(m.buf.Bytes())
+		m.buf.Reset()
+		m.direct = true // switch to passthrough for subsequent writes
+	}
+	if f, ok := m.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}

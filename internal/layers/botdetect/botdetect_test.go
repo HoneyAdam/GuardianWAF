@@ -986,7 +986,7 @@ func TestLookupJA4Fingerprint_KnownGood(t *testing.T) {
 }
 
 func TestLookupJA4Fingerprint_KnownBad(t *testing.T) {
-	info := LookupJA4Fingerprint("t12d0500_123456789abc_def456789abc")
+	info := LookupJA4Fingerprint("t12d050500_3b1e5fb35cf3_0a497f3a4ef1")
 	if info.Category != FingerprintBad {
 		t.Errorf("expected FingerprintBad, got %v", info.Category)
 	}

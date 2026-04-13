@@ -1,41 +1,54 @@
+import { lazy, Suspense } from 'react'
 import { BrowserRouter, Routes, Route } from 'react-router'
+import { ErrorBoundary } from '@/components/ui/error-boundary'
 import { Layout } from '@/components/layout/layout'
-import DashboardPage from '@/pages/dashboard'
-import ConfigPage from '@/pages/config'
-import RoutingPage from '@/pages/routing'
-import LogsPage from '@/pages/logs'
-import RulesPage from '@/pages/rules'
-import AIPage from '@/pages/ai'
-import AlertingPage from '@/pages/alerting'
-import TenantsPage from '@/pages/tenants'
-import TenantNewPage from '@/pages/tenant-new'
-import TenantDetailPage from '@/pages/tenant-detail'
-import TenantAnalyticsPage from '@/pages/tenant-analytics'
-import ClustersPage from '@/pages/clusters'
-import ClusterDetailPage from '@/pages/cluster-detail'
-import SSLPage from '@/pages/ssl'
+
+const DashboardPage = lazy(() => import('@/pages/dashboard'))
+const ConfigPage = lazy(() => import('@/pages/config'))
+const RoutingPage = lazy(() => import('@/pages/routing'))
+const LogsPage = lazy(() => import('@/pages/logs'))
+const RulesPage = lazy(() => import('@/pages/rules'))
+const AIPage = lazy(() => import('@/pages/ai'))
+const AlertingPage = lazy(() => import('@/pages/alerting'))
+const TenantsPage = lazy(() => import('@/pages/tenants'))
+const TenantNewPage = lazy(() => import('@/pages/tenant-new'))
+const TenantDetailPage = lazy(() => import('@/pages/tenant-detail'))
+const TenantAnalyticsPage = lazy(() => import('@/pages/tenant-analytics'))
+const ClustersPage = lazy(() => import('@/pages/clusters'))
+const ClusterDetailPage = lazy(() => import('@/pages/cluster-detail'))
+const SSLPage = lazy(() => import('@/pages/ssl'))
+
+function PageLoader() {
+  return (
+    <div className="flex min-h-[50vh] items-center justify-center">
+      <div className="h-6 w-6 animate-spin rounded-full border-2 border-accent border-t-transparent" />
+    </div>
+  )
+}
 
 export function App() {
   return (
-    <BrowserRouter>
-      <Routes>
-        <Route element={<Layout />}>
-          <Route index element={<DashboardPage />} />
-          <Route path="/routing" element={<RoutingPage />} />
-          <Route path="/rules" element={<RulesPage />} />
-          <Route path="/config" element={<ConfigPage />} />
-          <Route path="/alerting" element={<AlertingPage />} />
-          <Route path="/ssl" element={<SSLPage />} />
-          <Route path="/ai" element={<AIPage />} />
-          <Route path="/logs" element={<LogsPage />} />
-          <Route path="/tenants" element={<TenantsPage />} />
-          <Route path="/tenants/new" element={<TenantNewPage />} />
-          <Route path="/tenants/:id" element={<TenantDetailPage />} />
-          <Route path="/tenants/:id/analytics" element={<TenantAnalyticsPage />} />
-          <Route path="/clusters" element={<ClustersPage />} />
-          <Route path="/clusters/:id" element={<ClusterDetailPage />} />
-        </Route>
-      </Routes>
-    </BrowserRouter>
+    <ErrorBoundary>
+      <BrowserRouter>
+        <Routes>
+          <Route element={<Layout />}>
+            <Route index element={<Suspense fallback={<PageLoader />}><DashboardPage /></Suspense>} />
+            <Route path="/routing" element={<Suspense fallback={<PageLoader />}><RoutingPage /></Suspense>} />
+            <Route path="/rules" element={<Suspense fallback={<PageLoader />}><RulesPage /></Suspense>} />
+            <Route path="/config" element={<Suspense fallback={<PageLoader />}><ConfigPage /></Suspense>} />
+            <Route path="/alerting" element={<Suspense fallback={<PageLoader />}><AlertingPage /></Suspense>} />
+            <Route path="/ssl" element={<Suspense fallback={<PageLoader />}><SSLPage /></Suspense>} />
+            <Route path="/ai" element={<Suspense fallback={<PageLoader />}><AIPage /></Suspense>} />
+            <Route path="/logs" element={<Suspense fallback={<PageLoader />}><LogsPage /></Suspense>} />
+            <Route path="/tenants" element={<Suspense fallback={<PageLoader />}><TenantsPage /></Suspense>} />
+            <Route path="/tenants/new" element={<Suspense fallback={<PageLoader />}><TenantNewPage /></Suspense>} />
+            <Route path="/tenants/:id" element={<Suspense fallback={<PageLoader />}><TenantDetailPage /></Suspense>} />
+            <Route path="/tenants/:id/analytics" element={<Suspense fallback={<PageLoader />}><TenantAnalyticsPage /></Suspense>} />
+            <Route path="/clusters" element={<Suspense fallback={<PageLoader />}><ClustersPage /></Suspense>} />
+            <Route path="/clusters/:id" element={<Suspense fallback={<PageLoader />}><ClusterDetailPage /></Suspense>} />
+          </Route>
+        </Routes>
+      </BrowserRouter>
+    </ErrorBoundary>
   )
 }

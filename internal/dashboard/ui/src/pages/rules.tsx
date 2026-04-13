@@ -2,6 +2,8 @@ import { useState, useEffect } from 'react'
 import { api } from '@/lib/api'
 import type { CustomRule, GeoIPResult } from '@/lib/api'
 import { cn } from '@/lib/utils'
+import { useToast } from '@/components/ui/toast'
+import { useFocusTrap } from '@/hooks/use-focus-trap'
 import { Plus, Trash2, Save, X, Search, ShieldCheck, BookTemplate, Check } from 'lucide-react'
 
 const FIELDS = [
@@ -104,22 +106,31 @@ const TEMPLATES: RuleTemplate[] = [
   },
 ]
 
+function Tog({on, onClick}: {on: boolean; onClick: () => void}) {
+  return (
+    <button type="button" onClick={onClick} className={cn('h-5 w-9 rounded-full transition-colors relative', on ? 'bg-accent' : 'bg-border')}>
+      <span className={cn('absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white transition-transform', on && 'translate-x-4')} />
+    </button>
+  )
+}
+
 export default function RulesPage() {
   const [rules, setRules] = useState<CustomRule[]>([])
   const [editing, setEditing] = useState<CustomRule | null>(null)
   const [isNew, setIsNew] = useState(false)
-  const [toast, setToast] = useState<{msg: string; err: boolean} | null>(null)
+  const [localToast, setLocalToast] = useState<{msg: string; err: boolean} | null>(null)
   const [sortKey, setSortKey] = useState<'priority' | 'name' | 'action' | 'score'>('priority')
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('asc')
   const [showTemplates, setShowTemplates] = useState(false)
   const [applying, setApplying] = useState<Set<string>>(new Set())
   const [geoIP, setGeoIP] = useState('')
   const [geoResult, setGeoResult] = useState<GeoIPResult | null>(null)
+  const { toast } = useToast()
 
-  const load = () => api.getRules().then(d => setRules(d.rules || [])).catch(() => {})
+  const load = () => api.getRules().then(d => setRules(d.rules || [])).catch(() => toast({ title: 'Failed to load rules', variant: 'warning' }))
   useEffect(() => { load() }, [])
 
-  const flash = (msg: string, err = false) => { setToast({msg, err}); setTimeout(() => setToast(null), 3000) }
+  const flash = (msg: string, err = false) => { setLocalToast({msg, err}); setTimeout(() => setLocalToast(null), 3000) }
 
   const save = async () => {
     if (!editing) return
@@ -189,21 +200,15 @@ export default function RulesPage() {
   })
 
   const SortTh = ({k, children, className}: {k: typeof sortKey; children: React.ReactNode; className?: string}) => (
-    <th className={cn('text-left px-3 py-2 cursor-pointer select-none hover:text-foreground transition-colors', className)}
+    <th scope="col" className={cn('text-left px-3 py-2 cursor-pointer select-none hover:text-foreground transition-colors', className)}
       onClick={() => toggleSort(k)}>
       {children} {sortKey === k && <span className="text-accent">{sortDir === 'asc' ? '\u25B2' : '\u25BC'}</span>}
     </th>
   )
 
-  const Tog = ({on, onClick}: {on: boolean; onClick: () => void}) => (
-    <button type="button" onClick={onClick} className={cn('h-5 w-9 rounded-full transition-colors relative', on ? 'bg-accent' : 'bg-border')}>
-      <span className={cn('absolute top-0.5 left-0.5 h-4 w-4 rounded-full bg-white transition-transform', on && 'translate-x-4')} />
-    </button>
-  )
-
   return (
     <div className="space-y-4">
-      {toast && <div className={cn('fixed top-4 right-4 z-50 rounded-lg px-4 py-3 text-sm text-white shadow-lg', toast.err ? 'bg-destructive' : 'bg-success')}>{toast.msg}</div>}
+      {localToast && <div className={cn('fixed top-4 right-4 z-50 rounded-lg px-4 py-3 text-sm text-white shadow-lg', localToast.err ? 'bg-destructive' : 'bg-success')}>{localToast.msg}</div>}
 
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -275,14 +280,15 @@ export default function RulesPage() {
       {/* Table */}
       <div className="rounded-lg border border-border bg-card overflow-hidden">
         <table className="w-full text-sm">
+          <caption className="sr-only">Custom WAF rules with enabled toggle, priority, name, conditions, action, score, and delete columns</caption>
           <thead><tr className="border-b border-border text-muted text-xs">
-            <th className="text-left px-3 py-2 w-12">On</th>
+            <th scope="col" className="text-left px-3 py-2 w-12">On</th>
             <SortTh k="priority" className="w-10">Pri</SortTh>
             <SortTh k="name">Name</SortTh>
-            <th className="text-left px-3 py-2 hidden md:table-cell">Conditions</th>
+            <th scope="col" className="text-left px-3 py-2 hidden md:table-cell">Conditions</th>
             <SortTh k="action" className="w-24">Action</SortTh>
             <SortTh k="score" className="w-14">Score</SortTh>
-            <th className="w-10"></th>
+            <th scope="col" className="w-10"></th>
           </tr></thead>
           <tbody>
             {sorted.length === 0 && <tr><td colSpan={7} className="text-center py-8 text-muted">No rules yet. Click Add Rule.</td></tr>}
@@ -306,69 +312,7 @@ export default function RulesPage() {
 
       {/* Editor Modal */}
       {editing && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setEditing(null)}>
-          <div className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-            <div className="flex items-center justify-between px-6 py-4 border-b border-border">
-              <h2 className="font-semibold">{isNew ? 'Create Rule' : 'Edit Rule'}</h2>
-              <button onClick={() => setEditing(null)} className="p-1 hover:bg-background rounded"><X className="h-4 w-4" /></button>
-            </div>
-            <div className="p-6 space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <Field label="Rule ID"><input value={editing.id} onChange={e => setEditing({...editing, id: e.target.value})} disabled={!isNew} className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-accent font-mono disabled:opacity-50" /></Field>
-                <Field label="Name"><input value={editing.name} onChange={e => setEditing({...editing, name: e.target.value})} placeholder="Block admin from CN" className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-accent" /></Field>
-              </div>
-              <div className="grid grid-cols-4 gap-4">
-                <Field label="Priority"><input type="number" value={editing.priority} min={0} onChange={e => setEditing({...editing, priority: Number(e.target.value)})} className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-accent font-mono" /></Field>
-                <Field label="Action">
-                  <select value={editing.action} onChange={e => setEditing({...editing, action: e.target.value})} className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-accent">
-                    {ACTIONS.map(a => <option key={a.value} value={a.value}>{a.label}</option>)}
-                  </select>
-                </Field>
-                <Field label="Score"><input type="number" value={editing.score} min={0} onChange={e => setEditing({...editing, score: Number(e.target.value)})} className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-accent font-mono" /></Field>
-                <div className="flex items-end pb-1"><label className="flex items-center gap-2 text-sm"><Tog on={editing.enabled} onClick={() => setEditing({...editing, enabled: !editing.enabled})} /> Enabled</label></div>
-              </div>
-
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-semibold text-muted uppercase">Conditions (AND)</span>
-                  <button onClick={() => setEditing({...editing, conditions: [...editing.conditions, {field:'path',op:'contains',value:''}]})} className="text-xs text-accent hover:underline flex items-center gap-1"><Plus className="h-3 w-3" /> Add</button>
-                </div>
-                <div className="space-y-2">
-                  {editing.conditions.map((c, i) => (
-                    <div key={i} className="flex items-center gap-2 rounded-md bg-background border border-border p-2">
-                      <select value={c.field} onChange={e => { const cs=[...editing.conditions]; cs[i]={...cs[i],field:e.target.value}; setEditing({...editing,conditions:cs}) }} className="rounded border border-border bg-card px-2 py-1 text-xs text-foreground min-w-[120px]">
-                        {FIELDS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
-                        <option value="header:">Header...</option>
-                        <option value="cookie:">Cookie...</option>
-                      </select>
-                      <select value={c.op} onChange={e => { const cs=[...editing.conditions]; cs[i]={...cs[i],op:e.target.value}; setEditing({...editing,conditions:cs}) }} className="rounded border border-border bg-card px-2 py-1 text-xs text-foreground min-w-[90px]">
-                        {OPS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-                      </select>
-                      <input
-                        value={typeof c.value === 'string' ? c.value : JSON.stringify(c.value)}
-                        onChange={e => {
-                          const cs=[...editing.conditions]
-                          let v: unknown = e.target.value
-                          if (c.op === 'in' || c.op === 'not_in') { try { v = JSON.parse(e.target.value) } catch { /* keep as string */ } }
-                          cs[i] = {...cs[i], value: v}
-                          setEditing({...editing, conditions: cs})
-                        }}
-                        placeholder={c.op === 'in' ? '["US","CN"]' : 'value'}
-                        className="flex-1 rounded border border-border bg-card px-2 py-1 text-xs font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-accent"
-                      />
-                      <button onClick={() => { const cs=[...editing.conditions]; cs.splice(i,1); setEditing({...editing,conditions:cs}) }} className="text-muted hover:text-destructive p-1"><X className="h-3 w-3" /></button>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-2 pt-2">
-                <button onClick={() => setEditing(null)} className="rounded-md border border-border px-4 py-2 text-sm hover:bg-background">Cancel</button>
-                <button onClick={save} className="flex items-center gap-1.5 rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90"><Save className="h-4 w-4" /> {isNew ? 'Create' : 'Save'}</button>
-              </div>
-            </div>
-          </div>
-        </div>
+        <RuleEditorModal editing={editing} isNew={isNew} setEditing={setEditing} save={save} onClose={() => setEditing(null)} />
       )}
 
       {/* GeoIP */}
@@ -387,4 +331,80 @@ export default function RulesPage() {
 
 function Field({label, children}: {label: string; children: React.ReactNode}) {
   return <div><label className="text-xs text-muted block mb-1">{label}</label>{children}</div>
+}
+
+function RuleEditorModal({ editing, isNew, setEditing, save, onClose }: {
+  editing: CustomRule
+  isNew: boolean
+  setEditing: (r: CustomRule | null) => void
+  save: () => void
+  onClose: () => void
+}) {
+  const trapRef = useFocusTrap(onClose)
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
+      <div ref={trapRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={isNew ? 'Create rule' : 'Edit rule'} className="bg-card border border-border rounded-xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto outline-none" onClick={e => e.stopPropagation()}>
+        <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+          <h2 className="font-semibold">{isNew ? 'Create Rule' : 'Edit Rule'}</h2>
+          <button onClick={onClose} className="p-1 hover:bg-background rounded"><X className="h-4 w-4" /></button>
+        </div>
+        <div className="p-6 space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Rule ID"><input value={editing.id} onChange={e => setEditing({...editing, id: e.target.value})} disabled={!isNew} className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-accent font-mono disabled:opacity-50" /></Field>
+            <Field label="Name"><input value={editing.name} onChange={e => setEditing({...editing, name: e.target.value})} placeholder="Block admin from CN" className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-accent" /></Field>
+          </div>
+          <div className="grid grid-cols-4 gap-4">
+            <Field label="Priority"><input type="number" value={editing.priority} min={0} onChange={e => setEditing({...editing, priority: Number(e.target.value)})} className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-accent font-mono" /></Field>
+            <Field label="Action">
+              <select value={editing.action} onChange={e => setEditing({...editing, action: e.target.value})} className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-accent">
+                {ACTIONS.map(a => <option key={a.value} value={a.value}>{a.label}</option>)}
+              </select>
+            </Field>
+            <Field label="Score"><input type="number" value={editing.score} min={0} onChange={e => setEditing({...editing, score: Number(e.target.value)})} className="w-full rounded-md border border-border bg-background px-3 py-1.5 text-sm text-foreground focus:outline-none focus:ring-1 focus:ring-accent font-mono" /></Field>
+            <div className="flex items-end pb-1"><label className="flex items-center gap-2 text-sm"><Tog on={editing.enabled} onClick={() => setEditing({...editing, enabled: !editing.enabled})} /> Enabled</label></div>
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-semibold text-muted uppercase">Conditions (AND)</span>
+              <button onClick={() => setEditing({...editing, conditions: [...editing.conditions, {field:'path',op:'contains',value:''}]})} className="text-xs text-accent hover:underline flex items-center gap-1"><Plus className="h-3 w-3" /> Add</button>
+            </div>
+            <div className="space-y-2">
+              {editing.conditions.map((c, i) => (
+                <div key={i} className="flex items-center gap-2 rounded-md bg-background border border-border p-2">
+                  <select value={c.field} onChange={e => { const cs=[...editing.conditions]; cs[i]={...cs[i],field:e.target.value}; setEditing({...editing,conditions:cs}) }} className="rounded border border-border bg-card px-2 py-1 text-xs text-foreground min-w-[120px]">
+                    {FIELDS.map(f => <option key={f.value} value={f.value}>{f.label}</option>)}
+                    <option value="header:">Header...</option>
+                    <option value="cookie:">Cookie...</option>
+                  </select>
+                  <select value={c.op} onChange={e => { const cs=[...editing.conditions]; cs[i]={...cs[i],op:e.target.value}; setEditing({...editing,conditions:cs}) }} className="rounded border border-border bg-card px-2 py-1 text-xs text-foreground min-w-[90px]">
+                    {OPS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+                  </select>
+                  <input
+                    value={typeof c.value === 'string' ? c.value : JSON.stringify(c.value)}
+                    onChange={e => {
+                      const cs=[...editing.conditions]
+                      let v: unknown = e.target.value
+                      if (c.op === 'in' || c.op === 'not_in') { try { v = JSON.parse(e.target.value) } catch { /* keep as string */ } }
+                      cs[i] = {...cs[i], value: v}
+                      setEditing({...editing, conditions: cs})
+                    }}
+                    placeholder={c.op === 'in' ? '["US","CN"]' : 'value'}
+                    className="flex-1 rounded border border-border bg-card px-2 py-1 text-xs font-mono text-foreground focus:outline-none focus:ring-1 focus:ring-accent"
+                  />
+                  <button onClick={() => { const cs=[...editing.conditions]; cs.splice(i,1); setEditing({...editing,conditions:cs}) }} className="text-muted hover:text-destructive p-1"><X className="h-3 w-3" /></button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2">
+            <button onClick={onClose} className="rounded-md border border-border px-4 py-2 text-sm hover:bg-background">Cancel</button>
+            <button onClick={save} className="flex items-center gap-1.5 rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:opacity-90"><Save className="h-4 w-4" /> {isNew ? 'Create' : 'Save'}</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
 }

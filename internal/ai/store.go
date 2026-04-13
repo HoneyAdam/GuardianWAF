@@ -101,7 +101,9 @@ func NewStore(dirPath string) *Store {
 	// Try creating the directory; fallback to temp if permission denied
 	if err := os.MkdirAll(dirPath, 0o700); err != nil {
 		fallback := filepath.Join(os.TempDir(), "guardianwaf", "ai")
-		_ = os.MkdirAll(fallback, 0o700)
+		if fallbackErr := os.MkdirAll(fallback, 0o700); fallbackErr != nil {
+				log.Printf("[WARN] AI store: cannot create fallback dir %s: %v", fallback, fallbackErr)
+			}
 		log.Printf("[WARN] AI store: cannot create %s (%v), falling back to %s — data may have weaker permissions", dirPath, err, fallback)
 		dirPath = fallback
 	}
@@ -117,7 +119,9 @@ func NewStore(dirPath string) *Store {
 	} else {
 		// First run — write empty config so file always exists
 		empty, _ := json.MarshalIndent(s.data, "", "  ")
-		_ = os.WriteFile(configFile, empty, 0o600)
+		if writeErr := os.WriteFile(configFile, empty, 0o600); writeErr != nil {
+			log.Printf("[WARN] AI store: failed to write initial config: %v", writeErr)
+		}
 	}
 	return s
 }

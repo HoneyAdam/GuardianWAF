@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, memo } from 'react'
 import { cn, timeAgo } from '@/lib/utils'
 import type { WafEvent } from '@/lib/api'
 import { EventDetail } from './event-detail'
@@ -27,7 +27,7 @@ const actionStyles: Record<string, string> = {
   pass: 'bg-success/15 text-success',
 }
 
-export function EventsTable({ events, filter, setFilter, search, setSearch }: EventsTableProps) {
+export const EventsTable = memo(function EventsTable({ events, filter, setFilter, search, setSearch }: EventsTableProps) {
   const [selectedEvent, setSelectedEvent] = useState<WafEvent | null>(null)
 
   const filtered = events.filter(e => {
@@ -52,6 +52,8 @@ export function EventsTable({ events, filter, setFilter, search, setSearch }: Ev
                 <button
                   key={f.value}
                   onClick={() => setFilter(f.value)}
+                  aria-pressed={filter === f.value}
+                  aria-label={`Filter by ${f.label}`}
                   className={cn(
                     'px-3 py-1 text-xs font-medium transition-colors',
                     filter === f.value
@@ -66,6 +68,7 @@ export function EventsTable({ events, filter, setFilter, search, setSearch }: Ev
             <input
               type="text"
               placeholder="Search..."
+              aria-label="Search events"
               value={search}
               onChange={e => setSearch(e.target.value)}
               className="h-7 rounded-md border border-border bg-background px-2.5 text-xs text-foreground placeholder:text-muted focus:outline-none focus:ring-1 focus:ring-accent w-40"
@@ -76,16 +79,17 @@ export function EventsTable({ events, filter, setFilter, search, setSearch }: Ev
         {/* Table */}
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
+            <caption className="sr-only">WAF security events with time, source IP, method, path, action, score, browser and device columns</caption>
             <thead>
               <tr className="border-b border-border text-muted">
-                <th className="text-left px-3 py-2 font-medium">Time</th>
-                <th className="text-left px-3 py-2 font-medium">IP</th>
-                <th className="text-left px-3 py-2 font-medium">Method</th>
-                <th className="text-left px-3 py-2 font-medium">Path</th>
-                <th className="text-left px-3 py-2 font-medium">Action</th>
-                <th className="text-left px-3 py-2 font-medium">Score</th>
-                <th className="text-left px-3 py-2 font-medium hidden lg:table-cell">Browser</th>
-                <th className="text-left px-3 py-2 font-medium hidden lg:table-cell">Device</th>
+                <th scope="col" className="text-left px-3 py-2 font-medium">Time</th>
+                <th scope="col" className="text-left px-3 py-2 font-medium">IP</th>
+                <th scope="col" className="text-left px-3 py-2 font-medium">Method</th>
+                <th scope="col" className="text-left px-3 py-2 font-medium">Path</th>
+                <th scope="col" className="text-left px-3 py-2 font-medium">Action</th>
+                <th scope="col" className="text-left px-3 py-2 font-medium">Score</th>
+                <th scope="col" className="text-left px-3 py-2 font-medium hidden lg:table-cell">Browser</th>
+                <th scope="col" className="text-left px-3 py-2 font-medium hidden lg:table-cell">Device</th>
               </tr>
             </thead>
             <tbody>
@@ -148,4 +152,4 @@ export function EventsTable({ events, filter, setFilter, search, setSearch }: Ev
       )}
     </>
   )
-}
+})

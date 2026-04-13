@@ -23,6 +23,7 @@ type Manager struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 	done   chan struct{}
+	stop   chan struct{} // global stop signal for Close()
 }
 
 // Config for API discovery.
@@ -89,6 +90,7 @@ func NewManager(cfg Config) (*Manager, error) {
 		ctx:     ctx,
 		cancel:  cancel,
 		done:    make(chan struct{}),
+		stop:    make(chan struct{}),
 	}
 
 	// Initialize collector
@@ -135,7 +137,17 @@ func (m *Manager) SetEnabled(enabled bool) {
 
 	m.enabled = enabled
 	if enabled {
-		// Create fresh context since the old one may have been canceled
+		// Wait for previous run() to exit if running
+		select {
+		case <-m.done:
+			// Previous run exited, recreate done channel
+		default:
+			// Previous run still active — cancel it first
+			m.cancel()
+			<-m.done
+		}
+		// Recreate done channel for the new goroutine
+		m.done = make(chan struct{})
 		ctx, cancel := context.WithCancel(context.Background())
 		m.ctx = ctx
 		m.cancel = cancel
@@ -191,13 +203,19 @@ type Stats struct {
 
 // run is the background processing loop.
 func (m *Manager) run() {
-	ticker := time.NewTicker(m.config.Collection.FlushPeriod)
+	flushPeriod := m.config.Collection.FlushPeriod
+	if flushPeriod <= 0 {
+		flushPeriod = 5 * time.Minute
+	}
+	ticker := time.NewTicker(flushPeriod)
 	defer ticker.Stop()
+	defer close(m.done)
 
 	for {
 		select {
+		case <-m.stop:
+			return
 		case <-m.ctx.Done():
-			close(m.done)
 			return
 		case <-ticker.C:
 			m.process()
@@ -228,6 +246,7 @@ func (m *Manager) process() {
 
 // Close shuts down the discovery manager.
 func (m *Manager) Close() error {
+	close(m.stop)
 	m.cancel()
 	<-m.done
 	return nil

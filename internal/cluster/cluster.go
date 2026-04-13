@@ -12,6 +12,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -93,7 +94,7 @@ type Cluster struct {
 	isLeader  atomic.Bool
 
 	// Channels
-	events    chan Event
+	events    chan Event // cluster events (join/leave/failure); consume via Events()
 	stopCh    chan struct{}
 	wg        sync.WaitGroup
 
@@ -230,6 +231,7 @@ func (c *Cluster) Start() error {
 	}
 
 	// Start HTTP server for cluster communication
+	c.wg.Add(1)
 	go c.startHTTPServer()
 
 	// Join seed nodes
@@ -240,18 +242,19 @@ func (c *Cluster) Start() error {
 	}
 
 	// Start background tasks
-	c.wg.Add(3)
-	go c.heartbeatLoop()
-	// Initialize state
+	c.mu.Lock()
 	c.state.Store(StateJoining)
 
-	go c.failureDetector()
-	go c.stateSyncLoop()
-
-	// Mark as active
+	// Mark as active under lock to prevent race with heartbeatLoop
 	c.state.Store(StateActive)
 	c.localNode.State = StateActive
 	c.nodes[c.localNode.ID] = c.localNode
+	c.mu.Unlock()
+
+	c.wg.Add(3)
+	go c.heartbeatLoop()
+	go c.failureDetector()
+	go c.stateSyncLoop()
 
 	return nil
 }
@@ -286,6 +289,12 @@ func (c *Cluster) Stop() error {
 	}
 
 	return nil
+}
+
+// Events returns a read-only channel of cluster events (node join, leave, failure).
+// Consumers must drain this channel to prevent event drops when the buffer fills.
+func (c *Cluster) Events() <-chan Event {
+	return c.events
 }
 
 // IsLeader returns if this node is the leader.
@@ -445,6 +454,11 @@ func (c *Cluster) broadcast(msg *Message) {
 			continue
 		}
 		go func(n *Node) {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("[cluster] warning: send goroutine panic: %v", r)
+				}
+			}()
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 			if err := c.sendMessage(ctx, n, msg); err != nil {
@@ -482,7 +496,7 @@ func (c *Cluster) sendMessage(ctx context.Context, node *Node, msg *Message) err
 		return fmt.Errorf("node returned status %d", resp.StatusCode)
 	}
 
-	_, _ = io.Copy(io.Discard, resp.Body)
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 
 	return nil
 }
@@ -499,14 +513,20 @@ func (c *Cluster) joinCluster() error {
 
 // joinViaSeed attempts to join via a specific seed node.
 func (c *Cluster) joinViaSeed(seed string) error {
-	url := fmt.Sprintf("http://%s/cluster/join", seed)
+	// Use https:// by default to protect the auth secret in transit.
+	// If the seed address already includes a scheme, use it as-is.
+	joinURL := seed
+	if !strings.Contains(seed, "://") {
+		joinURL = "https://" + seed
+	}
+	joinURL += "/cluster/join"
 
 	data, err := json.Marshal(c.localNode)
 	if err != nil {
 		return fmt.Errorf("failed to marshal local node: %w", err)
 	}
 
-	req, reqErr := http.NewRequest(http.MethodPost, url, bytes.NewReader(data))
+	req, reqErr := http.NewRequest(http.MethodPost, joinURL, bytes.NewReader(data))
 	if reqErr != nil {
 		return reqErr
 	}
@@ -525,7 +545,7 @@ func (c *Cluster) joinViaSeed(seed string) error {
 		return fmt.Errorf("seed returned status %d", resp.StatusCode)
 	}
 
-	_, _ = io.Copy(io.Discard, resp.Body)
+	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 
 	return nil
 }
@@ -642,7 +662,11 @@ func (c *Cluster) startLeaderElection() *Message {
 // heartbeatLoop sends periodic heartbeats.
 func (c *Cluster) heartbeatLoop() {
 	defer c.wg.Done()
-	ticker := time.NewTicker(c.config.HeartbeatInterval)
+	heartbeatInterval := c.config.HeartbeatInterval
+	if heartbeatInterval <= 0 {
+		heartbeatInterval = 5 * time.Second
+	}
+	ticker := time.NewTicker(heartbeatInterval)
 	defer ticker.Stop()
 
 	for {
@@ -662,7 +686,11 @@ func (c *Cluster) heartbeatLoop() {
 // failureDetector detects failed nodes.
 func (c *Cluster) failureDetector() {
 	defer c.wg.Done()
-	ticker := time.NewTicker(c.config.HeartbeatTimeout)
+	timeoutInterval := c.config.HeartbeatTimeout
+	if timeoutInterval <= 0 {
+		timeoutInterval = 15 * time.Second
+	}
+	ticker := time.NewTicker(timeoutInterval)
 	defer ticker.Stop()
 
 	for {
@@ -721,7 +749,11 @@ func (c *Cluster) stateSyncLoop() {
 		return
 	}
 
-	ticker := time.NewTicker(c.config.SyncInterval)
+	syncInterval := c.config.SyncInterval
+	if syncInterval <= 0 {
+		syncInterval = 30 * time.Second
+	}
+	ticker := time.NewTicker(syncInterval)
 	defer ticker.Stop()
 
 	for {
@@ -754,6 +786,7 @@ func (c *Cluster) syncState() {
 
 // startHTTPServer starts the HTTP server for cluster communication.
 func (c *Cluster) startHTTPServer() {
+	defer c.wg.Done()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/cluster/join", c.handleJoinHTTP)
 	mux.HandleFunc("/cluster/message", c.handleMessageHTTP)
@@ -770,11 +803,9 @@ func (c *Cluster) startHTTPServer() {
 		IdleTimeout:       60 * time.Second,
 	}
 
-	go func() {
-		if err := c.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Printf("[cluster] warning: HTTP server failed: %v", err)
-		}
-	}()
+	if err := c.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		log.Printf("[cluster] warning: HTTP server failed: %v", err)
+	}
 }
 
 // authenticateCluster validates the X-Cluster-Auth header using constant-time comparison.

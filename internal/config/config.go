@@ -937,10 +937,8 @@ func FindVirtualHost(vhosts []VirtualHostConfig, host string) *VirtualHostConfig
 		return nil
 	}
 
-	// Remove port from host if present
-	if idx := strings.Index(host, ":"); idx != -1 {
-		host = host[:idx]
-	}
+	// Remove port from host if present (bracket-aware for IPv6)
+	host = stripHostPort(host)
 
 	for i := range vhosts {
 		vh := &vhosts[i]
@@ -958,4 +956,20 @@ func FindVirtualHost(vhosts []VirtualHostConfig, host string) *VirtualHostConfig
 		}
 	}
 	return nil
+}
+
+// stripHostPort removes the port suffix from a host string, handling IPv6 brackets.
+func stripHostPort(host string) string {
+	if strings.Contains(host, "]") {
+		// IPv6: [::1]:8088
+		bracket := strings.LastIndex(host, "]")
+		if idx := strings.LastIndex(host, ":"); idx > bracket {
+			return host[:idx]
+		}
+		return host
+	}
+	if idx := strings.LastIndex(host, ":"); idx != -1 {
+		return host[:idx]
+	}
+	return host
 }

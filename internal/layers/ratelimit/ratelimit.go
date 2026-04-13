@@ -74,7 +74,12 @@ func (l *Layer) RemoveRule(id string) bool {
 			l.config.Rules = append(l.config.Rules[:i], l.config.Rules[i+1:]...)
 			// Clean up buckets associated with this rule
 			l.buckets.Range(func(key, _ any) bool {
-				if strings.HasPrefix(key.(string), id+":") {
+				k, ok := key.(string)
+			if !ok {
+				l.buckets.Delete(key)
+				return true
+			}
+			if strings.HasPrefix(k, id+":") {
 					l.buckets.Delete(key)
 				}
 				return true

@@ -1,6 +1,7 @@
 import { X } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { WafEvent } from '@/lib/api'
+import { useFocusTrap } from '@/hooks/use-focus-trap'
 
 interface EventDetailProps {
   event: WafEvent
@@ -16,13 +17,15 @@ const severityColors: Record<string, string> = {
 }
 
 export function EventDetail({ event, onClose }: EventDetailProps) {
+  const trapRef = useFocusTrap(onClose)
+
   return (
     <>
       {/* Overlay */}
       <div className="fixed inset-0 bg-black/50 z-40" onClick={onClose} />
 
       {/* Sheet */}
-      <div className="fixed right-0 top-0 bottom-0 w-full max-w-xl bg-card border-l border-border z-50 overflow-y-auto animate-in slide-in-from-right">
+      <div ref={trapRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label="Event detail" className="fixed right-0 top-0 bottom-0 w-full max-w-xl bg-card border-l border-border z-50 overflow-y-auto animate-in slide-in-from-right outline-none">
         {/* Header */}
         <div className="sticky top-0 bg-card border-b border-border px-6 py-4 flex items-center justify-between">
           <div>

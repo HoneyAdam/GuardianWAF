@@ -170,11 +170,17 @@ func (a *Analyzer) loop(eventCh <-chan engine.Event) {
 	defer func() {
 		if r := recover(); r != nil {
 			// AI analyzer panic recovery — prevent silent failure of threat analysis
-			fmt.Printf("[ERROR] AI analyzer loop panic: %v\n", r)
+			a.logs("error", fmt.Sprintf("AI analyzer loop panic: %v - restarting", r))
+			a.wg.Add(1)
+			go a.loop(eventCh)
 		}
 	}()
 
-	ticker := time.NewTicker(a.config.BatchInterval)
+	batchInterval := a.config.BatchInterval
+		if batchInterval <= 0 {
+			batchInterval = 30 * time.Second
+		}
+		ticker := time.NewTicker(batchInterval)
 	defer ticker.Stop()
 
 	for {
@@ -272,7 +278,7 @@ func (a *Analyzer) flushBatch() {
 	cost := float64(usage.PromptTokens)/1_000_000*1.0 + float64(usage.CompletionTokens)/1_000_000*3.0
 
 	result := AnalysisResult{
-		ID:         fmt.Sprintf("ai-%d", time.Now().UnixMilli()),
+		ID:         fmt.Sprintf("ai-%d", time.Now().UnixNano()),
 		Timestamp:  time.Now(),
 		EventCount: len(batch),
 		TokensUsed: usage.TotalTokens,

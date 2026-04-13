@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -179,7 +180,11 @@ func (s *CertDiskStore) StartRenewal(checkInterval time.Duration) {
 				fmt.Printf("[ERROR] ACME cert renewal panic: %v\n", r)
 			}
 		}()
-		ticker := time.NewTicker(checkInterval)
+		checkInterval := checkInterval
+	if checkInterval <= 0 {
+		checkInterval = 24 * time.Hour
+	}
+	ticker := time.NewTicker(checkInterval)
 		defer ticker.Stop()
 
 		for {
@@ -248,7 +253,9 @@ func (s *CertDiskStore) renewIfNeeded() {
 			renewAt := cert.Leaf.NotAfter.Add(-30 * 24 * time.Hour) // 30 days before expiry
 			if time.Now().After(renewAt) {
 				// Renew
-				_, _ = s.LoadOrObtain(domains)
+				if _, err := s.LoadOrObtain(domains); err != nil {
+					log.Printf("[acme] ERROR: failed to renew cert for %v: %v", domains, err)
+				}
 			}
 		}
 	}

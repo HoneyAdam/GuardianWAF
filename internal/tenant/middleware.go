@@ -61,10 +61,12 @@ func (m *Middleware) Handler(next http.Handler) http.Handler {
 		// Also add engine tenant context for WAF (breaks import cycle by using interface)
 		var wafCfg *config.WAFConfig
 		var virtualHosts []config.VirtualHostConfig
+		tenant.mu.RLock()
 		if tenant.Config != nil {
 			wafCfg = &tenant.Config.WAF
 			virtualHosts = tenant.Config.VirtualHosts
 		}
+		tenant.mu.RUnlock()
 		tenantCtx := &engine.TenantContext{
 			ID:            tenant.ID,
 			WAFConfig:     wafCfg,

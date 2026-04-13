@@ -11,6 +11,7 @@ import (
 	"io"
 	"math/big"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -74,7 +75,7 @@ func FetchOCSPResponse(issuer, leaf *x509.Certificate) ([]byte, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		_, _ = io.Copy(io.Discard, resp.Body)
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 1<<20))
 		return nil, fmt.Errorf("OCSP responder returned status %d", resp.StatusCode)
 	}
 
@@ -354,23 +355,31 @@ func (cs *CertStore) stapleOCSPForEntry(entry CertEntry) {
 
 	cert.OCSPStaple = ocspResp
 
-	// Update the stored certificate with OCSP staple
+	// Build a lookup set of this entry's domains for targeted update
+	domainSet := make(map[string]bool, len(entry.Domains))
+	for _, d := range entry.Domains {
+		domainSet[strings.ToLower(d)] = true
+	}
+
+	// Update the stored certificate with OCSP staple — only matching domains
 	cs.mu.Lock()
 	defer cs.mu.Unlock()
 
-	// Update in all storage locations
-	for domain, c := range cs.certs {
-		if c != nil && len(c.Certificate) > 0 {
-			cs.certs[domain] = &cert
+	for _, domain := range entry.Domains {
+		lower := strings.ToLower(domain)
+		if strings.HasPrefix(lower, "*.") {
+			suffix := lower[1:]
+			for i, wc := range cs.wildcards {
+				if wc.suffix == suffix {
+					cs.wildcards[i].cert = &cert
+					break
+				}
+			}
+		} else {
+			if _, ok := cs.certs[lower]; ok {
+				cs.certs[lower] = &cert
+			}
 		}
-	}
-	for i, wc := range cs.wildcards {
-		if wc.cert != nil && len(wc.cert.Certificate) > 0 {
-			cs.wildcards[i].cert = &cert
-		}
-	}
-	if cs.defaultCert != nil && len(cs.defaultCert.Certificate) > 0 {
-		cs.defaultCert = &cert
 	}
 }
 
@@ -387,7 +396,11 @@ func (cs *CertStore) StartOCSPRefresh(interval time.Duration) {
 				fmt.Printf("[ERROR] OCSP refresh panic: %v\n", r)
 			}
 		}()
-		ticker := time.NewTicker(interval)
+		tickerInterval := interval
+		if tickerInterval <= 0 {
+			tickerInterval = 1 * time.Hour
+		}
+		ticker := time.NewTicker(tickerInterval)
 		defer ticker.Stop()
 		for {
 			select {

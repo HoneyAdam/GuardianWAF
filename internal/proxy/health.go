@@ -68,7 +68,11 @@ func (hc *HealthChecker) Start() {
 		// Initial check
 		hc.checkAll(ctx)
 
-		ticker := time.NewTicker(hc.interval)
+		tickerInterval := hc.interval
+	if tickerInterval <= 0 {
+		tickerInterval = 30 * time.Second
+	}
+	ticker := time.NewTicker(tickerInterval)
 		defer ticker.Stop()
 
 		for {
@@ -100,7 +104,7 @@ func (hc *HealthChecker) checkAll(ctx context.Context) {
 		// SSRF TOCTOU mitigation: re-check DNS on each health check to detect
 		// DNS rebinding attacks that change a public IP to a private one.
 		if !allowPrivateTargets.Load() {
-			if err := isPrivateOrReservedIP(t.URL.Host); err != nil {
+			if err := IsPrivateOrReservedIP(t.URL.Host); err != nil {
 				t.SetHealthy(false)
 				t.lastCheck.Store(time.Now())
 				continue

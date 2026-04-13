@@ -31,11 +31,22 @@ export function useStats() {
     }
 
     fetchStats()
-    const interval = setInterval(fetchStats, 5000)
+    const interval = setInterval(() => {
+      // Pause polling when tab is not visible
+      if (document.hidden) return
+      fetchStats()
+    }, 5000)
+
+    // Fetch fresh data when tab becomes visible again
+    function onVisibilityChange() {
+      if (!document.hidden && active) fetchStats()
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
 
     return () => {
       active = false
       clearInterval(interval)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
     }
   }, [])
 

@@ -377,19 +377,18 @@ func (l *Layer) Process(ctx *engine.RequestContext) engine.LayerResult {
 
 // isGraphQLRequest checks if the request is a GraphQL request.
 func isGraphQLRequest(req *http.Request) bool {
-	// Check URL path
-	if strings.Contains(req.URL.Path, "/graphql") {
+	// Check URL path — match exact path segments to avoid false positives
+	// on paths like /api/not-graphql-endpoint
+	path := req.URL.Path
+	if path == "/graphql" ||
+		strings.HasPrefix(path, "/graphql/") ||
+		strings.HasSuffix(path, "/graphql") {
 		return true
 	}
 
 	// Check Content-Type header
 	contentType := req.Header.Get("Content-Type")
 	if strings.Contains(contentType, "application/graphql") {
-		return true
-	}
-
-	// Check for GraphQL-specific query parameter
-	if req.URL.Query().Get("query") != "" {
 		return true
 	}
 
@@ -437,10 +436,13 @@ func extractQueries(ctx *engine.RequestContext) ([]string, error) {
 			}
 		}
 
-		// Fallback: treat entire body as raw GraphQL query
-		trimmed := strings.TrimSpace(body)
-		if trimmed != "" {
-			return []string{trimmed}, nil
+		// Fallback: treat entire body as raw GraphQL query,
+		// but only when Content-Type indicates raw GraphQL (not arbitrary JSON/text)
+		if strings.Contains(ctx.ContentType, "application/graphql") {
+			trimmed := strings.TrimSpace(body)
+			if trimmed != "" {
+				return []string{trimmed}, nil
+			}
 		}
 
 		return nil, fmt.Errorf("no query found in body")

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"net"
 	"net/http"
 	"sync"
@@ -212,21 +213,7 @@ func (e *Engine) Check(r *http.Request) *Event {
 	// Execute pipeline
 	result := e.currentPipeline().Execute(ctx)
 
-	// Determine final action based on score thresholds
-	finalAction := ActionPass
-	if result.TotalScore >= int(e.blockThreshold.Load()) {
-		finalAction = ActionBlock
-	} else if result.TotalScore >= int(e.logThreshold.Load()) {
-		finalAction = ActionLog
-	}
-	// Pipeline may have already set block (e.g., IP ACL, rate limit)
-	if result.Action == ActionBlock {
-		finalAction = ActionBlock
-	}
-	// Promote challenge from pipeline if not already blocked
-	if result.Action == ActionChallenge && finalAction != ActionBlock {
-		finalAction = ActionChallenge
-	}
+	finalAction := determineAction(result, int(e.blockThreshold.Load()), int(e.logThreshold.Load()))
 
 	// Create event
 	statusCode := 200
@@ -306,21 +293,7 @@ func (e *Engine) Middleware(next http.Handler) http.Handler {
 
 		result := e.currentPipeline().Execute(ctx)
 
-		// Determine final action
-		finalAction := ActionPass
-		blockThresh := int(e.blockThreshold.Load())
-		logThresh := int(e.logThreshold.Load())
-		if result.TotalScore >= blockThresh {
-			finalAction = ActionBlock
-		} else if result.TotalScore >= logThresh {
-			finalAction = ActionLog
-		}
-		if result.Action == ActionBlock {
-			finalAction = ActionBlock
-		}
-		if result.Action == ActionChallenge && finalAction != ActionBlock {
-			finalAction = ActionChallenge
-		}
+		finalAction := determineAction(result, int(e.blockThreshold.Load()), int(e.logThreshold.Load()))
 
 		// If challenge, check for valid cookie first — if present, downgrade to pass
 		if finalAction == ActionChallenge && challengeSvc != nil {
@@ -387,7 +360,7 @@ func (e *Engine) Middleware(next http.Handler) http.Handler {
 				StatusCode: statusCode,
 				Action:     finalAction.String(),
 				Score:      result.TotalScore,
-				Duration:   fmt.Sprintf("%d", result.Duration.Microseconds()),
+				Duration:   strconv.FormatInt(result.Duration.Microseconds(), 10),
 				UserAgent:  event.UserAgent,
 				Findings:   len(result.Findings),
 				RequestID:  event.RequestID,
@@ -456,9 +429,9 @@ func (e *Engine) Reload(cfg *config.Config) error {
 	defer e.mu.Unlock()
 
 	e.cfg = cfgCopy
-	e.blockThreshold.Store(int32(cfg.WAF.Detection.Threshold.Block))
-	e.logThreshold.Store(int32(cfg.WAF.Detection.Threshold.Log))
-	e.maxBodySize.Store(cfg.WAF.Sanitizer.MaxBodySize)
+	e.blockThreshold.Store(int32(e.cfg.WAF.Detection.Threshold.Block))
+	e.logThreshold.Store(int32(e.cfg.WAF.Detection.Threshold.Log))
+	e.maxBodySize.Store(e.cfg.WAF.Sanitizer.MaxBodySize)
 
 	// Note: layers are re-added by the caller after reload
 	// This just updates thresholds and config
@@ -500,8 +473,26 @@ func (e *Engine) Config() *config.Config {
 	return e.cfg
 }
 
-// Close shuts down the engine, closing the event store and bus.
+// Close shuts down the engine, closing the event store first (to drain pending writes),
+// then the event bus.
 func (e *Engine) Close() error {
+	err := e.eventStore.Close()
 	e.eventBus.Close()
-	return e.eventStore.Close()
+	return err
+}
+// determineAction computes the final action from a pipeline result and score thresholds.
+func determineAction(result PipelineResult, blockThresh, logThresh int) Action {
+	action := ActionPass
+	if result.TotalScore >= blockThresh {
+		action = ActionBlock
+	} else if result.TotalScore >= logThresh {
+		action = ActionLog
+	}
+	if result.Action == ActionBlock {
+		action = ActionBlock
+	}
+	if result.Action == ActionChallenge && action != ActionBlock {
+		action = ActionChallenge
+	}
+	return action
 }

@@ -25,9 +25,9 @@ type Target struct {
 	lastCheck   atomic.Value // stores time.Time
 }
 
-// isPrivateOrReservedIP checks if a host resolves to a private, loopback,
+// IsPrivateOrReservedIP checks if a host resolves to a private, loopback,
 // link-local, or other reserved IP range. Used for SSRF prevention.
-func isPrivateOrReservedIP(host string) error {
+func IsPrivateOrReservedIP(host string) error {
 	// Strip port if present
 	h, _, err := net.SplitHostPort(host)
 	if err != nil {
@@ -83,6 +83,11 @@ func AllowPrivateTargets() {
 	allowPrivateTargets.Store(true)
 }
 
+// PrivateTargetsAllowed reports whether private targets are allowed (for testing).
+func PrivateTargetsAllowed() bool {
+	return allowPrivateTargets.Load()
+}
+
 func NewTarget(rawURL string, weight int) (*Target, error) {
 	u, err := url.Parse(rawURL)
 	if err != nil {
@@ -94,7 +99,7 @@ func NewTarget(rawURL string, weight int) (*Target, error) {
 
 	// SSRF prevention: block targets resolving to private/reserved IPs
 	if !allowPrivateTargets.Load() {
-		if err := isPrivateOrReservedIP(u.Host); err != nil {
+		if err := IsPrivateOrReservedIP(u.Host); err != nil {
 			return nil, err
 		}
 	}

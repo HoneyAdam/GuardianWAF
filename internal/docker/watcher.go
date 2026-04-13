@@ -138,14 +138,22 @@ func (w *Watcher) streamEvents() error {
 
 	// Stop on shutdown
 	go func() {
-		<-w.stopCh
-		cancel()
+		select {
+		case <-w.stopCh:
+			cancel()
+		case <-ctx.Done():
+		}
 	}()
 
 	eventCh := make(chan Event, 32)
 	errCh := make(chan error, 1)
 
 	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				errCh <- fmt.Errorf("event stream panic: %v", r)
+			}
+		}()
 		errCh <- w.client.StreamEvents(ctx, w.labelPrefix, eventCh)
 	}()
 
@@ -168,7 +176,11 @@ func (w *Watcher) streamEvents() error {
 
 // pollLoop falls back to periodic polling when event streaming isn't available.
 func (w *Watcher) pollLoop() {
-	ticker := time.NewTicker(w.pollInterval)
+	pollInterval := w.pollInterval
+	if pollInterval <= 0 {
+		pollInterval = 10 * time.Second
+	}
+	ticker := time.NewTicker(pollInterval)
 	defer ticker.Stop()
 
 	for {

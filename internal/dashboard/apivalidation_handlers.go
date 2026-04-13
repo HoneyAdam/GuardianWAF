@@ -14,12 +14,13 @@ func NewAPIValidationHandler(d *Dashboard) *APIValidationHandler {
 	return &APIValidationHandler{dashboard: d}
 }
 
-// RegisterRoutes registers API validation routes.
+// RegisterRoutes registers API validation routes with authentication.
 func (h *APIValidationHandler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("/api/apivalidation/schemas", h.handleSchemas)
-	mux.HandleFunc("/api/apivalidation/schemas/", h.handleSchemaDetail)
-	mux.HandleFunc("/api/apivalidation/config", h.handleValidationConfig)
-	mux.HandleFunc("/api/apivalidation/test", h.handleTestValidation)
+	auth := h.dashboard.authWrap
+	mux.HandleFunc("/api/apivalidation/schemas", auth(h.handleSchemas))
+	mux.HandleFunc("/api/apivalidation/schemas/", auth(h.handleSchemaDetail))
+	mux.HandleFunc("/api/apivalidation/config", auth(h.handleValidationConfig))
+	mux.HandleFunc("/api/apivalidation/test", auth(h.handleTestValidation))
 }
 
 // handleSchemas handles GET/POST /api/apivalidation/schemas

@@ -261,7 +261,7 @@ func TestEscapeLEEF(t *testing.T) {
 func TestNewExporter(t *testing.T) {
 	cfg := &Config{
 		Enabled:       true,
-		Endpoint:      "http://localhost:8088",
+		Endpoint:      "https://1.2.3.4:8088",
 		Format:        FormatJSON,
 		BatchSize:     50,
 		FlushInterval: 10 * time.Second,
@@ -276,6 +276,18 @@ func TestNewExporter(t *testing.T) {
 
 	if exporter.config.BatchSize != 50 {
 		t.Errorf("BatchSize = %d, want 50", exporter.config.BatchSize)
+	}
+}
+
+func TestNewExporter_RejectsHTTP(t *testing.T) {
+	cfg := &Config{
+		Enabled:  true,
+		Endpoint: "http://localhost:8088",
+		Format:   FormatJSON,
+	}
+	exporter := NewExporter(cfg)
+	if exporter != nil {
+		t.Error("expected nil exporter for HTTP endpoint (SSRF protection)")
 	}
 }
 
