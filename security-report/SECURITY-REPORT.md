@@ -319,11 +319,16 @@ Fresh scan with different methodology (5 parallel agents). Found **47 new findin
 
 **P2 Fixed (Medium):**
 - M01: DNS rebinding SSRF — DNS resolution added to all URL validators (nvd.go, geoip.go, feed.go)
+- M02: DNS rebinding TOCTOU — DialContext added to proxy/webhook/SIEM transports validating IPs at connection time
 - M03: Unbounded rate limit buckets — hard cap of 500K buckets with atomic counter
 - M04: Unbounded ATO tracker maps — maxEntries cap applied to cross-reference maps
 - M05: WebSocket frame allocation DoS — max lowered from 16MB to 2MB
 - M06: Weak crypto fallback — crypto/rand failure now fatal-exits instead of weak fallback
+- M07: AI API key plaintext — AES-256-GCM encryption used when dashboard API key is set
 - M08: Raw error messages — sanitizeErr() used in cluster and integrator HTTP handlers
+- M09: Biometric keystroke PII — printable chars replaced with *, only timing data retained
+- M11: Cluster secret over HTTP — TLS config (tls_cert_file/tls_key_file) added, warns on HTTP+secret
+- M12: Plaintext YAML secrets — ${VAR} and ${VAR:-default} env var interpolation added to YAML parser
 - M13: FileStore channel close race — Store() checks closed flag under RWMutex
 - M14: Tenant APIKeyHash leak — sanitizeTenant() used in updateTenantWAFConfig
 
