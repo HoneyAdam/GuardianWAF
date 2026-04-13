@@ -224,6 +224,17 @@ func (r *PatternRegistry) GetCustomPattern(name string) *Pattern {
 	return r.custom[name]
 }
 
+// RemoveCustomPattern removes a custom pattern by name.
+func (r *PatternRegistry) RemoveCustomPattern(name string) bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.custom[name]; exists {
+		delete(r.custom, name)
+		return true
+	}
+	return false
+}
+
 // Scan scans text for sensitive patterns and returns matches.
 func (r *PatternRegistry) Scan(text string) []Match {
 	r.mu.RLock()

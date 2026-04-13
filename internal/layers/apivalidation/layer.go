@@ -687,6 +687,19 @@ func (l *Layer) GetSpecs() []*CompiledSpec {
 	return l.specs
 }
 
+// RemoveSchema removes a loaded schema by source path.
+func (l *Layer) RemoveSchema(name string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	for i, spec := range l.specs {
+		if spec.Source.Path == name {
+			l.specs = append(l.specs[:i], l.specs[i+1:]...)
+			return true
+		}
+	}
+	return false
+}
+
 // GetRoute returns route info for a specific path and method.
 func (l *Layer) GetRoute(method, path string) *RouteInfo {
 	return l.router.Match(method, path)

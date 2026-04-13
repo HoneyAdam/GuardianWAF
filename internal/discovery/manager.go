@@ -102,10 +102,8 @@ func NewManager(cfg Config) (*Manager, error) {
 	// Initialize storage (in-memory for POC)
 	m.storage = NewMemoryStorage()
 
-	// Start background processing
-	if cfg.Enabled {
-		go m.run()
-	}
+	// Start background processing loop (always, so Close() can wait on done)
+	go m.run()
 
 	return m, nil
 }
@@ -246,7 +244,13 @@ func (m *Manager) process() {
 
 // Close shuts down the discovery manager.
 func (m *Manager) Close() error {
-	close(m.stop)
+	select {
+	case <-m.stop:
+		// Already closed
+		return nil
+	default:
+		close(m.stop)
+	}
 	m.cancel()
 	<-m.done
 	return nil

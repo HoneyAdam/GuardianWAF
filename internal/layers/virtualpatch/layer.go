@@ -590,6 +590,23 @@ func (l *Layer) GetActivePatches() []VirtualPatch {
 	return l.database.GetActivePatches()
 }
 
+// GetAllPatches returns all patches (both enabled and disabled).
+func (l *Layer) GetAllPatches() []VirtualPatch {
+	return l.database.GetAllPatches()
+}
+
+// TriggerUpdate manually triggers a CVE database update.
+func (l *Layer) TriggerUpdate() error {
+	if l.nvdClient == nil {
+		return fmt.Errorf("NVD client not configured (enable auto_update)")
+	}
+	l.runUpdate()
+	if err, _ := l.lastError.Load().(error); err != nil {
+		return err
+	}
+	return nil
+}
+
 // GetStats returns statistics.
 func (l *Layer) GetStats() DatabaseStats {
 	return l.database.Stats()

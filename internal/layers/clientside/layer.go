@@ -459,6 +459,13 @@ func (l *Layer) GetStats() Stats {
 	return l.stats
 }
 
+// AddSkimmingDomain adds a domain to the known skimming domains list at runtime.
+func (l *Layer) AddSkimmingDomain(domain string) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.patterns.KnownSkimmingDomains[domain] = true
+}
+
 func minInt(a, b int) int {
 	if a < b {
 		return a

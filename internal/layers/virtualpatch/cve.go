@@ -182,6 +182,18 @@ func (db *Database) GetActivePatches() []VirtualPatch {
 	return active
 }
 
+// GetAllPatches returns copies of all patches (both enabled and disabled).
+func (db *Database) GetAllPatches() []VirtualPatch {
+	db.mu.RLock()
+	defer db.mu.RUnlock()
+
+	all := make([]VirtualPatch, 0, len(db.patches))
+	for _, patch := range db.patches {
+		all = append(all, *patch)
+	}
+	return all
+}
+
 // GetPatchesForProduct returns patches affecting a product.
 func (db *Database) GetPatchesForProduct(cpe string) []*VirtualPatch {
 	db.mu.RLock()
