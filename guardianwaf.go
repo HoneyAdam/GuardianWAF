@@ -267,7 +267,7 @@ func (e *Engine) OnEvent(fn func(Event)) {
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				// Prevent goroutine crash from taking down the process
+				//nolint:staticcheck
 			}
 		}()
 		for event := range ch {

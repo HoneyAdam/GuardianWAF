@@ -460,9 +460,9 @@ func (c *Client) signedPost(url string, payload any, useJWK bool) (*http.Respons
 	// Payload
 	var payloadB64 string
 	if payload != nil {
-		payloadJSON, err := json.Marshal(payload)
-		if err != nil {
-			return nil, fmt.Errorf("marshal JWS payload: %w", err)
+		payloadJSON, jsonErr := json.Marshal(payload)
+		if jsonErr != nil {
+			return nil, fmt.Errorf("marshal JWS payload: %w", jsonErr)
 		}
 		payloadB64 = base64.RawURLEncoding.EncodeToString(payloadJSON)
 	} else {

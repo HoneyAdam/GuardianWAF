@@ -243,6 +243,7 @@ func ParseQuery(query string) (*AST, error) {
 
 // parseSelectionSet parses a GraphQL selection set.
 // Deprecated: use parseSelectionSetDepth to prevent unbounded recursion.
+// nolint:unused
 func parseSelectionSet(query string) ([]Selection, error) {
 	return parseSelectionSetDepth(query, maxParseDepth)
 }
@@ -298,6 +299,7 @@ func parseSelectionSetDepth(query string, depth int) ([]Selection, error) {
 }
 
 // parseField parses a single field.
+// nolint:unused
 func parseField(fieldStr string) (*Field, error) {
 	return parseFieldDepth(fieldStr, maxParseDepth)
 }

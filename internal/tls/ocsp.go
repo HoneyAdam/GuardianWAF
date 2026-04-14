@@ -35,9 +35,6 @@ type OCSPResponse struct {
 // oidAuthorityInfoAccess is the OID for Authority Information Access.
 var oidAuthorityInfoAccess = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 1, 1}
 
-// oidOCSPSigner is the OID for OCSP signing.
-var oidOCSPNoCheck = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 48, 1, 5}
-
 // FetchOCSPResponse fetches an OCSP response for the given certificate from its
 // OCSP responder. Returns the raw DER-encoded response suitable for TLS stapling.
 
@@ -131,7 +128,7 @@ func parseAIAOCSP(data []byte) string {
 
 	// seq is the SEQUENCE of AccessDescriptions
 	var descs []asn1.RawValue
-	rest, err = asn1.Unmarshal(seq.Bytes, &descs)
+	_, err = asn1.Unmarshal(seq.Bytes, &descs)
 	if err != nil {
 		return ""
 	}

@@ -388,11 +388,7 @@ func isGraphQLRequest(req *http.Request) bool {
 
 	// Check Content-Type header
 	contentType := req.Header.Get("Content-Type")
-	if strings.Contains(contentType, "application/graphql") {
-		return true
-	}
-
-	return false
+	return strings.Contains(contentType, "application/graphql")
 }
 
 // extractQueries extracts GraphQL queries from the request context.
@@ -473,13 +469,6 @@ func calculateDepth(ast *AST) int {
 		}
 	}
 	return maxDepth
-}
-
-// calculateSelectionDepth recursively calculates selection depth.
-// It follows inline fragments and fragment spreads so that depth limits
-// cannot be bypassed by hiding nesting inside named fragments.
-func calculateSelectionDepth(selections []Selection, currentDepth int) int {
-	return calculateSelectionDepthWithFragments(selections, currentDepth, nil, nil)
 }
 
 // calculateSelectionDepthWithFragments does the actual depth walk.

@@ -32,6 +32,7 @@ func helperAuthReq(method, target string, body io.Reader) *http.Request {
 }
 
 // helperAuthReqKey creates an authenticated request with a custom API key.
+// nolint:unused
 func helperAuthReqKey(method, target string, body io.Reader, key string) *http.Request {
 	req := httptest.NewRequest(method, target, body)
 	req.Header.Set("X-API-Key", key)

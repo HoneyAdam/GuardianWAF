@@ -302,7 +302,7 @@ func downloadDB(downloadURL, path string) error {
 
 	// Limit download to 500MB to prevent disk exhaustion
 	const maxDownloadSize = 500 * 1024 * 1024
-	var reader io.Reader = io.LimitReader(resp.Body, maxDownloadSize)
+	reader := io.LimitReader(resp.Body, maxDownloadSize)
 
 	// Auto-detect gzip by URL suffix or Content-Type
 	if strings.HasSuffix(downloadURL, ".gz") || strings.Contains(resp.Header.Get("Content-Type"), "gzip") {

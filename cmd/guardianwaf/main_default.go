@@ -1282,7 +1282,7 @@ func cmdServe(args []string) {
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
-					// prevent crash
+					//nolint:staticcheck
 				}
 			}()
 			for event := range alertCh {
@@ -1348,7 +1348,7 @@ func cmdServe(args []string) {
 		go func() {
 			defer func() {
 				if r := recover(); r != nil {
-					// prevent crash
+					//nolint:staticcheck
 				}
 			}()
 			for event := range eventCh {
