@@ -267,7 +267,7 @@ func (e *Engine) OnEvent(fn func(Event)) {
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				//nolint:staticcheck
+				_ = r
 			}
 		}()
 		for event := range ch {
