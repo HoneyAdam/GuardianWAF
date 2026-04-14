@@ -186,9 +186,12 @@ func TestHandleEvent_DiscordFormat(t *testing.T) {
 }
 
 func TestHandleEvent_EventFilter(t *testing.T) {
+	var mu sync.Mutex
 	called := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
 		called++
+		mu.Unlock()
 		w.WriteHeader(200)
 	}))
 	defer srv.Close()
@@ -201,23 +204,30 @@ func TestHandleEvent_EventFilter(t *testing.T) {
 	m.HandleEvent(testEvent(engine.ActionPass, 10, "1.2.3.4"))
 	time.Sleep(100 * time.Millisecond)
 
+	mu.Lock()
 	if called != 0 {
 		t.Errorf("expected no webhook for pass event, got %d calls", called)
 	}
+	mu.Unlock()
 
 	// Should fire for "block" action
 	m.HandleEvent(testEvent(engine.ActionBlock, 80, "1.2.3.4"))
 	time.Sleep(100 * time.Millisecond)
 
+	mu.Lock()
+	defer mu.Unlock()
 	if called != 1 {
 		t.Errorf("expected 1 webhook for block event, got %d calls", called)
 	}
 }
 
 func TestHandleEvent_MinScore(t *testing.T) {
+	var mu sync.Mutex
 	called := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
 		called++
+		mu.Unlock()
 		w.WriteHeader(200)
 	}))
 	defer srv.Close()
@@ -229,22 +239,29 @@ func TestHandleEvent_MinScore(t *testing.T) {
 	// Score below threshold — should NOT fire
 	m.HandleEvent(testEvent(engine.ActionBlock, 40, "1.2.3.4"))
 	time.Sleep(100 * time.Millisecond)
+	mu.Lock()
 	if called != 0 {
 		t.Errorf("expected no webhook for score 40, got %d", called)
 	}
+	mu.Unlock()
 
 	// Score at threshold — should fire
 	m.HandleEvent(testEvent(engine.ActionBlock, 60, "1.2.3.4"))
 	time.Sleep(100 * time.Millisecond)
+	mu.Lock()
+	defer mu.Unlock()
 	if called != 1 {
 		t.Errorf("expected 1 webhook for score 60, got %d", called)
 	}
 }
 
 func TestHandleEvent_Cooldown(t *testing.T) {
+	var mu sync.Mutex
 	called := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
 		called++
+		mu.Unlock()
 		w.WriteHeader(200)
 	}))
 	defer srv.Close()
@@ -261,14 +278,18 @@ func TestHandleEvent_Cooldown(t *testing.T) {
 	m.HandleEvent(testEvent(engine.ActionBlock, 80, "1.2.3.4"))
 	time.Sleep(100 * time.Millisecond)
 
+	mu.Lock()
 	if called != 1 {
 		t.Errorf("expected 1 webhook (cooldown suppress), got %d", called)
 	}
+	mu.Unlock()
 
 	// Different IP — should fire
 	m.HandleEvent(testEvent(engine.ActionBlock, 80, "5.6.7.8"))
 	time.Sleep(100 * time.Millisecond)
 
+	mu.Lock()
+	defer mu.Unlock()
 	if called != 2 {
 		t.Errorf("expected 2 webhooks (different IP), got %d", called)
 	}
@@ -372,9 +393,12 @@ func TestMatchesEvent(t *testing.T) {
 }
 
 func TestHandleEvent_AllEvents(t *testing.T) {
+	var mu sync.Mutex
 	called := 0
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
 		called++
+		mu.Unlock()
 		w.WriteHeader(200)
 	}))
 	defer srv.Close()
@@ -389,6 +413,8 @@ func TestHandleEvent_AllEvents(t *testing.T) {
 	m.HandleEvent(testEvent(engine.ActionPass, 5, "4.4.4.4"))
 	time.Sleep(300 * time.Millisecond)
 
+	mu.Lock()
+	defer mu.Unlock()
 	if called != 4 {
 		t.Errorf("expected 4 webhooks for 'all' events, got %d", called)
 	}
