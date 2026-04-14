@@ -294,6 +294,17 @@ func checkWindowsPaths(lower, location string) []engine.Finding {
 		}
 	}
 
+	// Windows short name bypass (e.g., PROGRA~1 for Program Files)
+	// Short names contain ~ but no dots in the name segment
+	for i := 0; i < len(lower); i++ {
+		if lower[i] == '~' {
+			findings = append(findings, makeFinding(60, engine.SeverityHigh,
+				"Windows short name format detected (path traversal attempt)",
+				extractContext(lower, "~"), location, 0.75))
+			break
+		}
+	}
+
 	// \windows\system32 or /windows/system32
 	winSys := []string{
 		"\\windows\\system32", "/windows/system32",

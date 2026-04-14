@@ -95,24 +95,32 @@ func SSRFDialContext() func(ctx context.Context, network, addr string) (net.Conn
 			return dialer.DialContext(ctx, network, addr)
 		}
 
-		host, _, err := net.SplitHostPort(addr)
+		host, port, err := net.SplitHostPort(addr)
 		if err != nil {
 			host = addr
+			port = ""
 		}
 
-		// Resolve the hostname to check IPs before dialing
+		// Resolve and validate IPs once; use the first valid IP to avoid TOCTOU.
 		ips, err := net.LookupIP(host)
 		if err != nil {
 			return nil, fmt.Errorf("SSRF dial: DNS lookup failed for %q: %w", host, err)
 		}
 
+		var validIP net.IP
 		for _, ip := range ips {
-			if err := classifyIP(ip, host); err != nil {
-				return nil, err
+			if err := classifyIP(ip, host); err == nil {
+				validIP = ip
+				break
 			}
 		}
+		if validIP == nil {
+			return nil, fmt.Errorf("SSRF dial: no valid IPs for %q", host)
+		}
 
-		return dialer.DialContext(ctx, network, addr)
+		// Dial the validated IP directly, avoiding DNS re-resolution at dial time.
+		target := net.JoinHostPort(validIP.String(), port)
+		return dialer.DialContext(ctx, network, target)
 	}
 }
 
@@ -161,6 +169,7 @@ func NewTarget(rawURL string, weight int) (*Target, error) {
 		// inject non-standard ones like X-Forwarded-Host to confuse backends.
 		req.Header.Del("X-Forwarded-Host")
 		req.Header.Del("X-Forwarded-Proto")
+		req.Header.Del("X-Real-IP")
 	}
 
 	transport := &http.Transport{

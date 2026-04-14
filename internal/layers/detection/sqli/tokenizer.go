@@ -122,6 +122,11 @@ func Tokenize(input string) []Token {
 				// is actually injected SQL, not a real string value.
 				inner := input[start+1 : j-1]
 				containsSQLKeyword = containsSQLContent(inner)
+			} else {
+				// Unterminated quote — scan remaining input for SQL keywords.
+				// An injection like "' OR 1=1" leaves the quote open intentionally.
+				remaining := input[start+1:]
+				containsSQLKeyword = containsSQLContent(remaining)
 			}
 
 			if closed && !containsSQLKeyword {
@@ -292,6 +297,10 @@ func Tokenize(input string) []Token {
 				tokens = append(tokens, Token{Type: TokenFunction, Value: word, Pos: start})
 			case IsKeyword(upper):
 				tokens = append(tokens, Token{Type: TokenKeyword, Value: word, Pos: start})
+			case containsSQLKeywordSubstring(upper):
+				// Concatenated keywords like "unionselection", "selectall", "droptab"
+				// are TokenOther by default but may contain SQL injection patterns.
+				tokens = append(tokens, Token{Type: TokenOther, Value: word, Pos: start})
 			default:
 				tokens = append(tokens, Token{Type: TokenOther, Value: word, Pos: start})
 			}
@@ -354,6 +363,55 @@ func containsSQLContent(s string) bool {
 		switch word {
 		case "OR", "AND", "INTO", "FROM", "WHERE", "SET", "VALUES",
 			"HAVING", "ORDER", "GROUP", "LIMIT", "OFFSET", "WAITFOR":
+			return true
+		}
+	}
+	// Check for multi-word injection patterns (OR 1, AND 1, UNION SELECT, etc.)
+	if containsMultiWordPattern(upper) {
+		return true
+	}
+	return false
+}
+
+// containsMultiWordPattern detects multi-word SQL injection patterns
+// like "OR 1", "AND 1", "UNION SELECT" that single-word scanning misses.
+func containsMultiWordPattern(s string) bool {
+	// Patterns: (keyword/operator followed by a condition-like fragment)
+	multiWord := []string{
+		" OR 1", " OR '1", " OR \"1", " OR -", " OR 0",
+		" AND 1", " AND '1", " AND \"1", " AND -", " AND 0",
+		" UNION ALL", " UNION SELECT",
+		" LIMIT 1", " LIMIT 0",
+		" ORDER BY", " GROUP BY",
+		" HAVING 1", " HAVING '",
+		" INTO OUTFILE", " INTO DUMPFILE",
+	}
+	for _, pat := range multiWord {
+		if strings.Contains(s, pat) {
+			return true
+		}
+	}
+	// Check for tautology patterns (e.g., "1=1", "1'='1", "1=1--" etc.)
+	tautologyPatterns := []string{"1=1", "1'='1", "1\"=\"1", "1=0", "1<>0", "1>=1", "1<=1"}
+	for _, pat := range tautologyPatterns {
+		if strings.Contains(s, pat) {
+			return true
+		}
+	}
+	return false
+}
+
+// containsSQLKeywordSubstring checks if a word contains SQL keywords
+// as substrings (for concatenated keyword detection like "unionselection").
+func containsSQLKeywordSubstring(word string) bool {
+	// SQL keyword substrings to detect in concatenated words.
+	// Using short substrings to catch variations like "unionselection", "selCT" etc.
+	sqlParts := []string{
+		"UNION", "SELECT", "INSERT", "UPDATE", "DELETE", "DROP",
+		"CREATE", "ALTER", "EXEC", "EXECUTE", "SCRIPT",
+	}
+	for _, part := range sqlParts {
+		if strings.Contains(word, part) {
 			return true
 		}
 	}

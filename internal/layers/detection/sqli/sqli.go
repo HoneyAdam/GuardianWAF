@@ -1,6 +1,7 @@
 package sqli
 
 import (
+	"strings"
 	"time"
 
 	"github.com/guardianwaf/guardianwaf/internal/engine"
@@ -64,9 +65,19 @@ func (d *Detector) Process(ctx *engine.RequestContext) engine.LayerResult {
 		allFindings = append(allFindings, Detect(ctx.NormalizedBody, "body")...)
 	}
 
-	// 4. Cookie values
+	// 4. Cookie values (elevated scrutiny — cookies often carry auth tokens/sessions
+	// that are seldom intentionally SQL-shaped; catch delimiter-less injection)
 	for _, v := range ctx.Cookies {
-		allFindings = append(allFindings, Detect(v, "cookie")...)
+		cookieFindings := Detect(v, "cookie")
+		// Elevate scores for cookie values containing injection patterns without
+		// surrounding SQL delimiters (quotes, parens). Pattern: unquoted operators
+		// and tautologies like "admin OR 1=1" where cookie value isn't wrapped.
+		for i := range cookieFindings {
+			if cookieFindings[i].Score < 30 && isSQLishPattern(v) {
+				cookieFindings[i].Score = 30
+			}
+		}
+		allFindings = append(allFindings, cookieFindings...)
 	}
 
 	// 5. Referer header
@@ -108,4 +119,18 @@ func (d *Detector) Process(ctx *engine.RequestContext) engine.LayerResult {
 		Score:    totalScore,
 		Duration: time.Since(start),
 	}
+}
+
+// isSQLishPattern detects cookie values that look like SQL injection
+// despite not triggering a high score (e.g., "admin OR 1=1" without delimiters).
+func isSQLishPattern(s string) bool {
+	upper := strings.ToUpper(s)
+	patterns := []string{" OR ", " AND ", " OR'1", " OR\"1", " OR 1", " AND 1",
+		"1=1", "1'='1", "1\"=\"1", "UNION SELECT", " OR -", " AND -"}
+	for _, p := range patterns {
+		if strings.Contains(upper, p) {
+			return true
+		}
+	}
+	return false
 }

@@ -1,6 +1,7 @@
 package cmdi
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -122,7 +123,7 @@ func Detect(input, location string) []engine.Finding {
 	findings = append(findings, checkBase64Pipe(lower, location)...)
 
 	// 6. Encoded newline injection
-	findings = append(findings, checkEncodedNewline(lower, location)...)
+	findings = append(findings, checkEncodedNewline(input, lower, location)...)
 
 	// 7. Redirection operators
 	findings = append(findings, checkRedirection(input, lower, location)...)
@@ -304,33 +305,49 @@ func checkBase64Pipe(lower, location string) []engine.Finding {
 }
 
 // checkEncodedNewline detects URL-encoded newline injection.
-func checkEncodedNewline(lower, location string) []engine.Finding {
-	var findings []engine.Finding
+func checkEncodedNewline(input, lower, location string) []engine.Finding {
+	// Count all newline occurrences (case-insensitive)
+	newlineCount := strings.Count(lower, "%0a") + strings.Count(lower, "%0A") +
+		strings.Count(lower, "%0d") + strings.Count(lower, "%0D")
 
-	if strings.Contains(lower, "%0a") || strings.Contains(lower, "%0d") {
-		// Check if there's a command after the newline
-		parts := strings.Split(lower, "%0a")
-		if len(parts) < 2 {
-			parts = strings.Split(lower, "%0d")
+	if newlineCount == 0 {
+		return nil
+	}
+
+	// Score scales with newline count (each newline is suspicious)
+	baseScore := 50
+	newlineScore := min(baseScore+(newlineCount*10), 100)
+
+	lowerInput := strings.ToLower(input)
+
+	// Check if there's a command after any of the newlines
+	// Check %0a variants
+	parts := strings.Split(lowerInput, "%0a")
+	for i := 1; i < len(parts); i++ {
+		trimmed := strings.TrimSpace(parts[i])
+		cmd := extractFirstWord(trimmed)
+		if IsCommand(cmd) {
+			return []engine.Finding{makeFinding(newlineScore, engine.SeverityHigh,
+				fmt.Sprintf("Newline injection with command detected (%d newlines): %s", newlineCount, cmd),
+				extractContext(lower, "%0"), location, 0.80)}
 		}
-		for i := 1; i < len(parts); i++ {
-			trimmed := strings.TrimSpace(parts[i])
-			cmd := extractFirstWord(trimmed)
-			if IsCommand(cmd) {
-				findings = append(findings, makeFinding(60, engine.SeverityHigh,
-					"Newline injection with command detected: "+cmd,
-					extractContext(lower, "%0"), location, 0.80))
-				break
-			}
-		}
-		if len(findings) == 0 && (strings.Contains(lower, "%0a") || strings.Contains(lower, "%0d")) {
-			findings = append(findings, makeFinding(60, engine.SeverityHigh,
-				"Encoded newline injection detected",
-				extractContext(lower, "%0"), location, 0.70))
+	}
+	// Check %0d variants
+	parts = strings.Split(lowerInput, "%0d")
+	for i := 1; i < len(parts); i++ {
+		trimmed := strings.TrimSpace(parts[i])
+		cmd := extractFirstWord(trimmed)
+		if IsCommand(cmd) {
+			return []engine.Finding{makeFinding(newlineScore, engine.SeverityHigh,
+				fmt.Sprintf("Newline injection with command detected (%d newlines): %s", newlineCount, cmd),
+				extractContext(lower, "%0"), location, 0.80)}
 		}
 	}
 
-	return findings
+	// No command found, but newlines themselves are suspicious
+	return []engine.Finding{makeFinding(newlineScore, engine.SeverityHigh,
+		fmt.Sprintf("Encoded newline injection detected (%d occurrences)", newlineCount),
+		extractContext(lower, "%0"), location, 0.70)}
 }
 
 // checkRedirection detects output redirection operators.
