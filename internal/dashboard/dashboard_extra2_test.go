@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -826,19 +827,25 @@ func TestHandleSSE_DelegatesToBroadcaster(t *testing.T) {
 	req := httptest.NewRequest("GET", "/api/v1/sse", nil).WithContext(ctx)
 	req.Header.Set("X-API-Key", "test-api-key")
 
+	var headerMu sync.Mutex
+	var ct string
 	done := make(chan struct{})
 	go func() {
 		d.Handler().ServeHTTP(w, req)
+		headerMu.Lock()
+		ct = w.Header().Get("Content-Type")
+		headerMu.Unlock()
 		close(done)
 	}()
 
 	// Let SSE handler connect and set headers
 	time.Sleep(50 * time.Millisecond)
 
-	ct := w.Header().Get("Content-Type")
+	headerMu.Lock()
 	if ct != "text/event-stream" {
 		t.Errorf("expected text/event-stream, got %s", ct)
 	}
+	headerMu.Unlock()
 
 	// Cancel context to unblock the SSE handler
 	cancel()

@@ -300,8 +300,13 @@ func TestHandleEvent_FailedDelivery(t *testing.T) {
 		{Name: "bad", URL: "http://127.0.0.1:1", Type: "generic", Events: []string{"block"}},
 	})
 
+	var mu sync.Mutex
 	var logs []string
-	m.SetLogger(func(_, msg string) { logs = append(logs, msg) })
+	m.SetLogger(func(_, msg string) {
+		mu.Lock()
+		logs = append(logs, msg)
+		mu.Unlock()
+	})
 
 	m.HandleEvent(testEvent(engine.ActionBlock, 80, "1.2.3.4"))
 	time.Sleep(200 * time.Millisecond)
@@ -310,6 +315,8 @@ func TestHandleEvent_FailedDelivery(t *testing.T) {
 	if s.Failed != 1 {
 		t.Errorf("expected failed=1, got %d", s.Failed)
 	}
+	mu.Lock()
+	defer mu.Unlock()
 	if len(logs) == 0 {
 		t.Error("expected warning log for failed delivery")
 	}
