@@ -74,6 +74,8 @@ type Dashboard struct {
 	mux             *http.ServeMux
 	apiKey          string
 	adminKey        string // Separate key for system admin operations (tenant management, billing, stats)
+	tenantAPIKeys   map[string]string // map[tenantID] -> SHA256 hash of per-tenant API key
+	// Fields below unchanged
 	upstreamsFn     func() any   // returns upstream status (injected to avoid circular imports)
 	rebuildFn       func() error // rebuilds proxy after config change
 	saveFn          func() error // persists current config to disk
@@ -107,6 +109,16 @@ const (
 // If not set, admin endpoints are inaccessible.
 func (d *Dashboard) SetAdminKey(key string) {
 	d.adminKey = key
+}
+
+// SetTenantAPIKey registers a per-tenant API key hash for tenant-scoped authentication.
+// This enables AUTH-003: each tenant's API key only authenticates within that tenant's context.
+// Keys are stored as SHA256 hashes (not plaintext). The same hash format as tenant Manager uses.
+func (d *Dashboard) SetTenantAPIKey(tenantID, apiKeyHash string) {
+	if d.tenantAPIKeys == nil {
+		d.tenantAPIKeys = make(map[string]string)
+	}
+	d.tenantAPIKeys[tenantID] = apiKeyHash
 }
 
 // isAdminAuthenticated checks if the request has the system admin API key.
@@ -1612,10 +1624,33 @@ func (d *Dashboard) SetAlertingStatsFn(fn func() any) {
 }
 
 // SetTenantManager injects the multi-tenant manager.
+// Also registers all existing tenant API keys for per-tenant authentication (AUTH-003).
 func (d *Dashboard) SetTenantManager(manager tenantManagerInterface) {
 	d.tenantManager = manager
 	adminHandler := NewTenantAdminHandler(d, manager)
 	adminHandler.RegisterRoutes(d.mux)
+
+	// Sync existing tenant API keys into dashboard for per-tenant auth
+	d.syncTenantAPIKeys(manager)
+}
+
+// syncTenantAPIKeys registers all tenant API key hashes for per-tenant authentication.
+// This enables the dashboard to validate per-tenant API keys without needing the full tenant manager.
+func (d *Dashboard) syncTenantAPIKeys(manager tenantManagerInterface) {
+	if manager == nil {
+		return
+	}
+	tenants := manager.ListTenants()
+	d.tenantAPIKeys = make(map[string]string, len(tenants))
+	for _, t := range tenants {
+		if m, ok := t.(map[string]any); ok {
+			if id, ok := m["id"].(string); ok {
+				if hash, ok := m["api_key_hash"].(string); ok && hash != "" {
+					d.tenantAPIKeys[id] = hash
+				}
+			}
+		}
+	}
 }
 
 func (d *Dashboard) handleGetRules(w http.ResponseWriter, r *http.Request) {

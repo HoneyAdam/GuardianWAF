@@ -411,7 +411,10 @@ func TestSetCORSHeaders_NoExposeHeaders(t *testing.T) {
 	}
 }
 
-func TestSetCORSHeaders_ResponseHook(t *testing.T) {
+func TestSetCORSHeaders_CorsHeadersSet(t *testing.T) {
+	// Test that CORS layer correctly stores headers in metadata for applyResponseHook.
+	// The engine reads cors_headers map directly — cors_response_hook boolean was removed
+	// because it was never used (CORS-001 fix).
 	cfg := Config{
 		Enabled:      true,
 		AllowOrigins: []string{"https://example.com"},
@@ -425,8 +428,13 @@ func TestSetCORSHeaders_ResponseHook(t *testing.T) {
 	}
 	layer.Process(ctx)
 
-	if ctx.Metadata["cors_response_hook"] != true {
-		t.Error("expected cors_response_hook to be true")
+	// Verify cors_headers map is set (engine.applyCORSHook reads this directly)
+	headers, ok := ctx.Metadata["cors_headers"].(map[string]string)
+	if !ok {
+		t.Fatal("expected cors_headers map to be set")
+	}
+	if headers["Access-Control-Allow-Origin"] != "https://example.com" {
+		t.Errorf("expected Access-Control-Allow-Origin to be https://example.com, got %s", headers["Access-Control-Allow-Origin"])
 	}
 }
 

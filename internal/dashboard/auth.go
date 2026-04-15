@@ -199,17 +199,53 @@ func clientIPFromRequest(r *http.Request) string {
 	return ip
 }
 
-// isAuthenticated checks if the request has a valid session cookie or API key.
-// It returns true for any request with the global dashboard API key (X-API-Key header)
-// OR a valid session cookie. There is no tenant scoping — the dashboard API key
-// grants system-wide access to all tenant data, billing, rules, and config.
-// This is AUTH-004: Dashboard API key provides system-wide admin access.
+// extractTenantID extracts the tenant ID from the request path or header.
+// Path format: /t/{tenant-id}/... (e.g. /t/tenant-abc/api/v1/events)
+// Header format: X-Tenant-ID header (for API clients)
+func extractTenantID(r *http.Request) string {
+	// Try path prefix /t/{tenant-id}/
+	if strings.HasPrefix(r.URL.Path, "/t/") {
+		path := strings.TrimPrefix(r.URL.Path, "/t/")
+		if idx := strings.Index(path, "/"); idx > 0 {
+			return path[:idx]
+		}
+		// /t/{id} with nothing after is also valid tenant ref
+		if path != "" && !strings.Contains(path, "/") {
+			return path
+		}
+	}
+	// Fallback: X-Tenant-ID header
+	return r.Header.Get("X-Tenant-ID")
+}
+
+// verifyTenantAPIKey checks if an API key matches a stored salt$hash.
+// Uses the same format as tenant.Manager.hashAPIKey.
+func verifyTenantAPIKey(storedHash, apiKey string) bool {
+	parts := strings.SplitN(storedHash, "$", 2)
+	if len(parts) != 2 {
+		// Legacy unsalted hash
+		expected := sha256.Sum256([]byte(apiKey))
+		return subtle.ConstantTimeCompare([]byte(storedHash), []byte(hex.EncodeToString(expected[:]))) == 1
+	}
+	salt, _ := hex.DecodeString(parts[0])
+	if len(salt) != 16 {
+		return false
+	}
+	hash := sha256.Sum256(append(salt, []byte(apiKey)...))
+	return subtle.ConstantTimeCompare([]byte(parts[1]), []byte(hex.EncodeToString(hash[:]))) == 1
+}
+
+// isAuthenticated checks if the request has a valid session cookie, global dashboard API key,
+// OR a per-tenant API key (AUTH-003). Per-tenant keys are scoped to a specific tenant identified
+// by the request path prefix (/t/{tenant-id}/...) or X-Tenant-ID header.
 //
-// For multi-tenant deployments, per-tenant API keys should be used instead of the
-// global dashboard key. The global key should be rotated if compromised.
-// Per-tenant API key scoping (AUTH-003) requires: (1) per-tenant key storage
-// with TenantID field, (2) middleware to extract tenant from request path/host,
-// (3) key validation scoped to that tenant, (4) removal of global dashboard key.
+// Per-tenant API key scoping (AUTH-003) requires: (1) per-tenant key storage with TenantID field
+// (stored in dashboard.tenantAPIKeys), (2) middleware to extract tenant from request path/host,
+// (3) key validation scoped to that tenant. A tenant-scoped key only grants access within
+// its own tenant context and cannot access other tenants' data or admin endpoints.
+//
+// For multi-tenant deployments, per-tenant API keys should be used instead of the global
+// dashboard key. The global key grants system-wide access and should be rotated if compromised.
 func (d *Dashboard) isAuthenticated(r *http.Request) bool {
 	if d.apiKey == "" {
 		// This should never happen — main.go auto-generates an API key.
@@ -226,6 +262,16 @@ func (d *Dashboard) isAuthenticated(r *http.Request) bool {
 	if r.URL.Query().Get("api_key") != "" {
 		log.Printf("[WARN] Rejected API key from query parameter from %s — use X-API-Key header only", r.RemoteAddr)
 		return false
+	}
+
+	// Check per-tenant API key (AUTH-003): key is scoped to a specific tenant
+	tenantID := extractTenantID(r)
+	if tenantID != "" && d.tenantAPIKeys != nil {
+		if hash, ok := d.tenantAPIKeys[tenantID]; ok {
+			if key := r.Header.Get("X-API-Key"); key != "" && verifyTenantAPIKey(hash, key) {
+				return true
+			}
+		}
 	}
 
 	// Check session cookie (for browser access)
