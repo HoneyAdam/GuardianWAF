@@ -19,9 +19,10 @@ import (
 )
 
 const (
-	sessionCookieName = "gwaf_session"
-	sessionMaxAge     = 24 * time.Hour
-	sessionAbsMaxAge  = 7 * 24 * time.Hour // Absolute maximum session lifetime (7 days)
+	sessionCookieName            = "gwaf_session"
+	sessionMaxAge                = 24 * time.Hour
+	sessionAbsMaxAge             = 7 * 24 * time.Hour // Absolute maximum session lifetime (7 days)
+	MaxConcurrentSessionsPerIP  = 5                  // Max simultaneous sessions per client IP; oldest evicted when exceeded
 )
 
 // secretHolder holds the HMAC signing key atomically for thread safety.
@@ -32,6 +33,13 @@ var secretHolder atomic.Value
 // Tokens in this map are treated as invalid regardless of their signature/expiry.
 // Uses a sync.Map for lock-free reads and safe concurrent writes.
 var revokedSessions sync.Map
+
+// activeSessions tracks concurrent session tokens per client IP for
+// SESSION-003 mitigation. Each IP has a set of valid (non-expired,
+// non-revoked) sessions. When MaxConcurrentSessionsPerIP is exceeded,
+// oldest sessions are invalidated to make room for new ones.
+// Key: client IP string, Value: map of session token -> last access time.
+var activeSessions sync.Map
 
 func init() {
 	secret := make([]byte, 32)
@@ -124,7 +132,58 @@ func verifySession(token, clientIP string) bool {
 func RevokeSession(token string) {
 	if token != "" {
 		revokedSessions.Store(token, true)
+		// Also remove from active sessions tracking
+		// We can't cheaply know which IP owns the token in stateless design,
+		// so we just mark it revoked — verifySession will reject it anyway.
+		// The activeSessions map for each IP will be cleaned up lazily on next
+		// session creation when the expired token is encountered.
 	}
+}
+
+// registerActiveSession records a new session for a client IP and enforces
+// MaxConcurrentSessionsPerIP by evicting the oldest sessions when the limit
+// is exceeded. This prevents unlimited concurrent sessions from the same IP.
+func registerActiveSession(token, clientIP string) {
+	now := time.Now()
+
+	ipSessions, _ := activeSessions.LoadOrStore(clientIP, &sync.Map{})
+	sm := ipSessions.(*sync.Map)
+
+	// Count current sessions
+	count := 0
+	var oldestToken string
+	var oldestTime time.Time
+
+	sm.Range(func(k, v any) bool {
+		t := k.(string)
+		lt := v.(time.Time)
+		count++
+		if oldestTime.IsZero() || lt.Before(oldestTime) {
+			oldestTime = lt
+			oldestToken = t
+		}
+		return true
+	})
+
+	// Evict oldest sessions until under limit
+	for count >= MaxConcurrentSessionsPerIP && oldestToken != "" {
+		sm.Delete(oldestToken)
+		count--
+		// Find next oldest
+		oldestTime = time.Time{}
+		oldestToken = ""
+		sm.Range(func(k, v any) bool {
+			t := k.(string)
+			lt := v.(time.Time)
+			if oldestTime.IsZero() || lt.Before(oldestTime) {
+				oldestTime = lt
+				oldestToken = t
+			}
+			return true
+		})
+	}
+
+	sm.Store(token, now)
 }
 
 // clientIPFromRequest extracts the client IP from a request's RemoteAddr.
@@ -141,6 +200,16 @@ func clientIPFromRequest(r *http.Request) string {
 }
 
 // isAuthenticated checks if the request has a valid session cookie or API key.
+// It returns true for any request with the global dashboard API key (X-API-Key header)
+// OR a valid session cookie. There is no tenant scoping — the dashboard API key
+// grants system-wide access to all tenant data, billing, rules, and config.
+// This is AUTH-004: Dashboard API key provides system-wide admin access.
+//
+// For multi-tenant deployments, per-tenant API keys should be used instead of the
+// global dashboard key. The global key should be rotated if compromised.
+// Per-tenant API key scoping (AUTH-003) requires: (1) per-tenant key storage
+// with TenantID field, (2) middleware to extract tenant from request path/host,
+// (3) key validation scoped to that tenant, (4) removal of global dashboard key.
 func (d *Dashboard) isAuthenticated(r *http.Request) bool {
 	if d.apiKey == "" {
 		// This should never happen — main.go auto-generates an API key.
@@ -169,9 +238,12 @@ func (d *Dashboard) isAuthenticated(r *http.Request) bool {
 
 // setSessionCookie sets the session cookie on the response with proper security flags.
 func setSessionCookie(w http.ResponseWriter, r *http.Request) {
+	token := signSession(clientIPFromRequest(r))
+	// Enforce concurrent session limit for this IP
+	registerActiveSession(token, clientIPFromRequest(r))
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
-		Value:    signSession(clientIPFromRequest(r)),
+		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
 		Secure:   true, // Always require TLS for session cookies

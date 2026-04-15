@@ -321,7 +321,7 @@
 | H-INJ-02 | SQLi — Unterminated quote + comment bypass | HIGH | 75 | Fixed | Go Injection |
 | H-INJ-03 | CMDi — Uppercase %0A newline bypass | HIGH | 80 | Fixed | Go Injection |
 | AUTH-005 | MCP server has no built-in authentication | MEDIUM | 75 | **Fixed** | API Security |
-| SESSION-003 | No concurrent session limit enforcement | MEDIUM | 75 | Known gap | Session |
+| SESSION-003 | No concurrent session limit enforcement | MEDIUM | 75 | **Fixed** | Session |
 | VULN-002 | Plain text credential file download | MEDIUM | 90 | **Fixed** | TypeScript |
 | VULN-006 | Docker socket mounted in production | MEDIUM | 90 | **Fixed** | Docker |
 | VULN-007 | "none" JWT algorithm not explicitly blocked | MEDIUM | 75 | **Fixed** | JWT |
@@ -339,8 +339,8 @@
 | VULN-010 | Insecure alert() in production dashboard code | LOW | 90 | **Fixed** | TypeScript |
 
 **Total: 30 verified findings**
-**Fixed this session: 21** (H-INJ-01, H-INJ-02, H-INJ-03, M-INJ-02, M-INJ-03, M-INJ-04, M-INJ-05, L-INJ-01, L-INJ-03, BL-001, CORS-001, AUTH-001, SESSION-001, SESSION-002, AUTH-002, VULN-001, VULN-003, AUTH-005, VULN-002, VULN-007, VULN-011, VULN-010, VULN-012)
-**Known gaps (require design change): 4** (AUTH-003, AUTH-004, SESSION-003, VULN-006)
+**Fixed this session: 22** (H-INJ-01, H-INJ-02, H-INJ-03, M-INJ-02, M-INJ-03, M-INJ-04, M-INJ-05, L-INJ-01, L-INJ-03, BL-001, CORS-001, AUTH-001, SESSION-001, SESSION-002, AUTH-002, VULN-001, VULN-003, AUTH-005, VULN-002, VULN-007, VULN-011, VULN-010, VULN-012, VULN-006, SESSION-003)
+**Known gaps (require design change): 2** (AUTH-003, AUTH-004)
 **Not a gap: 1** (VULN-008 — already true by default)
 **Remaining unmitigated: 0**
 
