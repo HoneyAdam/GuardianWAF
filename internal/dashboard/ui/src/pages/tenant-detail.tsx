@@ -303,7 +303,7 @@ export default function TenantDetailPage() {
             </div>
             <p className="text-sm text-yellow-800 dark:text-yellow-200">
               <AlertTriangle className="w-4 h-4 inline mr-1" />
-              This key will not be shown again. Copy it now or download the credentials file.
+              This key will not be shown again. Copy it now and store it in your password manager.
             </p>
           </CardContent>
         </Card>

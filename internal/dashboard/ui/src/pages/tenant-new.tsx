@@ -672,22 +672,15 @@ Support: support@guardianwaf.com
               </CardContent>
             </Card>
 
-            <div className="space-y-3">
-              <Button onClick={downloadCredentials} variant="outline" className="w-full">
-                <Download className="w-4 h-4 mr-2" />
-                Download Credentials
-              </Button>
-
-              <div className="p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-sm">
+            <div className="p-4 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg text-sm">
                 <h4 className="font-semibold mb-2">Next Steps:</h4>
                 <ol className="list-decimal list-inside space-y-1 ml-2">
-                  <li>Save the API key in your password manager</li>
+                  <li>Copy and save the API key in your password manager</li>
                   <li>Share credentials with your customer securely</li>
                   <li>Configure DNS to point to this WAF instance</li>
                   <li>Customer can start using the API immediately</li>
                 </ol>
               </div>
-            </div>
           </div>
         )
     }
