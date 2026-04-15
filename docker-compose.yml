@@ -1,5 +1,6 @@
-# GuardianWAF Docker Compose - Production Ready
-# Usage: docker compose up -d
+# GuardianWAF Docker Compose - Development Mode
+# For production, use docker-compose.prod.yml with TLS-based Docker client.
+# DO NOT use socket mount in production — it is a privilege escalation vector.
 
 services:
   guardianwaf:
@@ -11,7 +12,8 @@ services:
     volumes:
       - ./guardianwaf.yaml:/etc/guardianwaf/guardianwaf.yaml:ro
       - guardianwaf-data:/var/lib/guardianwaf
-      - /var/run/docker.sock:/var/run/docker.sock:ro  # DEV ONLY — privilege escalation risk; use docker-compose.prod.yml with TLS client for production
+      # Socket mount is removed — use docker-compose.prod.yml for production
+      # which uses TLS-based Docker client (NewTLSClient in docker/client.go)
     environment:
       - GWAF_MODE=enforce
       - GWAF_LOGGING_LEVEL=info
