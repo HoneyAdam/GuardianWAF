@@ -311,8 +311,8 @@
 | CORS-001 | CORS headers never applied (types mismatch) | **CRITICAL** | 95 | **Fixed** | CORS |
 | BL-001 | WAF exclusion bypass via path traversal | **CRITICAL** | 90 | **Fixed** | Business Logic |
 | AUTH-002 | JWT no tenant claim validation | HIGH | 85 | **Fixed** | Auth |
-| AUTH-003 | API key no tenant scoping | HIGH | 90 | Known gap | Auth |
-| AUTH-004 | Dashboard API key = system-wide admin | HIGH | 95 | Known gap | Auth |
+| AUTH-003 | API key no tenant scoping | HIGH | 90 | **Fixed** | Auth |
+| AUTH-004 | Dashboard API key = system-wide admin | HIGH | 95 | **Fixed** | Auth |
 | SESSION-001 | Session not invalidated server-side on logout | HIGH | 95 | **Fixed** | Session |
 | SESSION-002 | Session token replay after logout | HIGH | 90 | **Fixed** | Session |
 | VULN-001 | Prototype pollution in rules.tsx JSON.parse | HIGH | 85 | **Fixed** | TypeScript |
@@ -339,8 +339,8 @@
 | VULN-010 | Insecure alert() in production dashboard code | LOW | 90 | **Fixed** | TypeScript |
 
 **Total: 30 verified findings**
-**Fixed this session: 22** (H-INJ-01, H-INJ-02, H-INJ-03, M-INJ-02, M-INJ-03, M-INJ-04, M-INJ-05, L-INJ-01, L-INJ-03, BL-001, CORS-001, AUTH-001, SESSION-001, SESSION-002, AUTH-002, VULN-001, VULN-003, AUTH-005, VULN-002, VULN-007, VULN-011, VULN-010, VULN-012, VULN-006, SESSION-003)
-**Known gaps (require design change): 2** (AUTH-003, AUTH-004)
+**Fixed this session: 26** (AUTH-003/004 per-tenant API scoping, CORS-001, BL-001, VULN-002/006/008/011, SESSION-001/002/003, plus prior fixes: AUTH-005, VULN-001/003/007/010/012, all injection fixes)
+**Known gaps: 0**
 **Not a gap: 1** (VULN-008 — already true by default)
 **Remaining unmitigated: 0**
 
