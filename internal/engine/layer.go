@@ -74,7 +74,8 @@ const (
 	OrderCRS         = 350 // OWASP CRS after sanitization
 	OrderDetection   = 400
 	OrderVirtualPatch = 450 // Virtual patches after detection
-	OrderDLP         = 475 // DLP before bot detection
+	OrderAnomaly      = 473 // ML anomaly detection (ONNX) before DLP
+	OrderDLP          = 475 // DLP before bot detection
 	OrderBotDetect   = 500
 	OrderClientSide  = 590 // Client-side protection before response
 	OrderReplay      = 145

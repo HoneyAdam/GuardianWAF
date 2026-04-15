@@ -59,6 +59,7 @@ import (
 	"github.com/guardianwaf/guardianwaf/internal/layers/canary"
 	"github.com/guardianwaf/guardianwaf/internal/layers/replay"
 	"github.com/guardianwaf/guardianwaf/internal/cluster"
+	"github.com/guardianwaf/guardianwaf/internal/ml/anomaly"
 	"github.com/guardianwaf/guardianwaf/internal/mcp"
 	"github.com/guardianwaf/guardianwaf/internal/proxy"
 	"github.com/guardianwaf/guardianwaf/internal/tenant"
@@ -2575,7 +2576,21 @@ func addLayers(eng *engine.Engine, cfg *config.Config) {
 		eng.Logs.Info("Virtual patch layer enabled")
 	}
 
-	// 4.75. DLP Layer (Order 475) - Data Loss Prevention
+	// 4.75. ML Anomaly Detection layer (Order 473) — ONNX-based Isolation Forest
+	if cfg.WAF.MLAnomaly.Enabled {
+		anomalyLayer, err := anomaly.New(anomaly.Config{
+			Enabled:   cfg.WAF.MLAnomaly.Enabled,
+			Threshold: cfg.WAF.MLAnomaly.Threshold,
+		})
+		if err != nil {
+			slog.Warn("failed to create ML anomaly layer", "error", err)
+		} else {
+			eng.AddLayer(engine.OrderedLayer{Layer: anomalyLayer, Order: engine.OrderAnomaly})
+			eng.Logs.Infof("ML anomaly layer enabled (threshold: %.2f)", cfg.WAF.MLAnomaly.Threshold)
+		}
+	}
+
+	// 4.8. DLP Layer (Order 475) - Data Loss Prevention
 	if cfg.WAF.DLP.Enabled {
 		dlpLayer := dlp.NewLayer(&dlp.Config{
 			Enabled:      cfg.WAF.DLP.Enabled,

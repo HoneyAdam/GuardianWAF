@@ -13,7 +13,7 @@ import (
 )
 
 // Layer is the WAF anomaly detection layer.
-// Layer order: 475 (between API Security and Sanitizer)
+// Layer order: 473 (between VirtualPatch and DLP)
 type Layer struct {
 	mu sync.RWMutex
 
