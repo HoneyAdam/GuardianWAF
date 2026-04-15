@@ -59,6 +59,7 @@ import (
 	"github.com/guardianwaf/guardianwaf/internal/layers/canary"
 	"github.com/guardianwaf/guardianwaf/internal/layers/replay"
 	"github.com/guardianwaf/guardianwaf/internal/cluster"
+	"github.com/guardianwaf/guardianwaf/internal/discovery"
 	"github.com/guardianwaf/guardianwaf/internal/ml/anomaly"
 	"github.com/guardianwaf/guardianwaf/internal/mcp"
 	"github.com/guardianwaf/guardianwaf/internal/proxy"
@@ -2519,6 +2520,26 @@ func addLayers(eng *engine.Engine, cfg *config.Config) {
 			StripHopByHop:  cfg.WAF.Sanitizer.StripHopByHop,
 		})
 		eng.AddLayer(engine.OrderedLayer{Layer: sanLayer, Order: engine.OrderSanitizer})
+	}
+
+	// 3.2. API Discovery layer (Order 310) — passive OpenAPI generation
+	if cfg.WAF.APIDiscovery.Enabled {
+		discLayer, err := discovery.NewLayer(&discovery.EngineConfig{
+			CaptureMode:       "passive",
+			RingBufferSize:     10000,
+			MinSamples:         10,
+			ClusterThreshold:   0.8,
+			ExportPath:         "data/api-discovery",
+			ExportFormat:      "openapi",
+			AutoExport:        cfg.WAF.APIDiscovery.AutoExport,
+			ExportInterval:    5 * time.Minute,
+		})
+		if err != nil {
+			slog.Warn("failed to create API discovery layer", "error", err)
+		} else {
+			eng.AddLayer(engine.OrderedLayer{Layer: discLayer, Order: engine.OrderDiscovery})
+			eng.Logs.Info("API discovery layer enabled")
+		}
 	}
 
 	// 3.5. CRS Layer (Order 350) - OWASP Core Rule Set

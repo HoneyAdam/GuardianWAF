@@ -71,6 +71,7 @@ const (
 	OrderAPISecurity = 275
 	OrderAPIValidation = 280
 	OrderSanitizer   = 300
+	OrderDiscovery   = 310 // Passive API discovery (OpenAPI generation)
 	OrderCRS         = 350 // OWASP CRS after sanitization
 	OrderDetection   = 400
 	OrderVirtualPatch = 450 // Virtual patches after detection
