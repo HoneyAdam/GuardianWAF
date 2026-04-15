@@ -9,6 +9,7 @@ import (
 	"context"
 	cryptoRand "crypto/rand"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -2685,6 +2686,15 @@ func startDashboard(cfg *config.Config, eng *engine.Engine) (*http.Server, *dash
 	}
 
 	dash := dashboard.New(eng, eventStore, cfg.Dashboard.APIKey)
+	if cfg.Dashboard.AdminKey != "" {
+		dash.SetAdminKey(cfg.Dashboard.AdminKey)
+	} else {
+		keyBytes := make([]byte, 32)
+		if _, err := rand.Read(keyBytes); err == nil {
+			dash.SetAdminKey(hex.EncodeToString(keyBytes))
+			fmt.Printf("Dashboard admin key not set — generated: %s\n", hex.EncodeToString(keyBytes))
+		}
+	}
 
 	srv := &http.Server{
 		Addr:         cfg.Dashboard.Listen,

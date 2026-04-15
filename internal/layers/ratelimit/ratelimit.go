@@ -131,6 +131,7 @@ func (l *Layer) Process(ctx *engine.RequestContext) engine.LayerResult {
 	blocked := false
 
 	l.mu.RLock()
+	tenantID := ctx.TenantID
 	rules := make([]Rule, len(l.config.Rules))
 	copy(rules, l.config.Rules)
 	l.mu.RUnlock()
@@ -142,7 +143,7 @@ func (l *Layer) Process(ctx *engine.RequestContext) engine.LayerResult {
 			continue
 		}
 
-		key := l.bucketKey(rule, ip, reqPath)
+		key := l.bucketKey(rule, tenantID, ip, reqPath)
 		bucket := l.getOrCreateBucket(key, rule)
 		if bucket == nil {
 			continue // bucket limit reached, skip this rule
@@ -167,7 +168,7 @@ func (l *Layer) Process(ctx *engine.RequestContext) engine.LayerResult {
 
 			// Track violations for auto-ban
 			if rule.AutoBanAfter > 0 {
-				l.trackViolation(ip, rule)
+				l.trackViolation(tenantID, ip, rule)
 			}
 		}
 	}
@@ -186,8 +187,9 @@ func (l *Layer) Process(ctx *engine.RequestContext) engine.LayerResult {
 	}
 }
 
-// bucketKey generates a unique key for the token bucket based on rule scope.
-func (l *Layer) bucketKey(rule *Rule, ip, reqPath string) string {
+// bucketKey generates a unique key for the token bucket based on rule scope and tenant.
+// Includes tenant ID in the key to provide per-tenant rate limit isolation.
+func (l *Layer) bucketKey(rule *Rule, tenantID, ip, reqPath string) string {
 	// Normalize IP: convert IPv4-mapped IPv6 addresses (e.g. ::ffff:192.168.1.1)
 	// to their IPv4 representation to prevent dual-stack bypass.
 	normalizedIP := ip
@@ -199,9 +201,9 @@ func (l *Layer) bucketKey(rule *Rule, ip, reqPath string) string {
 	case "ip+path":
 		// Normalize path: strip query strings and resolve ".." sequences
 		normalized := path.Clean(reqPath)
-		return rule.ID + ":" + normalizedIP + ":" + normalized
+		return rule.ID + ":" + tenantID + ":" + normalizedIP + ":" + normalized
 	default: // "ip" or anything else
-		return rule.ID + ":" + normalizedIP
+		return rule.ID + ":" + tenantID + ":" + normalizedIP
 	}
 }
 
@@ -269,10 +271,10 @@ func matchPath(pattern, p string) bool {
 	return matched
 }
 
-// trackViolation increments the violation counter for an IP and triggers
-// auto-ban callback if threshold is exceeded.
-func (l *Layer) trackViolation(ip string, rule *Rule) {
-	key := "violation:" + rule.ID + ":" + ip
+// trackViolation increments the violation counter for a tenant+IP combination
+// and triggers auto-ban callback if threshold is exceeded.
+func (l *Layer) trackViolation(tenantID, ip string, rule *Rule) {
+	key := "violation:" + rule.ID + ":" + tenantID + ":" + ip
 
 	// Pre-check to avoid allocating on every call
 	actual, loaded := l.violations.Load(key)
@@ -304,13 +306,13 @@ func (l *Layer) CleanupExpired(staleDuration time.Duration) {
 	})
 
 	// Also clean up violation counters for IPs whose buckets were evicted.
-	// A violation key has the form "violation:<ruleID>:<ip>", and the corresponding
-	// bucket key is "<ruleID>:<ip>". If the bucket is gone, the violation counter is stale.
+	// A violation key has the form "violation:<ruleID>:<tenantID>:<ip>", and the corresponding
+	// bucket key is "<ruleID>:<tenantID>:<ip>". If the bucket is gone, the violation counter is stale.
 	l.violations.Range(func(key, _ any) bool {
 		k := key.(string)
 		// Strip "violation:" prefix to get the bucket key
 		if len(k) > 10 && k[:10] == "violation:" {
-			bucketKey := k[10:]
+			bucketKey := k[10:] // "violation:" + rest
 			if _, exists := l.buckets.Load(bucketKey); !exists {
 				l.violations.Delete(key)
 			}

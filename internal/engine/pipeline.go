@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"path"
 	"slices"
 	"sort"
 	"strings"
@@ -86,12 +87,12 @@ func (p *Pipeline) Execute(ctx *RequestContext) (result PipelineResult) {
 		layer := ol.Layer
 
 		// Check if this layer should be skipped due to exclusions
-		// Use normalized path when available for exclusion matching (prevents
-		// evasion via path traversal like /api/webhook/../../etc/passwd).
-		// Falls back to raw path for layers that run before the sanitizer.
+		// Always use a cleaned path to prevent bypass via traversal sequences
+		// like /api/webhook/../../admin. When NormalizedPath is available (after
+		// sanitizer, Order 300+), use it directly. Otherwise clean the raw path.
 		skipPath := ctx.NormalizedPath
 		if skipPath == "" {
-			skipPath = ctx.Path
+			skipPath = path.Clean(ctx.Path)
 		}
 		if shouldSkip(layer, skipPath, exclusions) {
 			continue

@@ -78,6 +78,9 @@ export const api = {
   // GeoIP
   geoipLookup: (ip: string) =>
     request<GeoIPResult>('/api/v1/geoip/lookup?ip=' + encodeURIComponent(ip)),
+  // POST keeps IP out of access logs — prefer this over GET when possible
+  geoipLookupPost: (ip: string) =>
+    request<GeoIPResult>('/api/v1/geoip/lookup', { method: 'POST', body: JSON.stringify({ ip }), headers: { 'Content-Type': 'application/json' } }),
 
   // Alerting
   getAlertingStatus: () => request<AlertingStatusResponse>('/api/v1/alerting/status'),

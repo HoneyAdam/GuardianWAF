@@ -73,6 +73,7 @@ type Dashboard struct {
 	sse             *SSEBroadcaster
 	mux             *http.ServeMux
 	apiKey          string
+	adminKey        string // Separate key for system admin operations (tenant management, billing, stats)
 	upstreamsFn     func() any   // returns upstream status (injected to avoid circular imports)
 	rebuildFn       func() error // rebuilds proxy after config change
 	saveFn          func() error // persists current config to disk
@@ -98,6 +99,27 @@ const (
 	loginWindow      = 5 * time.Minute  // window for counting attempts
 	loginLockout     = 15 * time.Minute // lockout duration after max attempts
 )
+
+// SetAdminKey sets the system administrator API key.
+// This key grants exclusive access to /api/admin/* endpoints for cross-tenant
+// management (tenant CRUD, billing, system-wide stats). It is separate from
+// the per-tenant API key which only authenticates within a single tenant context.
+// If not set, admin endpoints are inaccessible.
+func (d *Dashboard) SetAdminKey(key string) {
+	d.adminKey = key
+}
+
+// isAdminAuthenticated checks if the request has the system admin API key.
+func (d *Dashboard) isAdminAuthenticated(r *http.Request) bool {
+	if d.adminKey == "" {
+		// Admin key not configured — reject all admin requests
+		return false
+	}
+	if key := r.Header.Get("X-API-Key"); key != "" {
+		return subtle.ConstantTimeCompare([]byte(key), []byte(d.adminKey)) == 1
+	}
+	return false
+}
 
 type loginBucket struct {
 	mu       sync.Mutex
@@ -153,6 +175,8 @@ func New(eng *engine.Engine, store events.EventStore, apiKey string) *Dashboard 
 	d.mux.HandleFunc("PUT /api/v1/rules/{id}", d.authWrap(d.handleUpdateRule))
 	d.mux.HandleFunc("DELETE /api/v1/rules/{id}", d.authWrap(d.handleDeleteRule))
 	d.mux.HandleFunc("GET /api/v1/geoip/lookup", d.authWrap(d.handleGeoIPLookup))
+	// POST for privacy — IP in request body keeps it out of access logs
+	d.mux.HandleFunc("POST /api/v1/geoip/lookup", d.authWrap(d.handleGeoIPLookupPost))
 	d.mux.HandleFunc("GET /api/v1/logs", d.authWrap(d.handleGetLogs))
 	d.mux.HandleFunc("GET /api/v1/sse", d.authWrap(d.handleSSE))
 
@@ -394,6 +418,10 @@ func (d *Dashboard) handleLogout(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "forbidden", http.StatusForbidden)
 			return
 		}
+	}
+	// Revoke session server-side immediately
+	if cookie, err := r.Cookie(sessionCookieName); err == nil && cookie.Value != "" {
+		RevokeSession(cookie.Value)
 	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     sessionCookieName,
@@ -1657,6 +1685,35 @@ func (d *Dashboard) handleGeoIPLookup(w http.ResponseWriter, r *http.Request) {
 	}
 	code, name := d.geoLookupFn(ip)
 	writeJSON(w, http.StatusOK, map[string]any{"ip": ip, "country": code, "name": name})
+}
+
+// handleGeoIPLookupPost performs the same lookup as GET but accepts IP in request
+// body to keep client IPs out of server-side access logs.
+func (d *Dashboard) handleGeoIPLookupPost(w http.ResponseWriter, r *http.Request) {
+	if r.Header.Get("Content-Type") != "application/json" {
+		writeJSON(w, http.StatusUnsupportedMediaType, map[string]any{"error": "Content-Type: application/json required"})
+		return
+	}
+	var req struct {
+		IP string `json:"ip"`
+	}
+	if !limitedDecodeJSON(w, r, &req) {
+		return
+	}
+	if req.IP == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "ip field required"})
+		return
+	}
+	if net.ParseIP(req.IP) == nil {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "invalid ip address"})
+		return
+	}
+	if d.geoLookupFn == nil {
+		writeJSON(w, http.StatusOK, map[string]any{"ip": req.IP, "country": "", "name": "GeoIP not configured"})
+		return
+	}
+	code, name := d.geoLookupFn(req.IP)
+	writeJSON(w, http.StatusOK, map[string]any{"ip": req.IP, "country": code, "name": name})
 }
 
 // --- Logs ---

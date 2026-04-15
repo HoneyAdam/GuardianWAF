@@ -1459,10 +1459,11 @@ type TenantDefinition struct {
 
 // DashboardConfig controls the built-in web dashboard.
 type DashboardConfig struct {
-	Enabled bool   `yaml:"enabled"`
-	Listen  string `yaml:"listen"`
-	APIKey  string `yaml:"api_key"`
-	TLS     bool   `yaml:"tls"`
+	Enabled  bool   `yaml:"enabled"`
+	Listen   string `yaml:"listen"`
+	APIKey   string `yaml:"api_key"`
+	AdminKey string `yaml:"admin_key"` // System admin key for cross-tenant management
+	TLS      bool   `yaml:"tls"`
 }
 
 // MCPConfig controls the Model Context Protocol server.

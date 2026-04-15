@@ -179,7 +179,7 @@ export default function RulesPage() {
 
   const geo = async () => {
     if (!geoIP.trim()) return
-    try { setGeoResult(await api.geoipLookup(geoIP.trim())) }
+    try { setGeoResult(await api.geoipLookupPost(geoIP.trim())) }
     catch (e) { flash((e as Error).message, true) }
   }
 
@@ -386,7 +386,23 @@ function RuleEditorModal({ editing, isNew, setEditing, save, onClose }: {
                     onChange={e => {
                       const cs=[...editing.conditions]
                       let v: unknown = e.target.value
-                      if (c.op === 'in' || c.op === 'not_in') { try { v = JSON.parse(e.target.value) } catch { /* keep as string */ } }
+                      if (c.op === 'in' || c.op === 'not_in') {
+                        try { v = JSON.parse(e.target.value) } catch { /* keep as string */ }
+                        // Reject prototype-polluting payloads: __proto__, constructor, prototype
+                        if (v && typeof v === 'object') {
+                          const val = v as Record<string, unknown>
+                          if ('__proto__' in val || 'constructor' in val || 'prototype' in val) {
+                            // Drop dangerous keys — prevents Object.prototype pollution
+                            const clean: Record<string, unknown> = {}
+                            for (const k of Object.keys(val)) {
+                              if (k !== '__proto__' && k !== 'constructor' && k !== 'prototype') {
+                                clean[k] = val[k]
+                              }
+                            }
+                            v = clean
+                          }
+                        }
+                      }
                       cs[i] = {...cs[i], value: v}
                       setEditing({...editing, conditions: cs})
                     }}

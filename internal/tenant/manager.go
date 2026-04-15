@@ -358,7 +358,9 @@ func (m *Manager) ResolveTenant(r *http.Request) *Tenant {
 	return m.tenants[m.defaultTenantID]
 }
 
-// UpdateTenant updates a tenant's configuration.
+// UpdateTenant updates a tenant's configuration atomically.
+// All updates (config, domains) are performed under a single m.mu lock
+// to prevent race conditions between related fields.
 func (m *Manager) UpdateTenant(id string, updates *TenantUpdate) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -381,12 +383,13 @@ func (m *Manager) UpdateTenant(id string, updates *TenantUpdate) error {
 		tenant.Quota = *updates.Quota
 	}
 	if updates.Config != nil {
+		// Config update uses its own lock for fine-grained concurrency
 		tenant.mu.Lock()
 		tenant.Config = updates.Config
 		tenant.mu.Unlock()
 	}
 
-	// Update domains
+	// Update domains — this is part of the same atomic operation under m.mu
 	if len(updates.Domains) > 0 {
 		// Remove old domain mappings
 		for _, oldDomain := range tenant.Domains {

@@ -22,7 +22,6 @@ import {
   CheckCircle,
   X,
   History,
-  Download,
   Eye,
   EyeOff
 } from 'lucide-react'
@@ -225,34 +224,9 @@ export default function TenantDetailPage() {
     toast({ title: 'Copied', description: 'API key copied to clipboard' })
   }
 
-  const downloadCredentials = () => {
-    if (!tenant || !newApiKey) return
-
-    const content = `GuardianWAF API Credentials
-============================
-
-Tenant ID: ${tenant.id}
-Tenant Name: ${tenant.name}
-Generated: ${new Date().toISOString()}
-
-API Key: ${newApiKey}
-
-IMPORTANT:
-- Store this API key securely
-- It will not be displayed again
-- Use it in the X-API-Key header
-
-API Base URL: /api/v1
-Documentation: https://docs.guardianwaf.com
-`
-    const blob = new Blob([content], { type: 'text/plain' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `api-credentials-${tenant.id}.txt`
-    a.click()
-    URL.revokeObjectURL(url)
-  }
+  // Removed downloadCredentials — storing raw API keys in plaintext files is a
+  // security risk. Keys are shown exactly once on generation; use clipboard copy
+  // or display the key shown on screen for manual recording.
 
   const getDaysUntilExpiration = (createdAt: string, intervalDays: number) => {
     const created = new Date(createdAt)
@@ -321,10 +295,6 @@ Documentation: https://docs.guardianwaf.com
               <Button onClick={() => copyApiKey(newApiKey)}>
                 <Copy className="w-4 h-4 mr-2" />
                 Copy Key
-              </Button>
-              <Button variant="outline" onClick={downloadCredentials}>
-                <Download className="w-4 h-4 mr-2" />
-                Download Credentials
               </Button>
               <Button variant="ghost" onClick={() => setNewApiKey(null)}>
                 <X className="w-4 h-4 mr-2" />

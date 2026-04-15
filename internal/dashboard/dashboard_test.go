@@ -506,6 +506,36 @@ func TestGeoIPLookup_WithFn(t *testing.T) {
 	}
 }
 
+func TestGeoIPLookupPost_NoIP(t *testing.T) {
+	d := newTestDashboard(t, "k")
+	w := httptest.NewRecorder()
+	req := authenticatedRequest("POST", "/api/v1/geoip/lookup", `{"ip":""}`, "k")
+	d.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestGeoIPLookupPost_WithIP(t *testing.T) {
+	d := newTestDashboard(t, "k")
+	d.SetRulesFns(nil, nil, nil, nil, nil, func(ip string) (string, string) {
+		return "US", "United States"
+	})
+	w := httptest.NewRecorder()
+	req := authenticatedRequest("POST", "/api/v1/geoip/lookup", `{"ip":"8.8.8.8"}`, "k")
+	d.Handler().ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+	result := decodeJSON(t, w)
+	if result["country"] != "US" {
+		t.Errorf("expected US, got %v", result["country"])
+	}
+	if result["ip"] != "8.8.8.8" {
+		t.Errorf("expected 8.8.8.8, got %v", result["ip"])
+	}
+}
+
 // --- Logs ---
 
 func TestLogsEndpoint(t *testing.T) {

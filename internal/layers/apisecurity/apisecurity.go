@@ -112,6 +112,25 @@ func (l *Layer) Process(ctx *engine.RequestContext) engine.LayerResult {
 			ctx.Metadata["auth_type"] = "jwt"
 			ctx.Metadata["auth_subject"] = claims.Subject
 
+			// Validate tenant binding: reject tokens with tenant_id claim
+			// that does not match the request's tenant context.
+			// This prevents cross-tenant access in multi-tenant deployments.
+			if claims.TenantID != "" && ctx.TenantID != "" && claims.TenantID != ctx.TenantID {
+				return engine.LayerResult{
+					Action: engine.ActionBlock,
+					Findings: []engine.Finding{{
+						DetectorName: "api_security",
+						Category:     "authorization",
+						Severity:     engine.SeverityHigh,
+						Score:        70,
+						Description:  "JWT tenant_id claim does not match request tenant context",
+						Location:     "header:Authorization",
+					}},
+					Score:    70,
+		Duration: time.Since(start),
+				}
+			}
+
 			return engine.LayerResult{Action: engine.ActionPass, Duration: time.Since(start)}
 		}
 	}

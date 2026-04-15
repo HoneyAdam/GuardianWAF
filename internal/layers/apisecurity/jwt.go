@@ -61,6 +61,7 @@ type JWTClaims struct {
 	NotBefore int64  `json:"nbf,omitempty"`
 	IssuedAt  int64  `json:"iat,omitempty"`
 	JWTID     string `json:"jti,omitempty"`
+	TenantID  string `json:"tenant_id,omitempty"` // Multi-tenant isolation claim
 }
 
 // NewJWTValidator creates a new JWT validator.
@@ -211,6 +212,11 @@ func (v *JWTValidator) Validate(tokenString string) (*JWTClaims, error) {
 }
 
 func (v *JWTValidator) isAlgorithmAllowed(alg string) bool {
+	// Explicitly reject "none" algorithm — this is a critical security measure.
+	// A token signed with algorithm "none" has no cryptographic integrity guarantee.
+	if alg == "" || alg == "none" {
+		return false
+	}
 	// Prevent algorithm confusion: if an asymmetric key source is configured
 	// (PEM key, key file, or JWKS URL), do not allow HMAC algorithms.
 	hasAsymmetricSource := v.config.PublicKeyPEM != "" ||

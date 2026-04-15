@@ -9,6 +9,7 @@ import (
 	"context"
 	cryptoRand "crypto/rand"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -2630,6 +2631,17 @@ func startDashboard(cfg *config.Config, eng *engine.Engine) (*http.Server, *dash
 	}
 
 	dash := dashboard.New(eng, eventStore, cfg.Dashboard.APIKey)
+	if cfg.Dashboard.AdminKey != "" {
+		dash.SetAdminKey(cfg.Dashboard.AdminKey)
+	} else {
+		// Generate a random admin key if not configured.
+		// Operators must set admin_key in config for multi-tenant deployments.
+		keyBytes := make([]byte, 32)
+		if _, err := cryptoRand.Read(keyBytes); err == nil {
+			dash.SetAdminKey(hex.EncodeToString(keyBytes))
+			fmt.Printf("Dashboard admin key not set — generated: %s\n", hex.EncodeToString(keyBytes))
+		}
+	}
 
 	srv := &http.Server{
 		Addr:              cfg.Dashboard.Listen,
@@ -2663,6 +2675,9 @@ func startMCPServer(eng *engine.Engine, cfg *config.Config, store events.EventSt
 	mcpSrv.SetServerInfo("guardianwaf", version)
 	mcpSrv.SetEngine(&mcpEngineAdapter{engine: eng, cfg: cfg, eventStore: store, alertMgr: alertMgr})
 	mcpSrv.RegisterAllTools()
+	if cfg.Dashboard.APIKey != "" {
+		mcpSrv.SetAPIKey(cfg.Dashboard.APIKey)
+	}
 
 	if err := mcpSrv.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "MCP server error: %v\n", err)

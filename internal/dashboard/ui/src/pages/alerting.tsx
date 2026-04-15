@@ -6,6 +6,7 @@ import { Input } from '@/components/ui/input'
 import { Switch } from '@/components/ui/switch'
 import { Badge } from '@/components/ui/badge'
 import { api, AlertingStatusResponse, WebhookConfig, EmailConfig } from '@/lib/api'
+import { useToast } from '@/components/ui/toast'
 import { cn } from '@/lib/utils'
 
 export default function AlertingPage() {
@@ -13,6 +14,7 @@ export default function AlertingPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<'webhooks' | 'emails'>('webhooks')
+  const { toast } = useToast()
 
   // New webhook form
   const [newWebhook, setNewWebhook] = useState<Partial<WebhookConfig>>({
@@ -98,7 +100,7 @@ export default function AlertingPage() {
   const testAlert = async (target: string) => {
     try {
       await api.testAlert(target)
-      alert(`Test alert sent to ${target}`)
+      toast({ title: 'Test sent', description: `Test alert sent to ${target}` })
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to send test alert')
     }

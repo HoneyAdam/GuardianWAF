@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -26,6 +27,11 @@ const (
 // secretHolder holds the HMAC signing key atomically for thread safety.
 // Reads and writes are safe for concurrent use.
 var secretHolder atomic.Value
+
+// revokedSessions stores session tokens that have been explicitly revoked.
+// Tokens in this map are treated as invalid regardless of their signature/expiry.
+// Uses a sync.Map for lock-free reads and safe concurrent writes.
+var revokedSessions sync.Map
 
 func init() {
 	secret := make([]byte, 32)
@@ -68,8 +74,16 @@ func signSession(clientIP string) string {
 	return ts + "." + sig
 }
 
-// verifySession checks if a session token is valid, not expired, and bound to the given client IP.
+// verifySession checks if a session token is valid, not expired, not revoked,
+// and bound to the given client IP.
 func verifySession(token, clientIP string) bool {
+	if token == "" {
+		return false
+	}
+	// Check revocation first — revoked tokens fail immediately regardless of signature
+	if _, revoked := revokedSessions.Load(token); revoked {
+		return false
+	}
 	parts := strings.SplitN(token, ".", 3)
 	if len(parts) != 3 {
 		return false
@@ -102,6 +116,15 @@ func verifySession(token, clientIP string) bool {
 		return false
 	}
 	return time.Since(time.Unix(createdUnix, 0)) < sessionAbsMaxAge
+}
+
+// RevokeSession invalidates a session token server-side immediately.
+// The token remains valid client-side but will be rejected by verifySession.
+// This provides immediate session invalidation on logout/compromise.
+func RevokeSession(token string) {
+	if token != "" {
+		revokedSessions.Store(token, true)
+	}
 }
 
 // clientIPFromRequest extracts the client IP from a request's RemoteAddr.

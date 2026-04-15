@@ -21,13 +21,15 @@ func NewTenantAdminHandler(d *Dashboard, manager tenantManagerInterface) *Tenant
 }
 
 // RegisterRoutes registers tenant admin routes.
-// All admin routes use the dashboard's central authentication check
-// (session cookie or API key) to stay consistent with the main authWrap middleware.
+// All admin routes require the system admin API key (X-API-Key header) via
+// isAdminAuthenticated. This is separate from per-tenant API key auth and grants
+// exclusive access to cross-tenant management operations (tenant CRUD, billing,
+// system stats). The admin key is set via Dashboard.SetAdminKey().
 func (h *TenantAdminHandler) RegisterRoutes(mux *http.ServeMux) {
 	auth := func(handler http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
-			if !h.dashboard.isAuthenticated(r) {
-				writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "unauthorized"})
+			if !h.dashboard.isAdminAuthenticated(r) {
+				writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "unauthorized: system admin key required"})
 				return
 			}
 			handler(w, r)

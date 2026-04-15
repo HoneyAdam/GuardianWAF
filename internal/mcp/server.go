@@ -41,6 +41,7 @@ const (
 	ErrCodeMethodNotFound = -32601
 	ErrCodeInvalidParams  = -32602
 	ErrCodeInternal       = -32603
+	ErrCodeUnauthorized   = -32001 // Authentication required
 )
 
 // ToolHandler handles a single MCP tool invocation.
@@ -105,14 +106,45 @@ type EngineInterface interface {
 
 // Server is a JSON-RPC 2.0 MCP server that communicates over stdio.
 type Server struct {
-	mu     sync.Mutex
-	reader *bufio.Reader
-	writer io.Writer
-	tools  map[string]ToolHandler
-	engine EngineInterface
+	mu           sync.Mutex
+	reader       *bufio.Reader
+	writer       io.Writer
+	tools        map[string]ToolHandler
+	engine       EngineInterface
+	apiKey       string
+	authenticated bool // true once client sends valid api_key in initialize
 
 	serverName    string
 	serverVersion string
+}
+
+// SetAPIKey sets the API key required for MCP server authentication.
+// When set, all tool calls must include the key in the initialize request.
+// Empty string disables authentication (default for stdio transport).
+func (s *Server) SetAPIKey(key string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.apiKey = key
+}
+
+func (s *Server) isAuthenticated(key string) bool {
+	if s.apiKey == "" {
+		return true // No auth required when no key is set
+	}
+	return key == s.apiKey
+}
+
+func (s *Server) checkAuth() bool {
+	s.mu.Lock()
+	authenticated := s.authenticated
+	s.mu.Unlock()
+	return authenticated
+}
+
+func (s *Server) markAuthenticated() {
+	s.mu.Lock()
+	s.authenticated = true
+	s.mu.Unlock()
 }
 
 // NewServer creates a new MCP server. Pass nil reader/writer for SSE-only mode.
@@ -208,11 +240,27 @@ func (s *Server) handleRequest(req JSONRPCRequest) {
 }
 
 // handleInitialize responds to the MCP initialize handshake.
+// It also authenticates the client when api_key is provided in params.
 func (s *Server) handleInitialize(req JSONRPCRequest) {
 	s.mu.Lock()
 	name := s.serverName
 	ver := s.serverVersion
 	s.mu.Unlock()
+
+	// Check if authentication is required
+	if s.apiKey != "" && !s.checkAuth() {
+		// Try to authenticate from params
+		var initParams map[string]any
+		if req.Params != nil {
+			_ = json.Unmarshal(req.Params, &initParams)
+		}
+		if apiKey, ok := initParams["api_key"].(string); ok && s.isAuthenticated(apiKey) {
+			s.markAuthenticated()
+		} else {
+			s.sendError(req.ID, ErrCodeUnauthorized, "authentication required: provide api_key in initialize params")
+			return
+		}
+	}
 
 	result := map[string]any{
 		"protocolVersion": "2024-11-05",
@@ -244,6 +292,12 @@ type toolsCallParams struct {
 
 // handleToolsCall dispatches a tools/call request to the registered handler.
 func (s *Server) handleToolsCall(req JSONRPCRequest) {
+	// Reject tool calls if authentication is required but client is not authenticated
+	if s.apiKey != "" && !s.checkAuth() {
+		s.sendError(req.ID, ErrCodeUnauthorized, "authentication required: call initialize first with api_key")
+		return
+	}
+
 	var params toolsCallParams
 	if err := json.Unmarshal(req.Params, &params); err != nil {
 		s.sendError(req.ID, ErrCodeInvalidParams, "Invalid params for tools/call")
