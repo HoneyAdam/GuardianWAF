@@ -86,6 +86,7 @@ Defined in `internal/engine/layer.go`. **24 layers** are registered in the main 
 
 | Order | Layer | Description |
 |-------|-------|-------------|
+| 1 | SIEM | Passive event forwarding to SIEM systems (Splunk, ELK, ArcSight) |
 | 75 | Cluster | HTTP gossip + leader election; distributes IP bans across nodes |
 | 76 | WebSocket | WebSocket handshake validation, connection limits |
 | 78 | gRPC | gRPC request validation, method allowlists |
@@ -100,10 +101,12 @@ Defined in `internal/engine/layer.go`. **24 layers** are registered in the main 
 | 250 | ATO Protection | Brute force, credential stuffing, password spray, impossible travel |
 | 275 | API Security | JWT validation (RS256/ES256/HS256), API key auth |
 | 280 | API Validation | Request/response schema validation (YAML-defined schemas) |
+| 285 | GraphQL | Query depth/complexity/introspection limits |
 | 300 | Sanitizer | Normalize + validate requests |
 | 310 | API Discovery | Passive API endpoint discovery, OpenAPI generation |
 | 350 | CRS | OWASP ModSecurity Core Rule Set parser and executor |
 | 400 | Detection | 6 detectors: sqli, xss, lfi, cmdi, xxe, ssrf (each in own subdirectory) |
+| 430 | JS Challenge | Bot proof-of-work challenge (SHA-256 PoW) |
 | 450 | Virtual Patch | Virtual patching layer |
 | 473 | ML Anomaly | ONNX-based Isolation Forest anomaly detection |
 | 475 | DLP | Data Loss Prevention (credit cards, SSNs, API keys, PII) |
