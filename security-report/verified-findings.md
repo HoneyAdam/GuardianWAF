@@ -323,7 +323,7 @@
 | AUTH-005 | MCP server has no built-in authentication | MEDIUM | 75 | **Fixed** | API Security |
 | SESSION-003 | No concurrent session limit enforcement | MEDIUM | 75 | Known gap | Session |
 | VULN-002 | Plain text credential file download | MEDIUM | 90 | **Fixed** | TypeScript |
-| VULN-006 | Docker socket mounted in production | MEDIUM | 90 | Infrastructure | Docker |
+| VULN-006 | Docker socket mounted in production | MEDIUM | 90 | **Fixed** | Docker |
 | VULN-007 | "none" JWT algorithm not explicitly blocked | MEDIUM | 75 | **Fixed** | JWT |
 | VULN-008 | GraphQL introspection enabled by default | MEDIUM | 80 | Not a gap | API Security |
 | VULN-011 | Tenant manager compound operations not atomic | MEDIUM | 75 | **Fixed** | Go Security |

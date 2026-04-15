@@ -1,0 +1,25 @@
+# GuardianWAF Docker Compose - Production
+# Uses TLS-based Docker client (no socket mount)
+# Usage: docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+
+services:
+  guardianwaf:
+    volumes:
+      - ./guardianwaf.yaml:/etc/guardianwaf/guardianwaf.yaml:ro
+      - guardianwaf-data:/var/lib/guardianwaf
+      # Socket removed — use TLS-based Docker client for production.
+      # Enable via GWAF_DOCKER_TLS=true with certs mounted below.
+      # For development only (unsafe for multi-tenant/multi-user envs):
+      # Uncomment the next line and use docker-compose.dev.yml instead.
+      # - /var/run/docker.sock:/var/run/docker.sock:ro
+    volumes_when_tls_enabled:
+      - docker-cert:/certs/client:ro
+    environment:
+      - GWAF_MODE=enforce
+      - GWAF_LOGGING_LEVEL=info
+      - GWAF_LOGGING_FORMAT=json
+      # Enable TLS-based Docker client (requires docker-cert volume)
+      # GWAF_DOCKER_TLS=true
+      # DOCKER_TLS_CA=/certs/client/ca.pem
+      # DOCKER_TLS_CERT=/certs/client/cert.pem
+      # DOCKER_TLS_KEY=/certs/client/key.pem

@@ -11,7 +11,7 @@ services:
     volumes:
       - ./guardianwaf.yaml:/etc/guardianwaf/guardianwaf.yaml:ro
       - guardianwaf-data:/var/lib/guardianwaf
-      - /var/run/docker.sock:/var/run/docker.sock:ro  # Docker auto-discovery
+      - /var/run/docker.sock:/var/run/docker.sock:ro  # DEV ONLY — privilege escalation risk; use docker-compose.prod.yml with TLS client for production
     environment:
       - GWAF_MODE=enforce
       - GWAF_LOGGING_LEVEL=info
