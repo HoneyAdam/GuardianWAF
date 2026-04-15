@@ -208,7 +208,7 @@ bot_detection:
 
 **Note**: `internal/layers/botdetect/` exists with base bot detection (layer, JA3/JA4, UA, behavior).
 The enhanced features below are planned: `fingerprint/fingerprinter.go`, `biometric/detector.go`,
-`web/` (goodbot), `challenge/` (CAPTCHA), and `clientside/agent.js`.
+`web/` (goodbot), `challenge/` (CAPTCHA), and `clientside/agent/agent.js`.
 
 | File | Purpose |
 |------|---------|
