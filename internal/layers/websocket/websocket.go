@@ -184,12 +184,10 @@ func (s *Security) ValidateHandshake(r *http.Request) error {
 		return fmt.Errorf("not a WebSocket upgrade request")
 	}
 
-	// Check origin if allowed origins configured
-	if len(s.config.AllowedOrigins) > 0 {
-		origin := r.Header.Get("Origin")
-		if !s.isAllowedOrigin(origin, r) {
-			return fmt.Errorf("origin not allowed: %s", origin)
-		}
+	// Check origin — always enforced, same-origin policy when AllowedOrigins is empty
+	origin := r.Header.Get("Origin")
+	if !s.isAllowedOrigin(origin, r) {
+		return fmt.Errorf("origin not allowed: %s", origin)
 	}
 
 	// Check path extension

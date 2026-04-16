@@ -214,12 +214,12 @@ func New(eng *engine.Engine, store events.EventStore, apiKey string) *Dashboard 
 	// Docker auto-discovery endpoints
 	d.mux.HandleFunc("GET /api/v1/docker/services", d.authWrap(d.handleDockerServices))
 
-	// Debug pprof endpoints — behind auth, same as all other API routes
-	d.mux.HandleFunc("GET /debug/pprof/", d.authWrap(http.HandlerFunc(pprof.Index)).ServeHTTP)
-	d.mux.HandleFunc("GET /debug/pprof/cmdline", d.authWrap(http.HandlerFunc(pprof.Cmdline)).ServeHTTP)
-	d.mux.HandleFunc("GET /debug/pprof/profile", d.authWrap(http.HandlerFunc(pprof.Profile)).ServeHTTP)
-	d.mux.HandleFunc("GET /debug/pprof/symbol", d.authWrap(http.HandlerFunc(pprof.Symbol)).ServeHTTP)
-	d.mux.HandleFunc("GET /debug/pprof/trace", d.authWrap(http.HandlerFunc(pprof.Trace)).ServeHTTP)
+	// Debug pprof endpoints — localhost-only, sensitive runtime data
+	d.mux.HandleFunc("GET /debug/pprof/", d.pprofWrap(pprof.Index))
+	d.mux.HandleFunc("GET /debug/pprof/cmdline", d.pprofWrap(pprof.Cmdline))
+	d.mux.HandleFunc("GET /debug/pprof/profile", d.pprofWrap(pprof.Profile))
+	d.mux.HandleFunc("GET /debug/pprof/symbol", d.pprofWrap(pprof.Symbol))
+	d.mux.HandleFunc("GET /debug/pprof/trace", d.pprofWrap(pprof.Trace))
 
 	// SPA serving — React build output from dist/ with fallback to legacy static/
 	d.mux.HandleFunc("GET /assets/", d.handleDistAssets)       // Vite hashed assets — public (content-hashed, no secrets)
@@ -279,6 +279,24 @@ func (d *Dashboard) authWrap(handler http.HandlerFunc) http.HandlerFunc {
 		}
 
 		handler(w, r)
+	}
+}
+
+// pprofWrap restricts pprof endpoints to localhost connections only.
+// These endpoints expose sensitive runtime data (goroutine stacks, memory profiles).
+func (d *Dashboard) pprofWrap(handler http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		host, _, err := net.SplitHostPort(r.RemoteAddr)
+		if err != nil {
+			http.Error(w, "connection error", http.StatusBadRequest)
+			return
+		}
+		ip := net.ParseIP(host)
+		if ip == nil || !ip.IsLoopback() {
+			http.Error(w, "pprof endpoints are localhost-only", http.StatusForbidden)
+			return
+		}
+		handler.ServeHTTP(w, r)
 	}
 }
 

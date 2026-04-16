@@ -1,389 +1,354 @@
-# GuardianWAF — Go Security Deep Scan Results
+# sc-lang-go Results
 
-**Scan Date:** 2026-04-15
-**Scanner:** sc-lang-go (Go Security Deep Scanner)
-**Scope:** 12 high-priority Go security categories
-**Go Version:** 1.25.0
+## Findings
 
----
+### [INFO] math/rand Usage in Attack Simulation Tool
 
-## Executive Summary
-
-No critical or high-severity vulnerabilities were found. The codebase demonstrates strong security engineering across all 12 checked categories. One low-severity issue was identified (tenant compound operation non-atomicity, documented in prior analysis). All security-sensitive operations properly use `crypto/rand`. HTTP server timeouts are correctly configured. Error messages are sanitized before HTTP responses. JWT implementation is robust with algorithm confusion prevention.
-
-**Overall Assessment: SECURE**
+- **File:** scripts/attack-simulation/main.go:12
+- **CWE:** CWE-338 (Use of Predictable Pseudorandom Number Generator)
+- **Confidence:** 100%
+- **Description:** The attack simulation script uses `math/rand` for generating test traffic. This is acceptable for load testing purposes and does not affect the GuardianWAF itself.
+- **Exploit Scenario:** N/A - This is a testing tool, not production code.
+- **Remediation:** No action required. If cryptographic randomness is needed for security-sensitive operations, use `crypto/rand`.
 
 ---
 
-## 1. net/http Missing Timeouts
+### [INFO] sync.Map Usage in Rate Limiting and Caching
 
-### Result: SECURE
-
-All `http.Server` instances are configured with proper timeouts for slowloris protection.
-
-**Main WAF Server** (`cmd/guardianwaf/main.go:1068-1075` and `main_default.go:1011-1018`):
-```go
-srv := &http.Server{
-    Addr:              cfg.Listen,
-    Handler:           httpHandler,
-    ReadTimeout:       30 * time.Second,
-    ReadHeaderTimeout: 10 * time.Second,
-    WriteTimeout:      30 * time.Second,
-    IdleTimeout:       120 * time.Second,
-}
-```
-
-**TLS Server** (`cmd/guardianwaf/main.go:973-980` and `main_default.go:969-977`):
-```go
-tlsSrv = &http.Server{
-    Addr:              cfg.TLS.Listen,
-    Handler:           handler,
-    TLSConfig:         certStore.TLSConfig(),
-    ReadTimeout:       30 * time.Second,
-    ReadHeaderTimeout: 10 * time.Second,
-    WriteTimeout:      30 * time.Second,
-    IdleTimeout:       120 * time.Second,
-}
-```
-
-**Dashboard Server** (`cmd/guardianwaf/main.go:2689-2695` and `main_default.go:2634-2641`):
-```go
-srv := &http.Server{
-    Addr:              cfg.Dashboard.Listen,
-    Handler:           dash.Handler(),
-    ReadTimeout:       10 * time.Second,
-    ReadHeaderTimeout: 5 * time.Second,
-    WriteTimeout:      30 * time.Second,
-    IdleTimeout:       120 * time.Second,
-}
-```
-
-**Proxy Transport** (`internal/proxy/target.go:175-183`):
-```go
-transport := &http.Transport{
-    DialContext:           SSRFDialContext(),
-    MaxIdleConns:        100,
-    MaxIdleConnsPerHost: 20,
-    IdleConnTimeout:     90 * time.Second,
-    ResponseHeaderTimeout: 30 * time.Second,
-    TLSHandshakeTimeout:   10 * time.Second,
-    MaxConnsPerHost:       100,
-}
-```
+- **File:** internal/layers/ratelimit/ratelimit.go:37-38, internal/layers/apisecurity/jwt.go:49, internal/layers/apisecurity/jwt.go:71, internal/alerting/webhook.go:67, internal/dashboard/auth.go:35-42
+- **CWE:** CWE-362 (Race Condition)
+- **Confidence:** 95%
+- **Description:** Multiple sync.Map instances are used for rate limit buckets, JWT JWKS cache, alerting last-fire tracking, and session management. Go's sync.Map is safe for concurrent use and appropriate for these "append-mostly" workloads as documented in the ADR-0029.
+- **Exploit Scenario:** sync.Map is designed for concurrent access; it is safe and optimized for high-read, low-write scenarios.
+- **Remediation:** No action required. This is an intentional design choice documented in ADR-0029.
 
 ---
 
-## 2. Race Conditions — sync.Pool and Shared State
+### [INFO] Panic Recovery in Pipeline
 
-### Result: SECURE with Minor Note
-
-**sync.Pool in RequestContext** (`internal/engine/context.go:131-293`):
-- Pool properly resets ALL fields in `ReleaseContext()` before returning to pool
-- JA4 TLS fingerprint fields explicitly cleared to prevent cross-request leakage
-- Metadata map recreated fresh on each acquisition
-
-```go
-// internal/engine/context.go:281-290
-// Clear JA4 TLS fingerprinting fields to prevent cross-request leakage
-ctx.JA4Ciphers = nil
-ctx.JA4Exts = nil
-ctx.JA4SigAlgs = nil
-ctx.JA4ALPN = ""
-ctx.JA4Protocol = ""
-ctx.JA4SNI = false
-ctx.JA4Ver = 0
-```
-
-**Minor Note - Tenant Compound Operations** (`internal/tenant/manager.go:362-428`):
-- Domain map and tenant config updates are separated by unlock gap
-- This is **not a security vulnerability** — Go's memory model ensures eventual consistency
-- Previously documented in `security-report/go-findings.md` section 1.1
+- **File:** internal/engine/pipeline.go:73-77
+- **CWE:** CWE-248 (Unchecked Exception)
+- **Confidence:** 100%
+- **Description:** The pipeline Execute function includes panic recovery to prevent a single layer panic from crashing the entire request processing. The panic is re-raised after cleanup (returning the timing map to the pool).
+- **Exploit Scenario:** A panic in any security layer is caught, logged, and the request is allowed to pass. This prevents DoS via panic-inducing requests but may allow malicious requests through if a detector panics.
+- **Remediation:** This is a deliberate trade-off to maintain availability. Ensure all layer code is thoroughly tested to prevent unexpected panics.
 
 ---
 
-## 3. crypto/rand vs math/rand
+### [MEDIUM] Intentional Panic on Crypto/Rand Failure in Bot Detection
 
-### Result: SECURE
-
-All security-sensitive operations use `crypto/rand`:
-
-| Operation | Location | RNG |
-|-----------|----------|-----|
-| Request ID generation | `internal/engine/context.go:362` | `crypto/rand` |
-| Session signing | `internal/dashboard/auth.go:62-68` | `crypto/rand` |
-| Challenge nonce generation | `internal/layers/challenge/challenge.go:239-245` | `crypto/rand` |
-| API key salt generation | `internal/tenant/manager.go:724-734` | `crypto/rand` |
-| Session secret init | `internal/dashboard/auth.go:30-38` | `crypto/rand` |
-| AES-GCM nonce | `internal/ai/store.go:175` | `crypto/rand` |
-
-**No usage of `math/rand` found for security-sensitive purposes.**
+- **File:** internal/layers/botdetect/collector_handler.go:386-393
+- **CWE:** CWE-248 (Unchecked Exception)
+- **Confidence:** 100%
+- **Description:** The challenge HMAC key initialization uses a panic if `crypto/rand` fails: `panic("guardianwaf: crypto/rand failed — cannot generate secure challenge HMAC key: " + err.Error())`. This is intentional because a WAF must not operate with a predictable HMAC key.
+- **Exploit Scenario:** If the system entropy is exhausted (extremely rare), the WAF will panic and stop accepting requests rather than operating insecurely.
+- **Remediation:** No action required. This is a deliberate security decision - a WAF with predictable HMAC keys would be fundamentally broken.
 
 ---
 
-## 4. Panic Recovery
+### [INFO] JWT Default Algorithm Restriction
 
-### Result: SECURE
-
-All goroutine entry points have deferred panic recovery:
-
-| Location | Recovery |
-|----------|----------|
-| `internal/engine/engine.go:263-269` | Engine.Middleware |
-| `internal/engine/pipeline.go:72-76` | Pipeline.Execute |
-| `internal/proxy/health.go:58-62` | HealthChecker |
-| `internal/tls/certstore.go:152-155` | TLSReload |
-| `internal/layers/challenge/challenge.go:372-375` | fetchJWKS |
-| `internal/layers/challenge/challenge.go:453-456` | refreshJWKSPeriodically |
-| `internal/docker/watcher.go:152-155` | Event stream |
-| `internal/cluster/cluster.go:371-373` | Cluster handlers |
-
-Example pattern (`internal/engine/engine.go:263-269`):
-```go
-defer func() {
-    if rv := recover(); rv != nil {
-        e.Logs.Errorf("PANIC recovered in WAF middleware: %v", rv)
-        http.Error(w, "500 Internal Server Error", http.StatusInternalServerError)
-    }
-}()
-```
+- **File:** internal/layers/apisecurity/jwt.go:232-241
+- **CWE:** CWE-345 (Insufficient Verification of Data Authenticity)
+- **Confidence:** 90%
+- **Description:** When JWT `algorithms` config is not explicitly set, only RS256 and ES256 are allowed by default. A warning is logged at startup. Other legitimate algorithms like ES512 or PS256 would be silently rejected.
+- **Exploit Scenario:** Operators may not notice the startup warning and deploy with tokens that use non-default algorithms, causing authentication failures.
+- **Remediation:** Explicitly set the `algorithms` field in JWT configuration to include all intended algorithms.
 
 ---
 
-## 5. Error Wrapping — Info Disclosure
+### [PASS] JWT Algorithm "none" Rejection
 
-### Result: SECURE
-
-HTTP handlers return generic error messages without internal details:
-
-| Location | Pattern |
-|----------|---------|
-| `internal/analytics/handler.go:70` | `"Internal server error"` |
-| `internal/analytics/handler.go:86` | `"Internal server error"` |
-| `internal/cluster/cluster.go:893` | `clusterSanitizeErr()` |
-| `internal/engine/engine.go:267` | `"500 Internal Server Error"` |
-| `internal/proxy/target.go:196` | `"502 Bad Gateway"` |
-| `internal/layers/challenge/challenge.go:100` | `"Internal server error"` |
-
-**Error Sanitization Function** (`internal/cluster/cluster.go:1019-1033`):
-```go
-func clusterSanitizeErr(err error) string {
-    if err == nil {
-        return ""
-    }
-    msg := err.Error()
-    if strings.Contains(msg, "/") || strings.Contains(msg, "\\") ||
-        strings.Contains(msg, "goroutine") || strings.Contains(msg, "runtime/") {
-        return "internal error"
-    }
-    if len(msg) > 200 {
-        msg = msg[:200]
-    }
-    return msg
-}
-```
+- **File:** internal/layers/apisecurity/jwt.go:217-218
+- **CWE:** CWE-347 (Improper Verification of Cryptographic Signature)
+- **Confidence:** 100%
+- **Description:** The `isAlgorithmAllowed` function explicitly returns `false` for `alg == ""` and `alg == "none"`. Tokens signed with algorithm "none" cannot be forged.
+- **Exploit Scenario:** N/A - Control is secure.
+- **Remediation:** None required.
 
 ---
 
-## 6. os/exec Command Injection
+### [PASS] JWT Algorithm Confusion Protection
 
-### Result: SECURE
-
-`exec.Command` is used in two locations, both with hardcoded command arguments:
-
-**Docker Client** (`internal/docker/client.go:270, 321`):
-```go
-cmd := exec.CommandContext(ctx, "docker", args...)
-```
-- `args` is built from internal label parsing, not user HTTP input
-- No shell evaluation (`shell=false`)
-
-**CLI Tests** (`cmd/guardianwaf/main_test.go:603`):
-```go
-cmd := exec.Command("go", "build", "-o", binPath, ".")
-```
-- Test code only, not production
-
-**No user-controlled command injection vectors found.**
+- **File:** internal/layers/apisecurity/jwt.go:220-230
+- **CWE:** CWE-347 (Improper Verification of Cryptographic Signature)
+- **Confidence:** 100%
+- **Description:** If an asymmetric key source is configured (PEM, key file, or JWKS URL), HMAC algorithms (HS256/HS384/HS512) are blocked. This prevents the RS256-to-HS256 algorithm confusion attack.
+- **Exploit Scenario:** N/A - Control is secure.
+- **Remediation:** None required.
 
 ---
 
-## 7. filepath.Join Path Traversal
+### [PASS] JWT JWKS URL SSRF Protection
 
-### Result: NOT APPLICABLE
-
-No file serving endpoints found in the codebase. The WAF does not serve static files directly — it acts as a reverse proxy with the React dashboard embedded as Go binary data.
-
----
-
-## 8. context.Background() Misuse
-
-### Result: SECURE (Test Code Only)
-
-Found in test files and initialization code only, not in request handlers:
-
-| Location | Context | Status |
-|----------|---------|--------|
-| `cmd/guardianwaf/main_cli_test.go:144` | `http.NewRequestWithContext(context.Background(), ...)` | Test code |
-| `internal/layers/apisecurity/jwt.go:380` | `context.WithTimeout(context.Background(), 10*time.Second)` | JWKS fetch with timeout |
-| `cmd/guardianwaf/main_default.go:1451` | `context.WithTimeout(context.Background(), 15*time.Second)` | Graceful shutdown |
-
-**JWT JWKS Context** (`internal/layers/apisecurity/jwt.go:380-381`):
-```go
-ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-defer cancel()
-```
-This is acceptable — JWKS fetching is an outbound HTTP call, not a request handler, and has an explicit 10-second timeout.
+- **File:** internal/layers/apisecurity/jwt.go:1073-1111
+- **CWE:** CWE-918 (Server-Side Request Forgery)
+- **Confidence:** 100%
+- **Description:** The `validateJWKSURL` function rejects localhost, .internal, .local domains, and private/loopback/link-local IP addresses before JWKS fetching.
+- **Exploit Scenario:** N/A - Control is secure.
+- **Remediation:** None required.
 
 ---
 
-## 9. JWT Implementation
+### [PASS] WebSocket Origin Validation
 
-### Result: SECURE
-
-JWT implementation is robust with multiple defense layers:
-
-**Algorithm Confusion Prevention** (`internal/layers/apisecurity/jwt.go:213-242`):
-```go
-func (v *JWTValidator) isAlgorithmAllowed(alg string) bool {
-    // Prevent algorithm confusion: if an asymmetric key source is configured
-    // (PEM key, key file, or JWKS URL), do not allow HMAC algorithms.
-    hasAsymmetricSource := v.config.PublicKeyPEM != "" ||
-        v.config.PublicKeyFile != "" ||
-        v.config.JWKSURL != ""
-    if hasAsymmetricSource {
-        switch alg {
-        case "HS256", "HS384", "HS512":
-            return false
-        }
-    }
-    // ...
-}
-```
-
-**Default Algorithm Restriction**:
-- Default allowed: `RS256`, `ES256` only (strongest defaults in industry)
-- Full list available: `RS256-RS512`, `PS256-PS512`, `ES256-ES512`, `HS256-HS512`
-- Warning logged if no explicit algorithm list configured
-
-**JWKS SSRF Prevention** (`internal/layers/apisecurity/jwt.go:1065-1106`):
-```go
-func validateJWKSURL(rawURL string) error {
-    // Reject localhost, .internal, .local, .localhost
-    // Block private, loopback, link-local, multicast IPs
-    // Check resolved IPs against private ranges
-}
-```
-
-**JWKS Fetch with Panic Recovery** (`internal/layers/apisecurity/jwt.go:370-375`):
-```go
-defer func() {
-    if r := recover(); r != nil {
-        log.Printf("[jwt] fetchJWKS panic: %v", r)
-    }
-}()
-```
+- **File:** internal/layers/websocket/websocket.go:187-193, 226-269
+- **CWE:** CWE-346 (Origin Validation Error)
+- **Confidence:** 100%
+- **Description:** Origin header is validated against an allowlist with support for wildcard subdomains (*.example.com). When no origins are configured, same-origin policy is enforced (cross-origin requests rejected).
+- **Exploit Scenario:** N/A - Control is secure.
+- **Remediation:** None required.
 
 ---
 
-## 10. TLS Configuration
+### [PASS] Cookie Security Attributes
 
-### Result: SECURE (One Documented Exception)
-
-**TLS 1.3 Only** (`internal/tls/certstore.go:135-140`):
-```go
-TLSConfig: &tls.Config{
-    MinVersion: tls.VersionTLS13,
-    // ...
-}
-```
-
-**InsecureSkipVerify** — One Known Location:
-- `internal/layers/threatintel/feed.go:55` — For threat intel feed TLS (operator opt-in, documented)
-- `cmd/guardianwaf/main_cli_test.go:981` — Test code only
-
-**SIEM Exporter** (`internal/layers/siem/exporter.go:91`):
-```go
-InsecureSkipVerify: false, // Always enforce TLS verification
-```
+- **File:** internal/layers/challenge/challenge.go:153-161, internal/dashboard/auth.go:290-296, internal/dashboard/dashboard.go:438-445, internal/layers/botdetect/collector_handler.go:274-281
+- **CWE:** CWE-614 (Sensitive Cookie Without 'HttpOnly' Flag)
+- **Confidence:** 100%
+- **Description:** Challenge cookies use `HttpOnly: true, Secure: true, SameSite: http.SameSiteLaxMode`. Dashboard session cookies use `SameSiteStrictMode`. All security-relevant cookies have appropriate attributes.
+- **Exploit Scenario:** N/A - Control is secure.
+- **Remediation:** None required.
 
 ---
 
-## 11. Slice/Map Concurrent Access
+### [PASS] GraphQL Security Controls
 
-### Result: SECURE
-
-**sync.Map Usage** — All accesses properly protected:
-- JWT JWKS cache: `sync.Map` with proper Load/Store pattern
-- Rate limiter buckets: Uses `sync.Map` (documented as appropriate for append-mostly pattern)
-- No plain `map` with concurrent读写 without mutex
-
-**sync.Pool** — Properly reset before return:
-- `internal/engine/context.go:247-293` — Full field reset
-- `internal/engine/pipeline.go:70-80` — Timing map cleared before pool return
-
-**sync.RWMutex** — Used correctly:
-- Tenant manager: Read-lock for reads, write-lock for writes
-- Pipeline: Read-lock for Execute (concurrent reads OK), write-lock for AddLayer
+- **File:** internal/layers/graphql/parser.go:133-140, internal/layers/graphql/layer.go:36-58
+- **CWE:** CWE-400 (Uncontrolled Resource Consumption)
+- **Confidence:** 100%
+- **Description:** GraphQL layer implements: max parse depth of 256, max query length of 256KB, max depth limiting, max complexity limiting, introspection blocking by default, batch size limiting, and directive injection detection.
+- **Exploit Scenario:** N/A - Control is secure.
+- **Remediation:** None required.
 
 ---
 
-## 12. Goroutine Leaks
+### [PASS] SSRF Protection
 
-### Result: SECURE
-
-All spawned goroutines have proper cancellation:
-
-**Periodic Cleanup** (`cmd/guardianwaf/main_default.go:1361-1403`):
-```go
-cleanupStop := make(chan struct{})
-go func() {
-    ticker := time.NewTicker(5 * time.Minute)
-    defer ticker.Stop()
-    for {
-        select {
-        case <-ticker.C:
-            // cleanup work
-        case <-cleanupStop:
-            return
-        }
-    }
-}()
-// On shutdown: close(cleanupStop)
-```
-
-**JWKS Refresh** (`internal/layers/apisecurity/jwt.go:452-468`):
-```go
-go v.refreshJWKSPeriodically(5 * time.Minute)
-// On Stop(): close(v.stopCh)
-```
-
-**Docker Watcher** — Has stop channel and proper cleanup on shutdown.
-
-**SSE Broadcaster** — Has event channel with buffer, goroutine exits when channel closed.
+- **File:** internal/proxy/target.go:29-65, internal/ai/client.go:58, internal/alerting/webhook.go:586-602, internal/layers/siem/exporter.go:376-391, internal/layers/apisecurity/jwt.go:1089-1111
+- **CWE:** CWE-918 (Server-Side Request Forgery)
+- **Confidence:** 100%
+- **Description:** Multiple `IsPrivateOrReservedIP` checks prevent requests to private, loopback, link-local, and unspecified IP addresses. Used consistently for upstream proxy, AI client, webhooks, SIEM exporter, and JWT JWKS fetching.
+- **Exploit Scenario:** N/A - Control is secure.
+- **Remediation:** None required.
 
 ---
 
-## Summary Table
+### [PASS] HTTP Server Timeouts Configured
 
-| Category | Status | Notes |
-|----------|--------|-------|
-| 1. HTTP Timeouts | SECURE | All servers configured with ReadTimeout, WriteTimeout, IdleTimeout |
-| 2. Race Conditions | SECURE | sync.Pool properly reset; minor tenant note not a vulnerability |
-| 3. crypto/rand | SECURE | All security operations use crypto/rand |
-| 4. Panic Recovery | SECURE | All goroutines have deferred recover |
-| 5. Error Disclosure | SECURE | Generic messages returned; sanitization function exists |
-| 6. Command Injection | SECURE | exec.Command uses hardcoded args, no user input |
-| 7. Path Traversal | N/A | No file serving endpoints |
-| 8. context.Background | SECURE | Only in init/test code, not request handlers |
-| 9. JWT Security | SECURE | Algorithm allowlist, HMAC blocking, JWKS SSRF validation |
-| 10. TLS Config | SECURE | TLS 1.3 only; one documented InsecureSkipVerify in threat intel |
-| 11. Concurrent Maps | SECURE | sync.Map/sync.Pool properly used; mutexes correct |
-| 12. Goroutine Leaks | SECURE | All goroutines have stop channels |
+- **File:** cmd/guardianwaf/main.go:994-996, cmd/guardianwaf/main.go:1088-1091, cmd/guardianwaf/main.go:1751-1753
+- **CWE:** CWE-400 (Uncontrolled Resource Consumption)
+- **Confidence:** 100%
+- **Description:** All HTTP servers set ReadTimeout (30s), WriteTimeout (30s), IdleTimeout (120s), and ReadHeaderTimeout (10s).
+- **Exploit Scenario:** N/A - Control is secure.
+- **Remediation:** None required.
 
 ---
 
-## Conclusion
+### [PASS] Path Traversal Prevention in Pipeline
 
-The GuardianWAF Go codebase exhibits **exemplary security engineering**. All 12 high-priority security categories passed inspection. The implementation demonstrates deep understanding of Go concurrency primitives, proper use of cryptographic libraries, and defense-in-depth measures throughout.
+- **File:** internal/engine/pipeline.go:89-96
+- **CWE:** CWE-22 (Path Traversal)
+- **Confidence:** 100%
+- **Description:** The pipeline uses `path.Clean(ctx.Path)` before checking exclusions to prevent bypass via sequences like `/api/webhook/../../admin`.
+- **Exploit Scenario:** N/A - Control is secure.
+- **Remediation:** None required.
 
-**No remediation required.**
+---
+
+### [PASS] Open Redirect Prevention
+
+- **File:** cmd/guardianwaf/main.go:1050-1076
+- **CWE:** CWE-601 (URL Redirection to Untrusted Site)
+- **Confidence:** 100%
+- **Description:** Host header is validated against virtual host domains (with wildcard support) before use in redirects. Protocol-relative URLs (//evil.com) are stripped.
+- **Exploit Scenario:** N/A - Control is secure.
+- **Remediation:** None required.
+
+---
+
+### [PASS] HTML Escaping in Error Pages
+
+- **File:** internal/layers/response/errorpage.go:133-139
+- **CWE:** CWE-79 (Cross-site Scripting)
+- **Confidence:** 100%
+- **Description:** The `escapeHTML` function properly escapes `&`, `<`, `>`, `"`, and `'` characters in error page content.
+- **Exploit Scenario:** N/A - Control is secure.
+- **Remediation:** None required.
+
+---
+
+### [PASS] CRS Regex Timeout Protection
+
+- **File:** internal/layers/crs/operators.go:23-52
+- **CWE:** CWE-1333 (Regular Expression Denial of Service)
+- **Confidence:** 100%
+- **Description:** Go's regexp uses RE2 (linear-time, no catastrophic backtracking). Additionally, a 5-second timeout (`regexExecutionTimeout`) is applied via `matchWithTimeout` for defense-in-depth.
+- **Exploit Scenario:** N/A - Control is secure.
+- **Remediation:** None required.
+
+---
+
+### [PASS] JSON Deserialization with Error Handling
+
+- **File:** internal/layers/graphql/layer.go:422-430, internal/ai/provider.go:246, internal/cluster/cluster.go:948-975
+- **CWE:** CWE-502 (Deserialization of Untrusted Data)
+- **Confidence:** 100%
+- **Description:** All `json.Unmarshal` calls check errors before using the data. No use of `encoding/gob` or other unsafe deserialization.
+- **Exploit Scenario:** N/A - Control is secure.
+- **Remediation:** None required.
+
+---
+
+### [PASS] No text/template Usage
+
+- **File:** N/A
+- **CWE:** CWE-79 (Cross-site Scripting)
+- **Confidence:** 100%
+- **Description:** No usage of `text/template` (which does not auto-escape) found in the codebase. All template rendering uses `html/template` or manual string building with escaping.
+- **Exploit Scenario:** N/A - Control is secure.
+- **Remediation:** None required.
+
+---
+
+### [PASS] No unsafe.Pointer Usage
+
+- **File:** N/A
+- **CWE:** CWE-787 (Out-of-bounds Write)
+- **Confidence:** 100%
+- **Description:** No usage of `unsafe.Pointer` found in the codebase. All memory operations use safe Go patterns.
+- **Exploit Scenario:** N/A - Control is secure.
+- **Remediation:** None required.
+
+---
+
+### [INFO] Docker Discovery exec.Command Usage
+
+- **File:** internal/docker/client.go:270, internal/docker/client.go:321
+- **CWE:** CWE-78 (OS Command Injection)
+- **Confidence:** 80%
+- **Description:** The Docker client uses `exec.CommandContext(ctx, "docker", args...)` where `args` are constructed from Docker API responses (container events, label parsing). While the args are internally generated, an attacker who could manipulate Docker labels or container names could potentially inject arguments.
+- **Exploit Scenario:** If an attacker can modify Docker container labels (e.g., via another service), they could influence the args passed to docker CLI commands.
+- **Remediation:** Consider validating Docker label values to ensure they don't contain shell metacharacters before including them in command arguments.
+
+---
+
+## Summary
+
+| Category | Finding | Severity |
+|----------|---------|----------|
+| JWT | Algorithm "none" rejection | PASS |
+| JWT | Algorithm confusion protection | PASS |
+| JWT | JWKS SSRF protection | PASS |
+| JWT | Default algorithm restriction | MEDIUM (info) |
+| WebSocket | Origin validation | PASS |
+| Cookies | Security attributes | PASS |
+| GraphQL | Query depth/complexity limits | PASS |
+| SSRF | Private IP detection | PASS |
+| HTTP | Server timeouts | PASS |
+| Path Traversal | Path cleaning | PASS |
+| Open Redirect | Host header validation | PASS |
+| XSS | HTML escaping | PASS |
+| ReDoS | CRS regex timeout | PASS |
+| Deserialization | JSON error handling | PASS |
+| Templates | No text/template | PASS |
+| Memory | No unsafe.Pointer | PASS |
+| Panic Handling | Pipeline recovery | INFO |
+| Crypto | Panic on entropy failure | INFO (by design) |
+| math/rand | Attack simulation tool | INFO (acceptable) |
+| Command Injection | Docker client args | INFO (low risk) |
+
+---
+
+## Follow-up Verification (2026-04-16)
+
+### 1. ipacl.go:172 - autoBanEntry.Count Race Condition
+
+**Finding:** NOT A VULNERABILITY (False positive)
+
+**Analysis:**
+- Line 30 comment: `Count int // protected by Layer.mu`
+- `AddAutoBan()` (lines 162-187) holds `l.mu.Lock()` before `entry.Count++` (line 172)
+- All accesses to `autoBan` map protected by `l.mu` RWMutex
+- `ExpiresAt` uses `atomic.Value` for lock-free reads; `Count` protected by mutex
+- **Conclusion:** Properly synchronized. No race condition.
+
+---
+
+### 2. engine/context.go - sync.Pool ReleaseContext() Field Reset
+
+**Finding:** SECURE - No cross-request contamination risk
+
+**Analysis:**
+- `ReleaseContext()` (lines 247-293) resets ALL fields to zero values:
+  - `Request`, `ClientIP`, `QueryParams`, `Headers`, `Cookies`, `Body`, `NormalizedQuery`, `NormalizedHeaders`, `Accumulator`, `Metadata` → `nil`
+  - String fields → `""`, int/uint fields → `0`, bool → `false`
+  - JA4 TLS fingerprinting fields explicitly cleared (lines 281-288)
+- Returns context to pool via `contextPool.Put(ctx)`
+- **Conclusion:** Properly implemented. No cross-request leakage.
+
+---
+
+### 3. response/errorpage.go - escapeHTML() Function
+
+**Finding:** SECURE - Correct and complete
+
+**Analysis:**
+- Function (lines 133-140) escapes five critical HTML metacharacters:
+  - `&` → `&amp;`, `<` → `&lt;`, `>` → `&gt;`, `"` → `&quot;`, `'` → `&#39;`
+- Uses `strings.ReplaceAll` correctly
+- Applied in both production and development error pages
+- **Conclusion:** XSS prevention is correct.
+
+---
+
+### 4. config/config.go - YAML Unsafe Tags (!<!>)
+
+**Finding:** SECURE - No unsafe yaml tags
+
+**Analysis:**
+- Line 3 comment: "The yaml struct tags are documentary — actual loading uses the YAML parser's Node tree"
+- No `!!python/object`, `!<!>`, or other unsafe tags present
+- Custom Node tree-based YAML parser used for actual loading (not yaml.Unmarshal)
+- **Conclusion:** No YAML deserialization vulnerability.
+
+---
+
+### 5. docker/client.go - isSafeContainerRef() Function
+
+**Finding:** SECURE - Properly implemented
+
+**Analysis:**
+- Allowlist validation: permits `0-9`, `a-z`, `A-Z`, `-`, `_`, `.` only
+- Length check: `0 < len(id) <= 128`
+- Rejects all shell metacharacters: `|`, `;`, `$`, `&`, `<`, `>`, `` ` ``, `!`, `*`, `?`, etc.
+- Used in `ListContainers()` (line 166) and `InspectContainer()` (line 226)
+- Prevents command injection in `docker inspect <id>` calls
+- **Conclusion:** Command injection prevented.
+
+---
+
+### 6. apisecurity/apikey.go - Constant-Time Comparison
+
+**Finding:** SECURE - Implemented correctly
+
+**Analysis:**
+- Uses `crypto/subtle.ConstantTimeCompare()` at line 115
+- Hash format fixed: `"sha256:"` (8 chars) + 64 hex = 72 bytes total
+- Map iteration (lines 113-117) is acceptable; Go randomizes map iteration order
+- **Conclusion:** Timing-safe comparison for API key validation.
+
+---
+
+## Follow-up Summary
+
+| Check | Status | Notes |
+|-------|--------|-------|
+| IPACL Count race | FALSE POSITIVE | Protected by mutex |
+| Context ReleaseContext() | SECURE | All fields reset |
+| escapeHTML() | SECURE | Complete entity encoding |
+| YAML unsafe tags | SECURE | Documentary only |
+| isSafeContainerRef() | SECURE | Allowlist validation |
+| ConstantTimeCompare | SECURE | Correct crypto/subtle usage |
+
+**Verified Issues:** 0 | **False Positives Cleared:** 1 (IPACL Count)

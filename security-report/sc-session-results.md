@@ -1,109 +1,160 @@
-# Session Management Security Scan Results
+# sc-session: Session Management Security Scan
 
-**Scanner:** sc-session (security-check)
-**Target:** GuardianWAF - Pure Go WAF Codebase
-**Date:** 2026-04-15
-**Files Scanned:**
-- `internal/dashboard/auth.go`
-- `internal/layers/zerotrust/service.go`
-- `internal/layers/zerotrust/middleware.go`
-- `internal/dashboard/dashboard.go`
+**Scanner:** sc-session
+**Target:** `internal/dashboard/auth.go`, `internal/dashboard/dashboard.go`
+**Date:** 2026-04-16
+**Severity Classification:** Per OWASP Session Management guidelines
 
 ---
 
 ## Summary
 
-| Check | Status | Severity |
-|-------|--------|----------|
-| Session Fixation | PASS | - |
-| Session Hijacking | FAIL | MEDIUM |
-| Session Timeout | PASS | - |
-| Session Invalidation | FAIL | MEDIUM |
-| Concurrent Sessions | WARN | LOW |
-| Session Cookies | PASS | - |
-| Session ID Generation | PASS | INFO |
+The session management implementation in `auth.go` is **well-designed** with strong cryptographic primitives and multiple defense layers. No critical or high-severity issues were found. One medium-severity finding (SESS-002: missing session regeneration on login) and one informational note (SESS-003: Secure flag behavior) are documented below.
 
 ---
 
 ## Findings
 
-### [MEDIUM] Session Not Invalidated Server-Side on Logout
+### SESS-001 — Session Token Generation
 
-- **Category:** Session Management
-- **Location:** `internal/dashboard/dashboard.go:389` (handleLogout)
-- **Description:** The logout handler only clears the session cookie client-side by setting `MaxAge: -1` and an empty value. The session token remains valid on the server. If an attacker has captured the session token before logout, they can continue using it to authenticate.
+**Severity:** Informational (Positive Finding)
+**Confidence:** 100
+**File:** `internal/dashboard/auth.go:44-56, 76-83`
+
+**Analysis:**
+- Tokens are signed using HMAC-SHA256 with a 32-byte secret generated via `crypto/rand` at startup
+- `init()` fails the process if `crypto/rand` is unavailable (fail-secure design)
+- `SetSessionSecret()` allows persistent secrets via config, with hex-decoding and SHA256 fallback
+- Token format: `timestamp.creation_timestamp.signature` where `signature = HMAC-SHA256(secret, "timestamp.creation_timestamp:clientIP")`
+- Client IP is bound into the HMAC, preventing session cookie theft across different IPs
+
+**Verdict:** Cryptographically sound. Token format is non-predictable; the HMAC secret is known only to the server.
+
+---
+
+### SESS-002 — Session Regeneration on Privilege Change
+
+**Severity:** Medium
+**Confidence:** 80
+**File:** `internal/dashboard/dashboard.go:332`
+
+**Description:**
+The login handler calls `setSessionCookie()` directly without first invalidating any pre-existing session. An authenticated session (e.g., from a prior login attempt or shared workstation) retains its token ID after a successful login — the session ID is reused rather than regenerated.
 
 ```go
-http.SetCookie(w, &http.Cookie{
-    Name:     sessionCookieName,
-    Value:    "",
-    Path:     "/",
-    MaxAge:   -1,  // Only deletes cookie client-side
-    HttpOnly: true,
-    Secure:   true,
-    SameSite: http.SameSiteStrictMode,
-})
-http.Redirect(w, r, "/login", http.StatusFound)
+// dashboard.go:298-334
+func (d *Dashboard) handleLoginSubmit(...) {
+    // ...
+    if subtle.ConstantTimeCompare([]byte(key), []byte(d.apiKey)) != 1 {
+        d.recordLoginFailure(clientIP)
+        // ...
+    }
+    d.resetLoginAttempts(clientIP)
+    setSessionCookie(w, r) // No prior session invalidation; token is set fresh but NOT regenerated
+    http.Redirect(w, r, "/", http.StatusFound)
+}
 ```
 
-- **Remediation:** Implement server-side session invalidation by maintaining a session invalidation list (e.g., revoked tokens set) or using a session store that supports active invalidation. On logout, add the session token to a revocation list that `verifySession()` checks before validating.
+**Impact:** A session fixation attack is theoretically possible if an attacker can set a known session token on a victim's browser before login. After login, the attacker uses the same token to hijack the session. Requires the attacker to pre-set a cookie on the victim's browser (e.g., via a sub-domain cookie-write or XSS).
+
+**Remediation:**
+```go
+// In handleLoginSubmit, before calling setSessionCookie:
+if cookie, err := r.Cookie(sessionCookieName); err == nil && cookie.Value != "" {
+    RevokeSession(cookie.Value) // Invalidate old session before issuing new one
+}
+```
+
+**CWE:** CWE-384 (Session Fixation)
 
 ---
 
-### [MEDIUM] Session Token Replay Possible After Logout
+### SESS-003 — Secure Cookie Flag in Development Environments
 
-- **Category:** Session Management
-- **Location:** `internal/dashboard/auth.go:60-69` (signSession), `internal/dashboard/auth.go:72-105` (verifySession)
-- **Description:** The dashboard session uses an HMAC-signed token format `timestamp.created.signature` without a server-side session store. Since logout does not invalidate sessions server-side and there is no session revocation list, a captured session token remains valid until its absolute expiry (7 days).
+**Severity:** Low
+**Confidence:** 70
+**File:** `internal/dashboard/auth.go:295`
 
-- **Remediation:** Maintain a server-side session registry with active/invalid status. Alternatively, implement token binding using a fast-expiring refresh token pattern where logout immediately revokes the refresh token.
+**Description:**
+`setSessionCookie` unconditionally sets `Secure: true`:
 
----
+```go
+// auth.go:290-298
+http.SetCookie(w, &http.Cookie{
+    Name:     sessionCookieName,
+    // ...
+    HttpOnly: true,
+    Secure:   true, // Always require TLS for session cookies
+    SameSite: http.SameSiteStrictMode,
+    MaxAge:   int(sessionMaxAge.Seconds()),
+})
+```
 
-### [LOW] No Enforcement of Single Concurrent Session Per User
+When the dashboard runs over HTTP (e.g., `http://localhost:9443`), the browser will not store the session cookie because the `Secure` flag prohibits cleartext transport. This can cause confusing auth failures in dev/test setups.
 
-- **Category:** Session Management
-- **Location:** `internal/dashboard/auth.go` (session management)
-- **Description:** There is no mechanism to limit concurrent sessions per user/account. The same user can authenticate from multiple devices/browsers simultaneously, and all sessions remain valid. While not inherently insecure, some security policies require single-session enforcement to detect credential sharing or compromise.
+**Impact:** No security impact in production (HTTPS is expected). Development usability issue only.
 
-- **Remediation:** If single-session-per-user is required, maintain a session registry mapping users to their active session IDs. On new login, invalidate previous sessions for that user.
+**Remediation:** Consider a config-driven approach:
+```go
+Secure: !isDevelopmentEnv(), // Configurable per environment
+```
 
----
-
-### [INFO] Session Token Uses HMAC Signature Rather Than Random Session ID
-
-- **Category:** Session Management
-- **Location:** `internal/dashboard/auth.go:62-68`
-- **Description:** The dashboard session token is constructed as `timestamp.created.signature` where signature is an HMAC of the timestamp and client IP. This is cryptographically sound but relies on timestamp uniqueness for replay prevention within the same second (`ts := fmt.Sprintf("%d.%d", now, now)` - both values are identical).
-
-- **Positive:** The HMAC binding to client IP prevents session cookie theft across different clients.
-- **Note:** Zero Trust service (`internal/layers/zerotrust/service.go:368-374`) correctly uses `crypto/rand` with 16 random bytes for session ID generation.
-
----
-
-## Passed Checks
-
-### Session Fixation - PASS
-Session IDs are server-generated via `signSession()`. Attackers cannot pre-set or influence session IDs.
-
-### Session Timeout - PASS
-- Sliding window: 24 hours (`sessionMaxAge`)
-- Absolute maximum: 7 days (`sessionAbsMaxAge`)
-
-### Session Cookies - PASS
-All security attributes properly configured:
-- `HttpOnly: true` - Prevents JavaScript access
-- `Secure: true` - Requires TLS
-- `SameSite: http.SameSiteStrictMode` - CSRF protection
-- `MaxAge: int(sessionMaxAge.Seconds())` - Client-side expiry
-
-### Session ID Generation (Zero Trust) - PASS
-Uses `crypto/rand` with 16 random bytes (128-bit entropy).
+**CWE:** CWE-614 (Sensitive Cookie Without Secure Flag) — note: flag IS set correctly; the finding is about unconditional enforcement.
 
 ---
 
-## Recommendations
+## Cookie Attribute Checklist
 
-1. **High Priority:** Implement server-side session revocation for dashboard logout
-2. **Medium Priority:** Add session registry for tracking active sessions per user
-3. **Low Priority:** Consider switching dashboard session tokens to random UUIDs with server-side validation (similar to Zero Trust implementation)
+| Attribute | Status | Location |
+|-----------|--------|----------|
+| HttpOnly | ✅ Set | `auth.go:294` |
+| Secure | ✅ Set (always) | `auth.go:295` |
+| SameSite=Strict | ✅ Set | `auth.go:296` |
+| Path=/ | ✅ Set | `auth.go:291` |
+| Max-Age (24h) | ✅ Set | `auth.go:297` |
+
+---
+
+## Session Lifecycle Verification
+
+| Feature | Status | Location |
+|---------|--------|----------|
+| Server-side revocation | ✅ | `auth.go:132-141` (`RevokeSession`) |
+| Revocation checked before signature | ✅ | `auth.go:91-94` |
+| Logout invalidates session | ✅ | `dashboard.go:434-437` |
+| Concurrent session limit (5/IP) | ✅ | `auth.go:25, 146-187` |
+| Absolute max lifetime (7 days) | ✅ | `auth.go:24` |
+| Sliding idle timeout (24h) | ✅ | `auth.go:22, 117-119` |
+| Session bound to client IP | ✅ | `auth.go:76-83, 104-110` |
+| Login rate limiting | ✅ | `dashboard.go:310-320, 336-361` |
+| CSRF protection on state-changes | ✅ | `dashboard.go:273-279` (via `verifySameOrigin`) |
+| Pre-login session invalidation | ❌ Missing | `dashboard.go:332` (see SESS-002) |
+
+---
+
+## Additional Security Controls (Positive Findings)
+
+1. **Origin/Referer CSRF validation** (`middleware.go:76-106`): All non-GET state-changing requests verify Origin or Referer matches request Host. Requests without either are rejected.
+
+2. **API key in query string rejected** (`auth.go:261-265`):
+   ```go
+   if r.URL.Query().Get("api_key") != "" {
+       log.Printf("[WARN] Rejected API key from query parameter ...")
+       return false
+   }
+   ```
+   Prevents API key leakage via access logs, browser history, and Referer headers.
+
+3. **Constant-time comparison** for API key validation (`dashboard.go:324`): Uses `subtle.ConstantTimeCompare` to prevent timing attacks.
+
+4. **Login rate limiting** (`dashboard.go:95-103, 336-413`): 5 attempts per 5-minute window, 15-minute lockout. Cleanup goroutine prevents memory growth.
+
+5. **No session token in URL**: Session ID is cookie-only; never appears in query parameters or URL path.
+
+---
+
+## Conclusion
+
+The session management implementation is **robust and secure** for a production WAF dashboard. The only actionable finding is **SESS-002** (session regeneration on login), which should be addressed to fully comply with OWASP session fixation prevention guidelines. **SESS-003** is a development usability note, not a production security defect.
+
+**Risk Level:** Low

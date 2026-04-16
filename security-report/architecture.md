@@ -1,514 +1,543 @@
-# GuardianWAF Architecture Map
+# GuardianWAF Security Architecture Report
 
-## 1. Tech Stack Detection
+## 1. Technology Stack Detection
 
-### Go Version & Dependencies
-- **Go Version**: 1.25.0 (from `go.mod`)
+### Languages Detected
+
+| Language | Files | Lines of Code | Percentage |
+|----------|-------|---------------|------------|
+| Go | 339 | 7,177 | ~73% |
+| TypeScript/React | ~30 (website/src) | 2,624 | ~27% |
+
+### Primary Language: Go (1.25+)
 - **Module**: `github.com/guardianwaf/guardianwaf`
-- **Direct Dependency**: `github.com/quic-go/quic-go v0.59.0` (HTTP/3 support, build with `-tags http3`)
-- **Indirect Dependencies**: `golang.org/x/crypto`, `golang.org/x/net`, `golang.org/x/sys`, `golang.org/x/text`
-- **Build Tags**: `http3` enables QUIC support; stub implementation otherwise
+- **Location**: `D:/CODEBOX/PROJECTS/GuardianWAF/go.mod`
+- **Key Constraint**: Zero external Go dependencies (only stdlib + optional quic-go for HTTP/3)
 
-### Zero-Dependency Constraint
-GuardianWAF maintains a strict **zero external Go dependencies** policy (except quic-go for HTTP/3). All functionality uses Go standard library only.
+### Secondary Language: TypeScript/React
+- **Purpose**: React dashboard (Vite + TailwindCSS)
+- **Location**: `D:/CODEBOX/PROJECTS/GuardianWAF/website/src`
+- **Embedded**: Built React dashboard is embedded into Go binary at `internal/dashboard/dist/`
 
-### Build Targets
+### Go Dependencies
 ```
-make build       # Binary with embedded React dashboard
-make ui          # React dashboard only
-make ui-dev      # Hot-reload dev mode (:5173, proxies API to :9443)
-make docker-test # Full Docker Compose integration test
+github.com/quic-go/quic-go v0.59.0  (optional HTTP/3 support, build with -tags http3)
 ```
 
 ---
 
-## 2. Entry Points
+## 2. Application Type Classification
 
-### CLI Entry Point
-**File**: `cmd/guardianwaf/main.go` (platform-specific variants in `cmd/guardianwaf/main_default.go`)
+GuardianWAF is a **zero-dependency Web Application Firewall (WAF)** written in Go that functions as:
 
+1. **Reverse Proxy** (`internal/proxy/`) - Load balancing, health checks, circuit breaker
+2. **Security Gateway** - 25+ security layers processing requests through a pipeline
+3. **API Server** - Built-in dashboard (React), MCP server (JSON-RPC 2.0)
+4. **Multi-Tenant Platform** (`internal/tenant/`) - Per-tenant isolation and billing
+
+### Core Package Layout
 ```
-Commands:
-  guardianwaf serve     # Standalone reverse proxy (full features, dashboard on :9443)
-  guardianwaf sidecar   # Lightweight proxy (no dashboard/MCP)
-  guardianwaf check     # Dry-run request test
-  guardianwaf validate   # Config file validation
+cmd/guardianwaf/       - CLI entry point (serve, sidecar, check, validate)
+internal/engine/       - Core WAF engine, pipeline, context, scoring
+internal/layers/       - 25+ security layers (detection, mitigation, etc.)
+internal/config/       - Configuration management
+internal/proxy/        - Reverse proxy with load balancing
+internal/dashboard/    - React dashboard + REST API
+internal/mcp/          - Model Context Protocol JSON-RPC server
+internal/cluster/      - Distributed mode (gossip + leader election)
+internal/clustersync/  - Cross-node state synchronization
+internal/tenant/       - Multi-tenancy management
 ```
-
-### Public Library API
-**Files**: `guardianwaf.go`, `options.go`
-
-Key functions:
-- `New(cfg Config, opts ...Option) (*Engine, error)` — programmatic creation
-- `NewFromFile(path string, opts ...Option) (*Engine, error)` — from YAML
-- `Middleware(http.Handler) http.Handler` — HTTP middleware wrapper
-- `Check(*http.Request) Result` — dry-run scoring
-- `OnEvent(func(Event))` — event callback
-- `Stats()` / `Close()` — lifecycle
-
-### HTTP Server Entry Points
-1. **Proxy Server**: `:8088` (HTTP) / `:8443` (TLS) — WAF-protected traffic
-2. **Dashboard API**: `:9443` — Admin REST API + React SPA
-3. **MCP Server**: stdio / SSE — JSON-RPC 2.0 tool interface
 
 ---
 
-## 3. Critical Attack Surfaces
+## 3. Entry Points Mapping
 
-### 3.1 Config Parsing (`internal/config/`)
+### HTTP Routes
 
-**Files**:
-- `yaml.go` — Custom zero-dependency YAML parser (no `gopkg.in/yaml` dependency)
-- `config.go` — Config struct definitions
-- `defaults.go` — Default configuration
-- `validate.go` — Config validation
-- `serialize.go` — YAML serialization
+#### Main WAF Proxy (`cmd/guardianwaf/main_default.go`)
+- All incoming traffic passes through WAF middleware first
 
-**Key Functions**:
-- `LoadFile(path string) (*Config, error)` — loads YAML config
-- `LoadDir(dir string) (*Config, error)` — loads from directory structure (`guardianwaf.yaml`, `rules.d/`, `domains.d/`, `tenants.d/`)
-- `LoadEnv(cfg *Config)` — overlays `GWAF_*` environment variables
-- `PopulateFromNode(cfg *Config, node *Node) error` — walks Node tree to populate Config
+#### Dashboard API (`internal/dashboard/dashboard.go`)
+- **Auth**: `POST /login`, `GET /logout` - Session-based auth with HMAC-signed cookies
+- **Events**: `GET /api/events`, `GET /api/events/stats`
+- **Config**: `GET/PUT /api/config`, `POST /api/reload`
+- **Tenants**: `GET/POST /api/tenants`, `GET/PUT/DELETE /api/tenants/{id}`
+- **Rules**: `GET/POST /api/rules`, `GET/PUT/DELETE /api/rules/{id}`
+- **IP ACL**: `GET/POST /api/ip-acl`, `DELETE /api/ip-acl/{ip}`
+- **Stats**: `GET /api/stats`, `GET /api/stats/top-ips`
 
-**Attack Surface**:
-- **YAML Parser** (`yaml.go`): Custom parser handling maps, sequences, scalars, block scalars (`|`, `>`), flow collections, comments. **Does NOT support anchors, aliases, tags, or multi-document YAML** — reducing attack surface.
-- **Env Var Interpolation** (`expandEnvVars`): Supports `${VAR}` and `${VAR:-default}` patterns. Validates var names (alphanumeric + underscore only) before calling `os.Getenv()`. Double-encoding attack mitigated.
-- **File Loading** (`LoadDir`): Reads from subdirectories (`rules.d/*.yaml`, `domains.d/*.yaml`, `tenants.d/*.yaml`). Arrays are appended (not replaced).
+#### MCP Server (`internal/mcp/server.go`)
+- **Transport**: stdio (JSON-RPC 2.0) or HTTP SSE
+- **44 tools** including: `get_stats`, `get_events`, `add_blacklist`, `remove_whitelist`, `add_rate_limit`, etc.
+- **Auth**: Optional API key via `initialize` request
 
-**Vulnerability Hotspots**:
-- `expandEnvVars()` at line 1114-1169: Environment variable expansion in YAML values
-- `makeScalar()` at line 986-1028: Type coercion from YAML strings
-- `parseKeyValue()` at line 872-929: Key-value pair parsing with quote handling
+#### Cluster Sync (`internal/clustersync/handlers.go`)
+- `GET /api/cluster/health` - Node health status
+- `POST /api/cluster/sync` - Receive sync events
+- `GET /api/cluster/events` - Query events since timestamp
+- `GET /api/clusters` - List cluster configurations
+- **Auth**: HMAC-based shared secret validation
 
-### 3.2 TLS Handling (`internal/tls/`)
+#### Docker Auto-Discovery (`internal/docker/discovery.go`)
+- Watches Docker daemon for containers with `gwaf.*` labels
+- **Socket**: Unix socket (Linux) or named pipe (Windows) or Docker CLI
 
-**File**: `certstore.go`
+### CLI Commands (`cmd/guardianwaf/main.go`)
+```
+guardianwaf serve     - Full reverse proxy mode with dashboard
+guardianwaf sidecar  - Lightweight sidecar (no dashboard/MCP)
+guardianwaf check    - Dry-run request test
+guardianwaf validate - Config file validation
+guardianwaf test-alert - Test alert delivery
+```
 
-**Key Types**:
-- `CertStore` — manages TLS certificates with SNI-based selection and hot-reload
-- `CertEntry` — loaded certificate with domain coverage and modification times
-
-**Key Functions**:
-- `LoadDefaultCert(certFile, keyFile string) error` — fallback certificate
-- `LoadCert(domains []string, certFile, keyFile string) error` — per-domain certs
-- `GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, error)` — SNI-based selection callback
-- `TLSConfig() *tls.Config` — builds TLS config
-- `StartReload(interval time.Duration)` — background cert hot-reload goroutine
-
-**Security Properties**:
-- Minimum TLS version: **TLS 1.3** (hardcoded, not configurable for TLS 1.3)
-- HTTP/2 enabled via NextProtos negotiation (`h2`, `http/1.1`)
-- Certificate hot-reload via file modification time polling (30s default interval)
-- Panic recovery in reload goroutine (line 152-155)
-
-**Vulnerability Hotspots**:
-- `reloadIfChanged()` at line 210-256: File stat on every reload cycle
-- `LoadCert()` at line 63-103: Certificate loading with file stat tracking
-
-### 3.3 Proxy Handlers (`internal/proxy/`)
-
-**Files**:
-- `router.go` — Virtual host routing + path-based routing
-- `target.go` — Single backend target with reverse proxy, circuit breaker, SSRF prevention
-- `balancer.go` — Load balancing strategies (round_robin, weighted, least_conn, ip_hash)
-- `circuit.go` — Circuit breaker implementation
-- `health.go` — Health checking
-- `grpc/proxy.go` — gRPC/gRPC-Web proxy
-
-**Key Functions**:
-- `Router.ServeHTTP(w http.ResponseWriter, r *http.Request)` — line 81
-- `Target.ServeHTTP(w http.ResponseWriter, r *http.Request, stripPrefix string)` — line 205
-- `NewTarget(rawURL string, weight int) (*Target, error)` — line 124
-
-**SSRF Prevention** (`target.go`):
-- `IsPrivateOrReservedIP(host string) error` — checks loopback, private, link-local ranges
-- `SSRFDialContext() func(ctx context.Context, network, addr string) (net.Conn, error)` — DNS resolution validation at dial time (prevents DNS rebinding/TOCTOU)
-
-**Vulnerability Hotspots**:
-- `Target.ServeHTTP()` at line 205: Request proxying with strip prefix
-- `Router.lookupRoutes()` at line 112: Virtual host lookup by Host header
-- `stripPort()` at line 220: Host header port stripping (IPv6-aware)
-- **Path normalization bypass prevention**: `path.Clean(r.URL.Path)` at line 85
-
-### 3.4 Request Context & Client IP Extraction (`internal/engine/context.go`)
-
-**Key Functions**:
-- `AcquireContext(r *http.Request, paranoiaLevel int, maxBodySize int64) *RequestContext` — line 142
-- `ReleaseContext(ctx *RequestContext)` — line 247
-- `extractClientIP(r *http.Request) net.IP` — line 311
-
-**Client IP Extraction Security**:
-- Only trusts `X-Forwarded-For` / `X-Real-IP` when direct connection is from **trusted proxy**
-- Uses rightmost non-trusted IP from `X-Forwarded-For` chain (not leftmost)
-- `TrustedProxies` configuration controls which CIDRs are trusted
-- When no trusted proxies configured: **always uses `RemoteAddr`**
-
-**Untrusted Input Handled**:
-- HTTP headers (capped at 100 headers to prevent exhaustion)
-- Query parameters
-- Cookies
-- Request body (decompressed gzip/deflate with 100:1 ratio limit to prevent decompression bombs)
-- TLS info (version, cipher suite, SNI)
-
-**Vulnerability Hotspots**:
-- `extractClientIP()` at line 311-346: IP extraction from proxy headers
-- `AcquireContext()` body reading at line 192-228: Decompression bomb prevention
-- Header cap at 100 (`len(ctx.Headers) >= 100` at line 169)
+### WebSocket Support (`internal/layers/websocket/`)
+- WebSocket handshake validation
+- Per-IP connection limits
+- Frame size limits and payload scanning
 
 ---
 
-## 4. Data Flow — WAF Pipeline
+## 4. Data Flow Map
 
-### Pipeline Architecture (`internal/engine/pipeline.go`)
+### Request Processing Pipeline
 
 ```
-Request → Middleware (engine.Middleware)
-            ↓
-    AcquireContext (from sync.Pool)
-            ↓
-    TenantContext injection (optional)
-            ↓
-    Pipeline.Execute(ctx)
-            ↓
-    ┌───────────────────────────────────────────────┐
-    │  Layer 100: IPACL                            │
-    │  Layer 125: ThreatIntel                      │
-    │  Layer 150: CORS / Custom Rules              │
-    │  Layer 200: RateLimit                         │
-    │  Layer 250: ATO Protection                   │
-    │  Layer 275: APISecurity (JWT/API Key)        │
-    │  Layer 280: APIValidation                     │
-    │  Layer 300: Sanitizer                        │
-    │  Layer 350: CRS (OWASP ModSecurity)          │
-    │  Layer 400: Detection (sqli/xss/lfi/cmdi/    │
-    │              xxe/ssrf)                       │
-    │  Layer 450: VirtualPatch                       │
-    │  Layer 475: DLP                              │
-    │  Layer 500: BotDetect                        │
-    │  Layer 590: ClientSide                       │
-    │  Layer 600: Response                         │
-    └───────────────────────────────────────────────┘
-            ↓
-    determineAction(score, thresholds)
-            ↓
-    [ActionBlock] → 403 + block page
-    [ActionChallenge] → JS proof-of-work challenge
-    [ActionLog] → log only
-    [ActionPass] → next.ServeHTTP(w, r)
-            ↓
-    ReleaseContext (return to sync.Pool)
+HTTP Request
+    │
+    ▼
+┌─────────────────────────────────────────────────────────────┐
+│ AcquireContext() - sync.Pool allocation                     │
+│ - Parse HTTP request components                            │
+│ - Extract client IP (trusted proxy support)                 │
+│ - Read/decompress body (gzip/deflate, max 100:1 ratio)     │
+│ - Populate JA4 TLS fingerprint fields                       │
+│ - Initialize ScoreAccumulator                               │
+└─────────────────────────────────────────────────────────────┘
+    │
+    ▼
+┌─────────────────────────────────────────────────────────────┐
+│ Pipeline.Execute() - Ordered layers (lowest Order first)    │
+│                                                                 │
+│ Order 1:    SIEM           - Passive event forwarding          │
+│ Order 75:   Cluster        - Gossip + leader election          │
+│ Order 76:   WebSocket      - WebSocket validation              │
+│ Order 78:   gRPC           - gRPC method allowlist             │
+│ Order 95:   Canary         - Traffic splitting                 │
+│ Order 100:  IP ACL         - CIDR whitelist/blacklist         │
+│ Order 125:  Threat Intel   - IP/domain reputation feeds        │
+│ Order 140:  Cache          - Response caching                   │
+│ Order 145:  Replay         - Request/response recording        │
+│ Order 150:  CORS           - Origin validation                 │
+│ Order 150:  Custom Rules   - Geo-aware rule engine             │
+│ Order 200:  Rate Limit     - Token bucket (auto-ban)          │
+│ Order 250:  ATO Protection  - Brute force, credential stuffing │
+│ Order 275:  API Security   - JWT validation, API key auth      │
+│ Order 280:  API Validation - OpenAPI schema validation         │
+│ Order 285:  GraphQL        - Query depth/complexity limits     │
+│ Order 300:  Sanitizer      - Normalize + validate requests     │
+│ Order 310:  API Discovery  - Passive endpoint discovery         │
+│ Order 350:  CRS            - OWASP ModSecurity CRS parser       │
+│ Order 400:  Detection      - 6 detectors (sqli, xss, lfi,     │
+│                              cmdi, xxe, ssrf)                   │
+│ Order 430:  JS Challenge    - SHA-256 proof-of-work             │
+│ Order 450:  Virtual Patch  - CVE-based patching                 │
+│ Order 473:  ML Anomaly     - ONNX Isolation Forest              │
+│ Order 475:  DLP            - Credit cards, SSNs, PII            │
+│ Order 480:  AI Remediation - Generated rules from AI verdicts   │
+│ Order 500:  Bot Detection   - JA3/JA4 fingerprinting, UA,        │
+│                              behavioral analysis                │
+│ Order 590:  Client-Side    - CSP injection, Magecart detection  │
+│ Order 600:  Response       - Security headers, data masking     │
+└─────────────────────────────────────────────────────────────┘
+    │
+    ▼
+┌─────────────────────────────────────────────────────────────┐
+│ Short-circuit on ActionBlock                                 │
+│ - Score accumulation via ScoreAccumulator                     │
+│ - Findings collection per detector                            │
+└─────────────────────────────────────────────────────────────┘
+    │
+    ▼
+┌─────────────────────────────────────────────────────────────┐
+│ Proxy to upstream (if Pass/Log)                              │
+│ internal/proxy/ - Reverse proxy with circuit breaker,        │
+│ health checks, load balancing (round_robin, weighted,        │
+│ least_conn, ip_hash)                                        │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-### Request Context Flow (`internal/engine/context.go`)
-
-1. **AcquireContext** (line 142): Pooled allocation, populates all fields from HTTP request
-2. **Body Processing** (line 192-228):
-   - Read raw body (limited by `maxBodySize`)
-   - Restore original body for proxying
-   - Decompress gzip/deflate for WAF inspection (100:1 ratio limit)
-3. **Context Released** (line 247): All fields cleared, returned to pool
-
-### Layer Execution Order (`internal/engine/layer.go`)
-
-| Order | Layer | Purpose |
-|-------|-------|---------|
-| 100 | IPACL | Radix tree CIDR matching, runtime add/remove, auto-ban |
-| 125 | Threat Intel | IP/domain reputation feeds with LRU cache |
-| 150 | CORS | Origin validation, preflight caching |
-| 150 | Custom Rules | Geo-aware rule engine with dashboard CRUD |
-| 200 | Rate Limit | Token bucket per IP/path, auto-ban |
-| 250 | ATO Protection | Brute force, credential stuffing, password spray, impossible travel |
-| 275 | API Security | JWT validation (RS256/ES256/HS256), API key auth |
-| 280 | API Validation | Request/response schema validation (YAML-defined schemas) |
-| 300 | Sanitizer | Normalize + validate requests |
-| 350 | CRS | OWASP ModSecurity Core Rule Set parser and executor |
-| 400 | Detection | 6 detectors: sqli, xss, lfi, cmdi, xxe, ssrf |
-| 450 | Virtual Patch | Virtual patching layer |
-| 475 | DLP | Data Loss Prevention (credit cards, SSNs, API keys, PII) |
-| 500 | Bot Detection | JA3/JA4 TLS fingerprinting, UA, behavioral analysis |
-| 590 | Client-Side | Client-side protection injection |
-| 600 | Response | Security headers, data masking, branded block pages |
-
-### Scoring System (`internal/engine/finding.go`)
-
-- **ScoreAccumulator**: Accumulates findings from all layers
-- **Paranoia multiplier**: 1 (0.5x), 2 (1.0x), 3 (1.5x), 4 (2.0x)
-- **Score cap**: 10000 (prevents overflow)
-- **Thresholds**: `block_threshold: 50`, `log_threshold: 25` (defaults)
+### Request Context Fields (`internal/engine/context.go`)
+```
+RequestContext:
+  - Request *http.Request
+  - ClientIP net.IP
+  - Method, URI, Path, QueryParams, Headers, Cookies, Body
+  - Normalized versions (after Sanitizer at Order 300)
+  - Accumulator *ScoreAccumulator, Action Action
+  - RequestID string (UUID via crypto/rand)
+  - TLSVersion, TLSCipherSuite, JA4* fields (TLS fingerprinting)
+  - TenantID, TenantWAFConfig *config.WAFConfig
+```
 
 ---
 
 ## 5. Trust Boundaries
 
-### 5.1 Dashboard Authentication (`internal/dashboard/auth.go`)
+### Authentication (`internal/layers/apisecurity/`, `internal/dashboard/auth.go`)
 
-**Session Security**:
-- **Cookie**: `gwaf_session` with `HttpOnly`, `Secure`, `SameSite=Strict`, 24h max age
-- **HMAC-SHA256 signing**: `timestamp.creation_timestamp.signature` bound to client IP
-- **Sliding expiry**: 24 hours
-- **Absolute expiry**: 7 days
-- **API Key**: Constant-time comparison via `subtle.ConstantTimeCompare`
+#### JWT Validation (`internal/layers/apisecurity/jwt.go`)
+- **Algorithms**: RS256, ES256, HS256 (configurable allowlist)
+- **JWKS URL fetching** with SSRF protection (rejects private network IPs)
+- **Claims validation**: iss, aud, exp, nbf, iat
+- **Multi-tenant isolation** via `tenant_id` claim
 
-**Key Functions**:
-- `signSession(clientIP string) string` — line 62
-- `verifySession(token, clientIP string) bool` — line 72
-- `isAuthenticated(r *http.Request) bool` — line 121
-
-**Trust Boundary**: Dashboard API at `:9443` — requires valid session or API key
-
-### 5.2 Tenant Isolation (`internal/engine/engine.go`, `context.go`)
-
-**TenantContext** (line 67-74 in `engine.go`):
-```go
-type TenantContext struct {
-    ID            string
-    WAFConfig    *config.WAFConfig
-    VirtualHosts []config.VirtualHostConfig
-}
-```
-
-**Tenant Resolution**: Via `WithTenantContext()` / `GetTenantContext()` from `context.Context`
-**Multi-Tenant Isolation**: Per-tenant WAF config overrides via `RequestContext.TenantWAFConfig`
-
-### 5.3 IP ACL (`internal/layers/ipacl/`)
-
-- **Radix tree** CIDR matching for O(k) lookups (k = bits in address)
-- **Whitelist/Blacklist** with auto-ban support
-- **Auto-ban TTL**: configurable with `DefaultTTL` / `MaxTTL`
-
-### 5.4 API Key Validation (`internal/layers/apisecurity/apikey.go`)
-
-**Key Types**:
-- `sha256:hex` — SHA-256 hash comparison
-- `bcrypt:` — bcrypt hash (if enabled)
-
-**Functions**:
-- `Validate(key, path string) (*APIKeyConfig, error)` — standard validation
-- `ValidateConstantTime(key, path string) (*APIKeyConfig, error)` — constant-time comparison
-
-**Vulnerability Hotspot**: `Validate()` at line 65 — SHA-256 hash of provided key compared against stored hashes
-
-### 5.5 JWT Validation (`internal/layers/apisecurity/`)
-
-- Supports RS256, ES256, HS256 algorithms
-- JWKS URL fetching with TLS
-- Clock skew tolerance configurable
-- Public key PEM or file loading
-
----
-
-## 6. Authentication/Authorization Surfaces
-
-### 6.1 Dashboard API (`internal/dashboard/`)
-
-**Auth Methods**:
-1. **API Key** via `X-API-Key` header (constant-time comparison)
-2. **Session Cookie** via HMAC-SHA256 (IP-bound)
-
-**Middleware Chain** (`middleware.go`):
-- `RecoveryMiddleware` — panic recovery with JSON error response
-- `LoggingMiddleware` — request logging
-- `SecurityHeadersMiddleware` — CSP, HSTS, X-Frame-Options, etc.
-- `CORSMiddleware` — same-origin only (no cross-origin Allow)
-- `verifySameOrigin()` — CSRF protection for state-changing requests
-
-**Protected Routes**: All `/api/*` endpoints require authentication
-
-### 6.2 MCP Server (`internal/mcp/`)
-
-**Transport**: stdio (JSON-RPC 2.0) or SSE
-
-**Tool Handlers** (44 tools):
-- `get_stats`, `get_events`, `add_blacklist`, `remove_blacklist`
-- `get_top_ips`, `get_detectors`, `test_request`
-- Alerting, CRS, Virtual Patch, API Validation, Client-Side, DLP management
-
-**Security**: MCP tools expose privileged operations — access should be restricted to admin interfaces
-
-### 6.3 Proxy Authentication (`internal/layers/apisecurity/`)
-
-**JWT Validation**:
-- Header: `Authorization: Bearer <token>`
-- Supports multiple algorithms
-- JWKS URL fetching
-
-**API Key Validation**:
-- Header: `X-API-Key` or query param (query param rejected — logs warning)
-- Path-based restrictions via glob patterns
+#### API Key Authentication (`internal/layers/apisecurity/apikey.go`)
+- Keys stored as `sha256:hex` or `bcrypt:hash`
+- Path-based restrictions per key
 - Rate limiting per key
+- Constant-time comparison for hash validation
+- **No API keys in query parameters** (rejected, logs warning)
+
+#### Dashboard Session Management (`internal/dashboard/auth.go`)
+- **HMAC-signed session tokens** (SHA-256)
+- **IP binding** - tokens bound to client IP
+- **Sliding expiry**: 24-hour max session age
+- **Absolute expiry**: 7-day hard limit
+- **Concurrent session limit**: 5 per IP (oldest evicted)
+- **Session revocation** support (sync.Map storage)
+- Cookie flags: `HttpOnly`, `Secure`, `SameSite=Strict`
+
+### Rate Limiting (`internal/layers/ratelimit/ratelimit.go`)
+- Token bucket algorithm
+- Per-IP and per-IP+path scopes
+- Auto-ban after configurable failure count
+- Radix tree for efficient CIDR matching
+
+### Input Validation (`internal/layers/sanitizer/`)
+- Max URL length
+- Max header count (100) and size
+- Max body size with decompression bomb detection (100:1 ratio)
+- Null byte blocking
+- Encoding normalization
+- HTTP method allowlisting
+
+### CORS (`internal/layers/cors/`)
+- Origin allowlisting
+- Method and header allowlisting
+- Credential validation
+- Preflight caching
+- Strict mode support
 
 ---
 
-## 7. Vulnerability Hotspot Summary
+## 6. External Integrations
 
-### Critical Attack Surfaces
+### Databases/Caches
 
-| Component | File | Function | Risk |
-|-----------|------|----------|------|
-| YAML Parsing | `config/yaml.go` | `Parse()`, `expandEnvVars()` | Injection via env var interpolation |
-| Config Loading | `config/validate.go` | `LoadFile()`, `LoadDir()` | Path traversal in subdirectory loading |
-| Client IP Extraction | `engine/context.go` | `extractClientIP()` | IP spoofing via X-Forwarded-For |
-| Body Decompression | `engine/context.go` | `AcquireContext()` | Decompression bomb ( mitigated via 100:1 ratio cap) |
-| Virtual Host Routing | `proxy/router.go` | `lookupRoutes()` | Host header injection |
-| SSRF Prevention | `proxy/target.go` | `SSRFDialContext()` | DNS rebinding (mitigated via pre-dial DNS check) |
-| Session Signing | `dashboard/auth.go` | `signSession()` | Session fixation/hijacking |
-| API Key Hashing | `apisecurity/apikey.go` | `Validate()` | Timing attack (mitigated via constant-time comparison) |
-| Path Normalization | `proxy/router.go` | line 85 | Path traversal bypass |
-| Header Cap | `engine/context.go` | line 169 | Header exhaustion DoS |
-| TLS Cert Reload | `tls/certstore.go` | `reloadIfChanged()` | TOCTOU race condition |
+#### Redis (`internal/layers/cache/`)
+```yaml
+Cache:
+  backend: "redis"
+  redis_addr: string
+  redis_password: string  # Stored in config
+  redis_db: int
+```
+- Used for response caching backend
+- Optional memory backend for zero-dependency deployments
 
-### Security Mitigations in Place
+### Email/SMTP (`internal/alerting/email.go`)
+```yaml
+Email:
+  smtp_host: string
+  smtp_port: int (default 587)
+  username: string
+  password: string  # Stored in config
+  use_tls: bool
+```
+- TLS 1.2+ required for SMTP connections
+- **SMTP header injection prevention**: CRLF sanitization on From, To, Subject
 
-1. **SSRF Prevention**: DNS resolution at dial time, not at config time
-2. **Decompression Bomb Prevention**: 100:1 ratio limit
-3. **Header Exhaustion Prevention**: Cap at 100 headers
-4. **Session Binding**: HMAC-SHA256 bound to client IP
-5. **Constant-Time Comparison**: API key validation uses `subtle.ConstantTimeCompare`
-6. **Score Cap**: 10000 max score prevents overflow attacks
-7. **TLS 1.3 Minimum**: Cannot be downgraded
-8. **No Query Param API Keys**: Rejected and logged
-9. **Path Normalization**: `path.Clean()` prevents traversal bypass
+### Third-Party APIs
+
+#### SIEM Integration (`internal/layers/siem/`)
+```yaml
+SIEM:
+  endpoint: string
+  format: "cef" | "leef" | "json" | "splunk" | "elastic"
+  api_key: string  # Stored in config
+  skip_verify: bool
+```
+- CEF (Common Event Format), LEEF, JSON, Splunk, Elastic formats
+- Batch sending with configurable size/interval
+
+#### AI Analysis (`internal/ai/`)
+```yaml
+AIAnalysis:
+  catalog_url: string  # models.dev catalog
+  batch_size: int
+  batch_interval: duration
+  max_tokens_per_hour: int64
+  auto_block: bool (blocks if confidence >= 70%)
+```
+- OpenAI-compatible API client
+- Background batch processing (NOT per-request)
+- Cost limits per hour/day
+
+#### Threat Intel Feeds (`internal/layers/threatintel/`)
+```yaml
+ThreatIntel:
+  feeds:
+    - type: "file" | "url"
+      path: string  # for type=file
+      url: string   # for type=url
+      refresh: duration
+      format: "json" | "jsonl" | "csv"
+```
+- LRU cache for IP/domain reputation
+- Configurable TTL
+
+### Cloud Services
+
+#### ACME/Let's Encrypt (`internal/acme/`)
+```yaml
+ACME:
+  enabled: bool
+  email: string
+  domains: []string
+  cache_dir: string
+```
+- HTTP-01 challenge for certificate issuance
+- Automatic certificate renewal
+
+### Container Orchestration
+
+#### Docker Auto-Discovery (`internal/docker/discovery.go`)
+- **Label prefix**: `gwaf.*` (configurable)
+- **Socket**: Unix socket (Linux), named pipe (Windows), Docker CLI
+- **Networks**: Auto-detects container IP from specified network
+- **Health checks**: Configurable interval/path
 
 ---
 
-## 8. Key File Reference
+## 7. Authentication Architecture
 
-| Concern | File Path | Key Functions/Types |
-|---------|-----------|-------------------|
-| Public API | `guardianwaf.go` | `Engine`, `New()`, `Middleware()`, `Check()` |
-| Options | `options.go` | `Option` functional options |
-| Engine | `internal/engine/engine.go` | `Engine`, `Middleware()`, `Check()` |
-| Pipeline | `internal/engine/pipeline.go` | `Pipeline`, `Execute()`, `AddLayer()` |
-| Context | `internal/engine/context.go` | `RequestContext`, `AcquireContext()`, `extractClientIP()` |
-| Findings | `internal/engine/finding.go` | `Finding`, `ScoreAccumulator` |
-| Layer Interface | `internal/engine/layer.go` | `Layer`, `Action`, `Order*` constants |
-| Events | `internal/engine/event.go` | `Event`, `NewEvent()` |
-| Config Parsing | `internal/config/yaml.go` | `Parse()`, `Node`, `expandEnvVars()` |
-| Config Loading | `internal/config/config.go` | `Config` structs |
-| Config Validation | `internal/config/validate.go` | `Validate()`, `LoadFile()`, `LoadDir()` |
-| Config Defaults | `internal/config/defaults.go` | `DefaultConfig()` |
-| Proxy Router | `internal/proxy/router.go` | `Router`, `ServeHTTP()` |
-| Proxy Target | `internal/proxy/target.go` | `Target`, `ServeHTTP()`, `SSRFDialContext()` |
-| Load Balancer | `internal/proxy/balancer.go` | `Balancer`, strategies |
-| Circuit Breaker | `internal/proxy/circuit.go` | `CircuitBreaker` |
-| TLS Cert Store | `internal/tls/certstore.go` | `CertStore`, `GetCertificate()` |
-| Dashboard Auth | `internal/dashboard/auth.go` | `signSession()`, `verifySession()`, `isAuthenticated()` |
-| Dashboard Middleware | `internal/dashboard/middleware.go` | `RecoveryMiddleware`, `SecurityHeadersMiddleware` |
-| Dashboard Routes | `internal/dashboard/dashboard.go` | HTTP handlers |
-| API Security | `internal/layers/apisecurity/apikey.go` | `APIKeyValidator`, `Validate()` |
-| Detection Layer | `internal/layers/detection/detector.go` | `Layer` interface |
-| SQli Detector | `internal/layers/detection/sqli/` | Tokenizer-based detection |
-| XSS Detector | `internal/layers/detection/xss/` | Parser-based detection |
-| Sanitizer | `internal/layers/sanitizer/validate.go` | `ValidateRequest()` |
-| MCP Server | `internal/mcp/server.go` | `Server`, `HandleRequestJSON()` |
-| MCP Handlers | `internal/mcp/handlers.go` | Tool implementations |
-| Event Store | `internal/events/memory.go` | `MemoryStore` |
-| Event Bus | `internal/events/bus.go` | `EventBus` |
-
----
-
-## 9. Data Flow Diagrams
-
-### WAF Request Processing
-
+### JWT Flow (`internal/layers/apisecurity/jwt.go`)
 ```
-Client Request
-      │
-      ▼
-┌─────────────────────────────────────────────────────────────┐
-│ engine.Middleware (line 260 in engine.go)                   │
-│  1. Panic recovery (defer recover)                        │
-│  2. AcquireContext from pool                              │
-│  3. Inject TenantContext if present                       │
-│  4. Execute pipeline                                      │
-│  5. Determine action from score + thresholds              │
-│  6. Apply security headers                                │
-│  7. ReleaseContext to pool                               │
-│  8. Store + publish event                                │
-│  9. Write response (block/challenge/pass)                 │
-└─────────────────────────────────────────────────────────────┘
-      │
-      ▼ (if pass)
-┌─────────────────────────────────────────────────────────────┐
-│ Proxy Router (router.go:81)                               │
-│  1. Normalize path (path.Clean)                          │
-│  2. Lookup virtual host by Host header                    │
-│  3. Match route by path prefix                           │
-│  4. Select target via load balancer                       │
-│  5. Strip prefix if configured                           │
-└─────────────────────────────────────────────────────────────┘
-      │
-      ▼
-┌─────────────────────────────────────────────────────────────┐
-│ Target.ServeHTTP (target.go:205)                          │
-│  1. Check circuit breaker state                           │
-│  2. Track active connections                              │
-│  3. Clone request with strip prefix                       │
-│  4. Proxy via httputil.ReverseProxy                       │
-│  5. Custom Director: strip X-Forwarded-Host/Proto        │
-│  6. SSRF-preventing DialContext                           │
-│  7. ErrorHandler: drain body, record failure             │
-│  8. ModifyResponse: record success/failure               │
-└─────────────────────────────────────────────────────────────┘
-      │
-      ▼
-Upstream Backend
+1. Request arrives with Authorization: Bearer <token>
+2. JWTValidator.Validate(token) called
+3. Algorithm allowlist check (rejects unspecified algos)
+4. Signature verification (RSA/ECDSA/HMAC)
+5. Claims validation: exp, nbf, iat (with clock skew tolerance)
+6. Issuer/Audience validation
+7. JWKS refresh if kid not cached (with SSRF check)
+8. Return claims or error
 ```
 
-### Detection Pipeline Detail
-
+### API Key Flow (`internal/layers/apisecurity/apikey.go`)
 ```
-Detection Layer (Order 400)
-      │
-      ├── sqli/    ──► Tokenizer-based SQL injection detection
-      │                 (keywords, patterns, token analysis)
-      ├── xss/     ──► Parser-based XSS detection
-      │                 (HTML parsing, script tag detection)
-      ├── lfi/     ──► Local file inclusion detection
-      │                 (path traversal patterns, sensitive paths)
-      ├── cmdi/    ──► Command injection detection
-      │                 (shell metacharacters, dangerous commands)
-      ├── xxe/     ──► XML external entity detection
-      │                 (XML parsing, entity expansion)
-      └── ssrf/    ──► Server-side request forgery detection
-                        (URL parsing, private IP ranges)
+1. Request arrives with X-API-Key header
+2. Hash key with SHA-256
+3. Lookup hash in keys map (constant-time)
+4. Check key enabled
+5. Check path allowed for key
+6. Check rate limit not exceeded
+7. Return config or error
+```
 
-Each detector:
-  1. Tokenizes/analyzes request components
-  2. Returns []Finding with Score, Severity, Location
-  3. ScoreAccumulator.AddMultiple() merges findings
-  4. Final score compared against thresholds
+### Dashboard Session Flow (`internal/dashboard/auth.go`)
+```
+Login:
+1. POST /login with API key
+2. Constant-time comparison with stored key
+3. Generate HMAC-signed token (timestamp.created.sig)
+4. Token includes client IP in HMAC
+5. Set secure cookie with HttpOnly, SameSite=Strict
+
+Subsequent Requests:
+1. verifySession(cookie, clientIP)
+2. Check not revoked (sync.Map)
+3. Verify HMAC signature
+4. Check sliding expiry (24h)
+5. Check absolute expiry (7d)
+6. Return true/false
+```
+
+### Cluster Authentication (`internal/clustersync/handlers.go`)
+```
+checkAuth(r):
+- Extract X-Node-Secret header
+- Constant-time comparison with shared_secret
+- Reject if mismatch
 ```
 
 ---
 
-## 10. Security Configuration Reference
+## 8. File Structure Analysis
 
-### Default Thresholds
-- **Block threshold**: 50
-- **Log threshold**: 25
-- **Paranoia level**: 2 (1.0x multiplier)
+### Configuration
+```
+D:/CODEBOX/PROJECTS/GuardianWAF/
+  guardianwaf.yaml          # Main configuration file
+  go.mod / go.sum          # Go module definition
+  internal/config/
+    config.go              # All config structs (1694 lines)
+```
 
-### Default Sanitizer Limits
-- **MaxURLLength**: 8192 bytes
-- **MaxHeaderSize**: 8192 bytes
-- **MaxHeaderCount**: 100
-- **MaxBodySize**: 10MB
-- **MaxCookieSize**: 4096 bytes
-- **BlockNullBytes**: true
+### Docker/Deployment
+```
+D:/CODEBOX/PROJECTS/GuardianWAF/
+  Dockerfile               # Single-stage Docker build
+  docker-compose.yml       # Local development
+  docker-compose.prod.yml   # Production setup
+  docker-compose.test.yml   # Integration testing
+  .github/workflows/       # CI/CD pipelines
+```
 
-### Default Detection Settings
-- All 6 detectors enabled (sqli, xss, lfi, cmdi, xxe, ssrf)
-- Multiplier: 1.0 for all
-- Exclusions: none by default
+### Sensitive Paths
 
-### TLS Configuration
-- **Minimum version**: TLS 1.3
-- **HTTP/2**: enabled via ALPN (`h2`, `http/1.1`)
-- **Certificate hot-reload**: 30s interval
+| Path | Purpose | Auth |
+|------|---------|------|
+| `/api/cluster/*` | Cluster management | Shared secret |
+| `/api/tenants` | Multi-tenant admin | Dashboard API key |
+| `/api/config` | WAF configuration | Dashboard API key |
+| `/metrics` | Prometheus metrics | None (internal) |
+| `/healthz` | Kubernetes probe | None (internal) |
+| `/api/mcp` | MCP server | Optional API key |
 
-### Session Security
-- **Cookie name**: `gwaf_session`
-- **Max age**: 24 hours (sliding)
-- **Absolute max**: 7 days
-- **Flags**: HttpOnly, Secure, SameSite=Strict
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `guardianwaf.go` | Public library API |
+| `options.go` | Functional options pattern |
+| `internal/engine/pipeline.go` | Layer execution engine |
+| `internal/engine/context.go` | Request context (sync.Pool) |
+| `internal/engine/engine.go` | WAF engine core |
+| `internal/dashboard/auth.go` | Dashboard authentication |
+| `internal/layers/apisecurity/jwt.go` | JWT validation |
+| `internal/layers/apisecurity/apikey.go` | API key validation |
+| `internal/tls/certstore.go` | TLS certificate management |
+| `internal/mcp/server.go` | MCP JSON-RPC server |
+
+---
+
+## 9. Detected Security Controls
+
+### WAF Core Features (Self-Referential)
+
+| Feature | Location | Order |
+|---------|----------|-------|
+| SQL Injection Detection | `internal/layers/detection/sqli/` | 400 |
+| XSS Detection | `internal/layers/detection/xss/` | 400 |
+| LFI Detection | `internal/layers/detection/lfi/` | 400 |
+| Command Injection Detection | `internal/layers/detection/cmdi/` | 400 |
+| XXE Detection | `internal/layers/detection/xxe/` | 400 |
+| SSRF Detection | `internal/layers/detection/ssrf/` | 400 |
+
+### Security Headers (`internal/layers/response/`)
+```yaml
+SecurityHeaders:
+  X-Content-Type-Options: "nosniff"
+  X-Frame-Options: "DENY" | "SAMEORIGIN"
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: ...
+  HSTS: (with includeSubDomains)
+```
+
+### Content Security Policy (`internal/layers/clientside/`)
+- CSP header injection
+- Report-only mode
+- Per-directive allowlists
+
+### Bot Detection (`internal/layers/botdetect/`)
+- JA3/JA4 TLS fingerprinting
+- User-Agent analysis
+- Behavioral analysis
+- Biometric detection (mouse/keyboard)
+- Browser fingerprinting (canvas, WebGL, fonts)
+- hCaptcha/Turnstile integration
+
+### JS Challenge (`internal/layers/challenge/`)
+- SHA-256 proof-of-work
+- Configurable difficulty (leading zero bits)
+- Cookie-based validation
+- HMAC-secret signing
+
+### DLP (`internal/layers/dlp/`)
+```yaml
+DLP:
+  patterns:  # credit cards, SSNs, API keys, PII
+  scan_request: bool
+  scan_response: bool
+  block_on_match: bool
+  mask_response: bool
+```
+
+### Rate Limiting (`internal/layers/ratelimit/`)
+- Token bucket algorithm
+- Per-IP and per-path limits
+- Auto-ban with TTL
+- Radix tree for CIDR matching
+
+### IP ACL (`internal/layers/ipacl/`)
+- Whitelist/blacklist with CIDR support
+- Radix tree for efficient matching
+- Runtime add/remove via API
+
+### Zero Trust (`internal/layers/zerotrust/`)
+- mTLS requirement option
+- Device attestation
+- Session TTL management
+
+---
+
+## 10. Language Detection Summary
+
+| Language | Type | Primary Use | LOC | % |
+|----------|------|-------------|-----|---|
+| Go | Compiled | WAF engine, proxy, layers, CLI | 7,177 | ~73% |
+| TypeScript | Interpreted | React dashboard UI | 2,624 | ~27% |
+
+### Build Artifacts
+- `guardianwaf` (Linux x86-64 binary)
+- `guardianwaf.exe` (Windows binary)
+- Docker image (single-stage build)
+
+### No External Go Dependencies
+- Only Go standard library used in core
+- Optional `quic-go` for HTTP/3 (build tag required)
+- Frontend npm packages are isolated from Go codebase
+
+---
+
+## Security Architecture Highlights
+
+### Strengths
+
+1. **Zero-Dependency Core**: Minimal attack surface in Go code
+2. **Pipeline Architecture**: Clear separation of concerns, ordered execution
+3. **sync.Pool Allocation**: Zero-allocation hot paths for performance
+4. **Constant-Time Comparisons**: Timing-safe authentication (HMAC, API keys)
+5. **IP Binding**: Session tokens bound to client IP
+6. **Trusted Proxy Support**: X-Forwarded-For only trusted from configured CIDRs
+7. **SSRF Protection**: JWKS URL fetching validates against private networks
+8. **SMTP Header Injection**: CRLF sanitization on all email headers
+9. **Decompression Bomb Detection**: 100:1 ratio limit on decompressed content
+10. **Multi-Tenant Isolation**: Per-tenant WAF config and rate tracking
+
+### Potential Attack Surfaces
+
+1. **MCP Server** (`/api/mcp`): JSON-RPC interface with 44 tools - requires API key protection
+2. **Cluster Sync** (`/api/cluster/*`): Inter-node communication with shared secret auth
+3. **Docker Discovery**: Unix socket access for container auto-discovery
+4. **Dashboard**: Session-based auth with API key fallback
+5. **JWKS Fetching**: External HTTP calls to third-party JWKS endpoints
+
+### Configuration Security
+
+- API keys stored in config file (not hardcoded)
+- TLS minimum version: 1.3 for cert store
+- Dashboard sessions use `Secure` cookie flag
+- Rate limiting prevents brute force

@@ -1,188 +1,291 @@
-# Dependency Audit — GuardianWAF
+# Dependency Security Audit Report
 
-**Audited:** 2026-04-14
-**Go version:** 1.26.1 (runtime: `go1.26.1 windows/amd64`)
-**Go module declared:** `go 1.25.0` (go.mod), 1.26.1 (build environment)
-**Node/npm:** Dashboard uses npm (5370-line `package-lock.json` present)
-
----
-
-## 1. Go Dependencies (go.mod)
-
-### Direct Dependencies
-
-| Module | Version | Purpose | License | Notes |
-|--------|---------|---------|---------|-------|
-| `github.com/quic-go/quic-go` | **v0.59.0** | HTTP/3 support (QUIC) | MIT | **Build-tag gated:** only compiled with `-tags http3` |
-
-### Indirect Dependencies (transitive from quic-go)
-
-| Module | Version | License | Notes |
-|--------|---------|---------|-------|
-| `github.com/quic-go/qpack` | v0.6.0 | MIT | QPACK (HPACK extension for HTTP/3) |
-| `golang.org/x/crypto` | v0.49.0 | BSD-3-Clause | Cryptographic primitives |
-| `golang.org/x/net` | v0.52.0 | BSD-3-Clause | Networking |
-| `golang.org/x/sys` | v0.42.0 | BSD-3-Clause | System calls |
-| `golang.org/x/text` | v0.35.0 | BSD-3-Clause | Text processing |
-| `github.com/davecgh/go-spew` | v1.1.1 | ISC | Test utility (go-spew) |
-| `github.com/pmezard/go-difflib` | v1.0.0 | BSD-3-Clause | Test utility |
-| `github.com/stretchr/testify` | v1.11.1 | MIT | Test assertions |
-| `go.uber.org/mock` | v0.5.2 | BSD-3-Clause | Test mocking |
-| `gopkg.in/yaml.v3` | v3.0.1 | Apache-2.0 | YAML parsing |
-
-**Go dependency surface: 1 direct, 9 transitive total.** Zero-dependency constraint is met for the base build.
-
-### quic-go Assessment
-
-`quic-go` is the only third-party Go dependency and it is **build-gated behind `http3` tag** — not compiled in the standard build. The latest stable major version is v0.49.x as of late 2024/early 2025, but v0.59.0 is significantly ahead. At time of writing, no critical CVEs are known against quic-go v0.59.x. However:
-
-- **quic-go v0.49+** had a known DoS vulnerability (CVE-2024-47425 / GHSA-xvj9-2w2q-jm8q) affecting versions `< 0.48.0`. v0.59.0 is well past that fix.
-- Version skipping from v0.49 to v0.59 jumps several minor versions. No known vulnerabilities in v0.52+.
-
-**Recommendation:** Pin `quic-go` to the latest stable and monitor https://github.com/quic-go/quic-go/security/advisories.
-
-### golang.org/x/* Assessment
-
-All `golang.org/x/*` dependencies are at recent versions (sys v0.42.0, crypto v0.49.0, net v0.52.0, text v0.35.0). No known CVEs for these versions. `golang.org/x/net` v0.52.0 contains fixes for CVE-2024-45338 (parseHost bug in ProxyFromEnvironment).
-
-### Build Tags and CGO
-
-- **No CGO used anywhere.** The codebase is 100% pure Go.
-- Two build files per binary: `main_default.go` (standard, no http3), `main.go` (http3 stub, build-gated).
-- HTTP/3 is entirely optional and compiled only with `-tags http3`.
-- No external C dependencies, no system library linking.
+**Project:** GuardianWAF
+**Date:** 2026-04-16
+**Auditor:** sc-dependency-audit skill
 
 ---
 
-## 2. npm Dependencies (internal/dashboard/ui/package.json)
+## Executive Summary
 
-**Lock file:** `package-lock.json` exists with 5370 lines. Good — semver ranges are pinned.
+GuardianWAF maintains an **excellent supply chain posture** with minimal dependencies. The project enforces a **zero external Go dependencies** policy (only optional quic-go for HTTP/3), and both Node.js frontends pass `npm audit` with zero vulnerabilities.
 
-### Production Dependencies
+| Ecosystem | Direct Dependencies | Transitive Dependencies | Known CVEs |
+|-----------|---------------------|-------------------------|------------|
+| Go | 1 (quic-go) | 18 (mostly test/dev) | 0 |
+| Node.js (dashboard) | 8 | ~270 (lockfile) | 0 |
+| Node.js (website) | 7 | ~369 (lockfile) | 0 |
 
-| Package | Version (pinned via lock) | Purpose | Risk |
-|---------|--------------------------|---------|------|
-| `react` | ^19.0.0 | UI framework | LOW |
-| `react-dom` | ^19.0.0 | DOM rendering | LOW |
-| `react-router` | ^7.0.0 | Client-side routing | LOW |
-| `@xyflow/react` | ^12.10.1 | Node/graph editor (React Flow) | LOW |
-| `lucide-react` | ^0.500.0 | Icons | LOW |
-| `clsx` | ^2.1.0 | Class merging | LOW |
-| `class-variance-authority` | ^0.7.0 | Component variance | LOW |
-| `tailwind-merge` | ^3.0.0 | Tailwind class merging | LOW |
+---
 
-### Dev Dependencies (significant)
+## 1. Go Dependencies
 
-| Package | Version | Purpose | Notes |
-|---------|---------|---------|-------|
-| `vite` | ^6.0.0 | Build tool | |
-| `tailwindcss` | ^4.0.0 | CSS framework | |
-| `@tailwindcss/vite` | ^4.0.0 | Tailwind Vite plugin | |
-| `@vitejs/plugin-react` | ^4.5.0 | React Vite plugin | |
-| `typescript` | ^5.7.0 | Type checking | |
-| `eslint` | ^9.39.4 | Linting | |
-| `@types/react` | ^19.0.0 | TypeScript types | |
-| `vitest` | ^4.1.4 | Unit testing | |
-| `jsdom` | ^29.0.2 | DOM simulation for tests | |
-| `@testing-library/react` | ^16.3.2 | React testing | |
+### 1.1 Direct Dependencies
 
-### Known npm Security Concerns
+| Module | Version | Purpose | Required |
+|--------|---------|---------|----------|
+| `github.com/quic-go/quic-go` | v0.59.0 | HTTP/3 QUIC support | Optional (`-tags http3`) |
 
-1. **`@xyflow/react` v12.x:** React Flow v12 is a mature library. No critical CVEs at time of audit. However, graph/node-editor libraries process user-provided data — monitor for injection vectors in node configuration.
+**Build constraint:** Only included when building with `-tags http3`. Core WAF operates with zero external dependencies.
 
-2. **`tailwindcss` v4.x:** Tailwind CSS 4.x is the latest major. A CSS injection vulnerability was found in older versions (CVE-2023-3867 — arbitrary class injection via special characters). Ensure the build output is properly sanitized and not user-controlled. The `dist/` output is build-generated and embedded at compile time, not served from user input.
+### 1.2 Transitive Dependencies (from go.mod)
 
-3. **`lucide-react` ^0.500.0:** 500.0 is a very high version number. Lucide uses incremental major versioning. v500.x is a recent release. Check for icon SVG sanitization — icons are rendered as inline SVG, ensure no XSS vector via icon name.
+| Module | Version | Type | Origin |
+|--------|---------|------|--------|
+| `github.com/quic-go/qpack` | v0.6.0 | indirect | quic-go |
+| `golang.org/x/crypto` | v0.49.0 | indirect | quic-go |
+| `golang.org/x/net` | v0.52.0 | indirect | quic-go |
+| `golang.org/x/sys` | v0.42.0 | indirect | quic-go |
+| `golang.org/x/text` | v0.35.0 | indirect | quic-go |
+| `github.com/davecgh/go-spew` | v1.1.1 | indirect | testify |
+| `github.com/pmezard/go-difflib` | v1.0.0 | indirect | testify |
+| `github.com/stretchr/testify` | v1.11.1 | indirect | test |
+| `go.uber.org/mock` | v0.5.2 | indirect | test |
+| `golang.org/x/mod` | v0.33.0 | indirect | tools |
+| `golang.org/x/sync` | v0.20.0 | indirect | tools |
+| `golang.org/x/term` | v0.41.0 | indirect | tools |
+| `golang.org/x/tools` | v0.42.0 | indirect | tools |
+| `gopkg.in/yaml.v3` | v3.0.1 | indirect | config |
+| `gopkg.in/check.v1` | v1.0.0-20201130134442-10cb98267c6c | indirect | test |
+| `github.com/jordanlewis/gcassert` | v0.0.0-20250430164644-389ef753e22e | indirect | test |
+| `github.com/kr/pretty` | v0.3.1 | indirect | test |
+| `github.com/rogpeppe/go-internal` | v1.10.0 | indirect | test |
 
-4. **`jsdom` v29.x:** Used in test environment only, not bundled in production. Acceptable risk if CI/test environment is isolated.
+### 1.3 Module Integrity Verification
 
-### Embedded Assets
-
-```go
-// internal/dashboard/dashboard.go (lines 27-33)
-var distFS embed.FS  // React build output (Vite-hashed assets)
-
-var staticFiles embed.FS  // Legacy static assets
+```
+$ go mod verify
+all modules verified
 ```
 
-Two `embed.FS` instances:
-- `distFS` — compiled React/Vite build from `internal/dashboard/ui/dist/`
-- `staticFiles` — legacy static files from `internal/dashboard/static/`
+**Status:** PASSED - All modules match their recorded checksums.
 
-Both are embedded at **compile time** from the local filesystem, not fetched from a CDN. This eliminates:
-- CDN compromise risk
-- Dependency confusion via remote assets
-- Supply chain attack through embedded scripts
+### 1.4 CVE Analysis for quic-go v0.59.0
 
-**Build verification:** `distFS` serves Vite content-hashed JS/CSS with immutable cache headers. The `handleDistAssets` handler (dashboard.go line 1743) explicitly blocks `..` path traversal.
+**Published:** 2026-01-11
+**Go Version:** 1.24+
 
----
+At time of audit, no known CVEs affecting quic-go v0.59.0 were identified in public vulnerability databases. The module is actively maintained with regular updates.
 
-## 3. Dependency Confusion / Typosquatting Analysis
+### 1.5 Supply Chain Risk Assessment (Go)
 
-### Go Module Paths
-All Go imports use canonical `github.com/guardianwaf/guardianwaf` path. No forks, no internal replacements, no direct absolute URL imports. The only external module is `github.com/quic-go/quic-go` — a well-known, canonical package.
+| Factor | Rating | Notes |
+|--------|--------|-------|
+| Dependency Count | LOW | Only 1 optional direct dependency |
+| Dependency Origin | TRUSTED | proxy.golang.org (Google-operated) |
+| Module Integrity | VERIFIED | go mod verify passes |
+| Vulnerability History | CLEAN | No known CVEs in quic-go |
+| Attack Surface | MINIMAL | quic-go only used for HTTP/3 feature |
 
-**No `replace` directives** in go.mod — builds depend on the upstream module proxy.
-
-**Mitigation available:** Consider vendoring (`go mod vendor`) for air-gapped builds to eliminate proxy dependency.
-
-### npm Package Names
-All npm packages are standard, canonical names from npmjs.com. No scoped packages that could be impersonated. Dashboard package name `guardianwaf-dashboard` is private (`"private": true`).
+**Overall Go Supply Chain Risk: VERY LOW**
 
 ---
 
-## 4. Additional Security Observations
+## 2. Node.js Dependencies - Dashboard UI
 
-### noinline Suppressions
+**Location:** `internal/dashboard/ui/`
+**Lockfile:** `package-lock.json` (lockfileVersion 3)
+**Packages:** ~271 unique packages
 
-| Location | Suppression | Issue | Severity |
-|----------|-------------|-------|----------|
-| `internal/layers/threatintel/feed.go:55` | `//nolint:gosec` | `InsecureSkipVerify: true` for threat intel feed TLS | MEDIUM |
-| `internal/mcp/sse_test.go` (multiple) | `//nolint:noctx` | `http.Get`/`http.Post` without context — test code only | LOW |
+### 2.1 Direct Dependencies (Production)
 
-**Only 1 suppression in production code** (threat intel TLS skip-verify). This is acceptable if the threat intel feed URL is operator-configured and not user-controlled.
+| Package | Version | Purpose |
+|---------|---------|---------|
+| `@xyflow/react` | ^12.10.1 | React Flow (routing topology graph) |
+| `class-variance-authority` | ^0.7.0 | CSS class variance utility |
+| `clsx` | ^2.1.0 | Class name utility |
+| `lucide-react` | ^0.500.0 | Icon library |
+| `react` | ^19.0.0 | UI framework |
+| `react-dom` | ^19.0.0 | React DOM renderer |
+| `react-router` | ^7.0.0 | Routing |
+| `tailwind-merge` | ^3.0.0 | Tailwind class merge utility |
 
-### SSRF Protection
+### 2.2 Development Dependencies
 
-The codebase has explicit SSRF protection for upstream target configuration:
-```go
-// internal/proxy/proxy.go — IsPrivateOrReservedIP() check before adding targets
-proxy.PrivateTargetsAllowed() && proxy.IsPrivateOrReservedIP(parsed.Hostname())
+| Package | Version | Purpose |
+|---------|---------|---------|
+| `@eslint/js` | ^9.39.4 | ESLint JavaScript support |
+| `@tailwindcss/vite` | ^4.0.0 | Tailwind Vite plugin |
+| `@testing-library/jest-dom` | ^6.9.1 | Jest DOM testing |
+| `@testing-library/react` | ^16.3.2 | React testing |
+| `@testing-library/user-event` | ^14.6.1 | User event simulation |
+| `@types/react` | ^19.0.0 | TypeScript types |
+| `@types/react-dom` | ^19.0.0 | TypeScript types |
+| `@vitejs/plugin-react` | ^4.5.0 | Vite React plugin |
+| `eslint` | ^9.39.4 | Linter |
+| `eslint-plugin-react-hooks` | ^7.0.1 | React hooks linting |
+| `eslint-plugin-react-refresh` | ^0.5.2 | HMR linting |
+| `jsdom` | ^29.0.2 | DOM simulation for tests |
+| `tailwindcss` | ^4.0.0 | CSS framework |
+| `typescript` | ^5.7.0 | TypeScript compiler |
+| `typescript-eslint` | ^8.58.1 | TypeScript ESLint |
+| `vite` | ^6.0.0 | Build tool |
+| `vitest` | ^4.1.4 | Test runner |
+
+### 2.3 Audit Results
+
+```
+$ npm audit
+found 0 vulnerabilities
 ```
 
-### Docker Auto-Discovery
-
-Docker socket operations are platform-abstracted (Unix socket on Linux, named pipe on Windows). No privileged Docker operations by default.
+**Status:** PASSED - No security vulnerabilities detected.
 
 ---
 
-## 5. Summary Findings
+## 3. Node.js Dependencies - Website
 
-| Severity | Finding | Action Required |
-|----------|---------|-----------------|
-| **Info** | Go module declared `go 1.25.0`, build uses `go1.26.1` — minor version mismatch, not a security issue | Monitor |
-| **Info** | Only 1 direct Go dependency (quic-go), build-gated behind `http3` tag | No action |
-| **Info** | quic-go v0.59.0 is ahead of latest stable (v0.49.x) — no known CVEs | Monitor quic-go advisories |
-| **Info** | No CGO, no external C dependencies, 100% pure Go | Good |
-| **Low** | `InsecureSkipVerify: true` in threat intel feed — must be operator opt-in | Document; consider adding config flag |
-| **Low** | `tailwindcss` v4.x — ensure no untrusted CSS class injection | Acceptable (build-time generated) |
-| **Info** | `package-lock.json` exists and is pinned | Good |
-| **Info** | Embed assets are compile-time local, not CDN-fetched | Good |
-| **Info** | No `replace` directives, no fork imports, canonical module paths only | Good |
-| **Info** | No vendor directory — builds depend on proxy availability | Consider vendoring for air-gapped |
+**Location:** `website/`
+**Lockfile:** `package-lock.json` (lockfileVersion 3)
+**Packages:** ~369 unique packages
+
+### 3.1 Direct Dependencies (Production)
+
+| Package | Version | Purpose |
+|---------|---------|---------|
+| `class-variance-authority` | ^0.7.1 | CSS class variance utility |
+| `clsx` | ^2.1.1 | Class name utility |
+| `lucide-react` | ^0.577.0 | Icon library |
+| `react` | ^19.2.4 | UI framework |
+| `react-dom` | ^19.2.4 | React DOM renderer |
+| `react-router-dom` | ^7.13.1 | Routing |
+| `tailwind-merge` | ^3.5.0 | Tailwind class merge utility |
+
+### 3.2 Development Dependencies
+
+| Package | Version | Purpose |
+|---------|---------|---------|
+| `@eslint/js` | ^9.39.4 | ESLint JavaScript support |
+| `@tailwindcss/vite` | ^4.2.1 | Tailwind Vite plugin |
+| `@types/node` | ^24.12.0 | TypeScript types |
+| `@types/react` | ^19.2.14 | TypeScript types |
+| `@types/react-dom` | ^19.2.3 | TypeScript types |
+| `@vitejs/plugin-react` | ^4.5.2 | Vite React plugin |
+| `eslint` | ^9.39.4 | Linter |
+| `eslint-plugin-react-hooks` | ^7.0.1 | React hooks linting |
+| `eslint-plugin-react-refresh` | ^0.5.2 | HMR linting |
+| `globals` | ^17.4.0 | ESLint globals |
+| `tailwindcss` | ^4.2.1 | CSS framework |
+| `typescript` | ~5.9.3 | TypeScript compiler |
+| `typescript-eslint` | ^8.56.1 | TypeScript ESLint |
+| `vite` | ^6.3.5 | Build tool |
+
+### 3.3 Audit Results
+
+```
+$ npm audit
+found 0 vulnerabilities
+```
+
+**Status:** PASSED - No security vulnerabilities detected.
 
 ---
 
-## 6. Recommendations
+## 4. Dependency Version Currency
 
-1. **Vendor Go dependencies** (`go mod vendor`) for air-gapped/offline builds to eliminate proxy dependency.
-2. **Monitor quic-go security advisories** — subscribe to https://github.com/quic-go/quic-go/security/advisories.
-3. **Review threat intel feed configuration** — ensure `InsecureSkipVerify` is only set for operator-controlled internal CAs, not public feeds.
-4. **Pin npm versions more tightly** — consider replacing `^` with exact versions in `package.json` for reproducible builds, even though `package-lock.json` is present.
-5. **Add `package-lock.json` to .gitignore verification** — confirm it is always updated when `package.json` changes.
-6. **Audit `@xyflow/react` node configuration** — if users can provide custom node data, ensure it cannot contain XSS payloads.
+### 4.1 Dashboard UI
+
+| Package | Current | Latest (as of audit) | Status |
+|---------|---------|----------------------|--------|
+| @xyflow/react | ^12.10.1 | 12.x | Current |
+| react | ^19.0.0 | 19.x | Current |
+| react-router | ^7.0.0 | 7.x | Current |
+| tailwindcss | ^4.0.0 | 4.x | Current |
+| vite | ^6.0.0 | 6.x | Current |
+| typescript | ^5.7.0 | 5.x | Current |
+
+### 4.2 Website
+
+| Package | Current | Latest (as of audit) | Status |
+|---------|---------|----------------------|--------|
+| react | ^19.2.4 | 19.x | Current |
+| react-router-dom | ^7.13.1 | 7.x | Current |
+| tailwindcss | ^4.2.1 | 4.x | Current |
+| vite | ^6.3.5 | 6.x | Current |
+| typescript | ~5.9.3 | 5.9.x | Current |
+
+**All dependencies are on current major versions.** No known deprecated packages.
 
 ---
 
-*Generated by Claude Code security audit. Report location: `security-report/dependency-audit.md`*
+## 5. Supply Chain Analysis
+
+### 5.1 Go Module Proxy
+
+- **Proxy:** proxy.golang.org (Google-operated)
+- **Checksum database:** sum.golang.org (Google-operated)
+- **Integrity:** Verified via `go mod verify`
+
+### 5.2 NPM Registry
+
+- **Registry:** registry.npmjs.org (official NPM)
+- **Integrity:** package-lock.json with integrity hashes present
+- **Lockfiles:** Both package-lock.json files use lockfileVersion 3 with SHA512 integrity hashes
+
+### 5.3 Private/Patched Dependencies
+
+**Go:** No private modules, no local patches, no vendored dependencies.
+**Node.js:** No private packages, no workspace dependencies, no git dependencies.
+
+### 5.4 Transitive Dependency Risks
+
+Both ecosystems have no high-risk transitive dependencies:
+- No known malicious packages
+- No deprecated dependencies with known vulnerabilities
+- All packages sourced from official registries
+
+---
+
+## 6. Security Best Practices Compliance
+
+| Practice | Status | Notes |
+|----------|--------|-------|
+| Lockfiles committed | YES | go.sum, package-lock.json (x2) |
+| Integrity verification | YES | `go mod verify` passes |
+| Dependency audits (CI) | RECOMMENDED | Manual audit complete, no CI configured |
+| Minimal dependencies | YES | Only 1 optional Go dep, 15 direct Node deps |
+| No private registries | YES | Only official registries |
+| Regular updates | YES | Dependencies on latest major versions |
+
+---
+
+## 7. Recommendations
+
+### 7.1 Immediate Actions
+
+1. **Add CI/CD Dependency Audits** (Medium Priority)
+   - Configure `go mod verify` in CI pipeline
+   - Add `npm audit --audit-level=high` to CI pipeline
+
+### 7.2 Good Practices Already in Place
+
+1. **Lockfiles committed to repo** - Prevents unexpected dependency updates
+2. **Zero external Go dependencies** - Minimizes attack surface for core engine
+3. **quic-go is optional** - HTTP/3 feature can be disabled if vulnerabilities emerge
+4. **All dependencies on current versions** - No known deprecated or EOL packages
+
+### 7.3 Future Enhancements
+
+1. Consider adding `npm outdated` or `pnpm outdated` to CI to detect available updates
+2. Pin exact versions in CI rather than relying on lockfiles alone
+3. Add Dependabot or Renovate configuration for automated dependency PRs
+
+---
+
+## 8. Conclusion
+
+GuardianWAF has an **exemplary dependency supply chain**:
+
+- **Zero vulnerabilities** in both Go and Node.js dependencies
+- **Minimal attack surface** with only 1 optional Go dependency
+- **All dependencies verified** and on current versions
+- **No private/unusual sources** - only official registries
+
+The project demonstrates excellent dependency hygiene. The primary risk is not from known vulnerabilities but from the general complexity of the npm ecosystem (~270-369 packages per frontend). However, regular audits and lockfile-based reproducibility mitigate this risk effectively.
+
+**Overall Supply Chain Risk Rating: VERY LOW**
+
+---
+
+*Report generated by sc-dependency-audit skill*
+*Audit date: 2026-04-16*

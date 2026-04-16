@@ -1,90 +1,175 @@
-# CSRF Security Assessment — GuardianWAF
+# CSRF Security Scan Results
 
-**Scanner:** sc-csrf
-**Target:** GuardianWAF (Pure Go WAF + React Dashboard)
-**Date:** 2026-04-15
+**Scanner:** sc-csrf (Cross-Site Request Forgery)
+**Target:** GuardianWAF Dashboard API
+**Date:** 2026-04-16
 
 ---
 
 ## Summary
 
-No CSRF vulnerabilities found. The implementation uses a defense-in-depth approach combining multiple overlapping safeguards:
-
-- Session cookies use `SameSite=Strict` (cannot be sent cross-origin in any browser)
-- `authWrap` middleware enforces `verifySameOrigin` for all state-changing requests authenticated via cookie
-- API key header authentication is inherently CSRF-safe (browsers cannot set custom headers cross-origin)
-- `verifySameOrigin` validates Origin or Referer header matches the request Host
-- GET logout is explicitly allowed with referrer verification only when Origin is present
-- No state-changing GET routes exist for sensitive operations
+| Category | Status |
+|----------|--------|
+| CSRF Tokens | Not present (uses Origin/Referer check instead) |
+| SameSite Cookie | `StrictMode` (properly set) |
+| GET state changes | Not found |
+| Admin routes CSRF | Missing (uses API key auth only) |
 
 ---
 
-## Detailed Findings
+## Findings
 
-### [INFO] Session Cookie Uses SameSite=Strict
+### CSRF-1: Origin/Referer Check (Low Risk)
 
-- **Category:** Cross-Site Request Forgery
-- **Location:** internal/dashboard/auth.go:155
-- **Description:** The session cookie is set with `SameSite: http.SameSiteStrictMode`. This is the strongest SameSite level and prevents the cookie from being sent in any cross-origin request, including navigation and subresource requests. CSRF attacks that rely on cookie transmission are fully blocked at the browser level.
-- **Remediation:** No action needed. This is the correct configuration.
+The dashboard uses `verifySameOrigin()` in `middleware.go` instead of traditional CSRF tokens. This checks the `Origin` header (preferred) or `Referer` header and validates they match the request host.
 
-### [INFO] authWrap Enforces Same-Origin Verification for State-Changing Requests
+**Location:** `internal/dashboard/middleware.go:76-106`
 
-- **Category:** Cross-Site Request Forgery
-- **Location:** internal/dashboard/dashboard.go:236-243
-- **Description:** The `authWrap` middleware checks `verifySameOrigin(r)` for all non-idempotent requests (POST, PUT, DELETE, etc.) when authenticated via session cookie. API key authentication bypasses this check, which is correct since browsers cannot set custom headers (X-API-Key) in cross-origin requests. This ensures defense-in-depth even if the SameSite cookie were somehow bypassed.
-- **Remediation:** No action needed. This is the correct design.
+```go
+func verifySameOrigin(r *http.Request) bool {
+    origin := r.Header.Get("Origin")
+    if origin != "" {
+        u, err := url.Parse(origin)
+        if err != nil {
+            return false
+        }
+        return u.Host == r.Host
+    }
+    referer := r.Header.Get("Referer")
+    if referer != "" {
+        u, err := url.Parse(referer)
+        if err != nil {
+            return false
+        }
+        return u.Host == r.Host
+    }
+    return false  // No Origin or Referer — rejected
+}
+```
 
-### [INFO] verifySameOrigin Validates Origin and Referer Headers
+**Analysis:** This approach is effective against CSRF when:
+- Browsers automatically set `Origin` for cross-origin requests
+- The dashboard is accessed directly (not via iframe/proxy that strips headers)
 
-- **Category:** Cross-Site Request Forgery
-- **Location:** internal/dashboard/middleware.go:76-106
-- **Description:** The `verifySameOrigin` function validates that both Origin and Referer headers (when present) match the request Host. Critically, it rejects requests that have neither header, preventing CSRF via stripped headers. The comment explicitly notes this: "Requests without Origin or Referer — reject to prevent CSRF via stripped headers."
-- **Remediation:** No action needed. This is the correct implementation.
+**Note:** Requests without Origin or Referer are rejected (line 104-105). This is a conservative default that prevents CSRF but may cause issues in certain proxy scenarios.
 
-### [INFO] Login Form CSRF Protected
+### CSRF-2: authWrap Applies CSRF Check (Low Risk)
 
-- **Category:** Cross-Site Request Forgery
-- **Location:** internal/dashboard/dashboard.go:263-267
-- **Description:** The `handleLoginSubmit` handler calls `verifySameOrigin(r)` before processing credentials, ensuring login attempts originate from the same host. This prevents login CSRF attacks.
-- **Remediation:** No action needed.
+All protected state-changing endpoints go through `authWrap()` which applies CSRF validation for cookie-authenticated requests.
 
-### [INFO] No State-Changing GET Routes for Sensitive Operations
+**Location:** `internal/dashboard/dashboard.go:255-283`
 
-- **Category:** Cross-Site Request Forgery
-- **Location:** internal/dashboard/dashboard.go:124-196
-- **Description:** All sensitive operations (rules CRUD, config updates, bans, ACLs, webhooks, alerting) use POST/PUT/DELETE methods. GET routes only read data. The only GET route that changes state is `/logout`, which is acceptable (user-initiated navigation) and has partial origin checking.
-- **Remediation:** No action needed.
+```go
+if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions {
+    if r.Header.Get("X-API-Key") == "" && !verifySameOrigin(r) {
+        writeJSON(w, http.StatusForbidden, map[string]any{"error": "CSRF validation failed"})
+        return
+    }
+}
+```
 
-### [INFO] GET /logout Has Partial CSRF Protection
+**Key behavior:**
+- API key auth (`X-API-Key` header) skips CSRF check (inherently CSRF-safe since browsers can't set custom headers cross-origin)
+- Cookie auth requires Origin/Referer validation
 
-- **Category:** Cross-Site Request Forgery
-- **Location:** internal/dashboard/dashboard.go:389-408
-- **Description:** The logout handler only enforces `verifySameOrigin` when the Origin header is present (not Referer alone). Since Origin is stripped on some cross-origin navigations (e.g., redirect chains), a malicious page could potentially trigger logout via a cross-origin redirect. However, logout is a low-impact operation (destroys the session cookie), and the session cookie itself is SameSite=Strict, so any browser-side CSRF attack is already blocked. Additionally, the comment says "GET logout is allowed (user clicking a link)" which is intentional.
-- **Remediation:** Consider enforcing Origin check unconditionally, or rely on the SameSite=Strict cookie as the primary defense (which is already in place).
+### CSRF-3: Admin Routes Missing CSRF Check (Low-Medium Risk)
 
-### [INFO] CORS Dashboard is Same-Origin Only
+Admin routes (`/api/admin/*`) use a custom auth wrapper that only checks for admin API key. No CSRF check is applied.
 
-- **Category:** Cross-Site Resource Sharing
-- **Location:** internal/dashboard/middleware.go:108-125
-- **Description:** The dashboard CORS middleware sets `Access-Control-Allow-Origin` only on OPTIONS preflight responses (to satisfy browser requirements for custom headers). No `Access-Control-Allow-Origin` is set on actual responses, meaning cross-origin requests are rejected by the browser. This is the correct approach for a same-origin-only application.
-- **Remediation:** No action needed.
+**Location:** `internal/dashboard/tenant_admin_handler.go:28-50`
 
-### [INFO] Content Security Policy Includes form-action Self
+```go
+auth := func(handler http.HandlerFunc) http.HandlerFunc {
+    return func(w http.ResponseWriter, r *http.Request) {
+        if !h.dashboard.isAdminAuthenticated(r) {
+            writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "unauthorized: system admin key required"})
+            return
+        }
+        handler(w, r)
+    }
+}
+```
 
-- **Category:** Cross-Site Request Forgery
-- **Location:** internal/dashboard/middleware.go:69
-- **Description:** The CSP header includes `form-action 'self'`, which restricts form submission targets to the same origin. This provides an additional CSRF mitigation layer.
-- **Remediation:** No action needed.
+**Affected endpoints:**
+- `POST /api/admin/tenants` - Create tenant
+- `PUT /api/admin/tenants/{id}` - Update tenant
+- `DELETE /api/admin/tenants/{id}` - Delete tenant
+- `POST /api/admin/tenants/{id}/regenerate-key` - Regenerate API key
+- `POST /api/admin/tenants/rules` - Add tenant rule
+- `PUT /api/admin/tenants/rules/{tenantID}/{ruleID}` - Update tenant rule
+- `DELETE /api/admin/tenants/rules/{tenantID}/{ruleID}` - Delete tenant rule
+- `POST /api/admin/billing/{tenantID}` - Generate invoice
+
+**Risk:** If an admin is authenticated via cookie (unlikely since admin endpoints use API key only), these endpoints could be CSRF targets. However, admin auth typically uses `X-API-Key` header which is not subject to CSRF.
+
+### CSRF-4: Logout Partial CSRF Check (Low Risk)
+
+Logout handler only checks `Origin` header (not `Referer`) before revoking session.
+
+**Location:** `internal/dashboard/dashboard.go:425-448`
+
+```go
+if origin := r.Header.Get("Origin"); origin != "" {
+    if !verifySameOrigin(r) {
+        http.Error(w, "forbidden", http.StatusForbidden)
+        return
+    }
+}
+```
+
+**Analysis:** This means if `Origin` is not present, the request proceeds. However, this is acceptable since:
+- `GET /logout` is a safe navigation action
+- Session revocation requires valid cookie regardless of CSRF
+- The `Referer` is not checked which is a minor gap
+
+### CSRF-5: SameSite Cookie Properly Configured (Good)
+
+Session cookie is set with `SameSite: http.SameSiteStrictMode` which provides strong CSRF protection for cookie-based auth.
+
+**Location:** `internal/dashboard/auth.go:290-298`
+
+```go
+http.SetCookie(w, &http.Cookie{
+    Name:     sessionCookieName,
+    Value:    token,
+    Path:     "/",
+    HttpOnly: true,
+    Secure:   true, // Always require TLS for session cookies
+    SameSite: http.SameSiteStrictMode,
+    MaxAge:   int(sessionMaxAge.Seconds()),
+})
+```
 
 ---
 
-## Conclusion
+## Recommendations
 
-**No CSRF vulnerabilities found.** The implementation demonstrates strong CSRF protection through multiple overlapping defenses:
+| Priority | Finding | Recommendation |
+|----------|---------|----------------|
+| Low | Admin routes use API key auth only | Consider adding CSRF check to admin routes for defense-in-depth, even though API key auth is CSRF-safe |
+| Low | Logout only checks Origin | Add `Referer` check for GET /logout requests for consistency |
+| Info | No traditional CSRF tokens | Document that Origin/Referer validation is the CSRF mechanism (not tokens) |
+| Info | Content-Security-Policy `form-action 'self'` | CSP header already restricts form targets to same-origin |
 
-1. **SameSite=Strict cookie** — primary defense, blocks all cross-origin cookie transmission
-2. **Same-origin header verification** — defense-in-depth for cookie-authenticated requests
-3. **API key header auth** — inherently CSRF-safe, no cookie involved
-4. **CSP form-action restriction** — limits form submission targets
-5. **No state-changing GET** — all sensitive operations require explicit POST/PUT/DELETE
+---
+
+## Test Coverage
+
+The dashboard tests include CSRF-related test cases:
+
+- `TestCSRFVerification` in `dashboard_test.go` verifies Origin/Referer validation
+- `TestLoginLogout` covers login form submission with CSRF check
+
+---
+
+## Risk Assessment
+
+**Overall Risk: LOW**
+
+The dashboard implements CSRF protection via Origin/Referer validation which is effective for the threat model. Traditional CSRF tokens are not used, but the implemented mechanism is considered equivalent for browser-based attacks.
+
+Key mitigating factors:
+1. SameSite=Strict cookie prevents cross-origin cookie sending
+2. Origin/Referer header validation catches cross-origin state-changing requests
+3. API key authentication is inherently CSRF-safe (browsers can't set custom headers)
+4. Admin endpoints use API key auth, not cookies

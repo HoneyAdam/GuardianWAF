@@ -809,9 +809,9 @@ func (c *Cluster) startHTTPServer() {
 		IdleTimeout:       60 * time.Second,
 	}
 
-	// Warn if AuthSecret is used over plain HTTP -- the secret is sent in cleartext
+	// Refuse to start if AuthSecret is configured without TLS — secret would be transmitted in cleartext
 	if c.config.AuthSecret != "" && (c.config.TLSCertFile == "" || c.config.TLSKeyFile == "") {
-		log.Printf("[cluster] WARNING: AuthSecret is configured but TLS is not enabled -- cluster auth secret will be sent in cleartext. Configure tls_cert_file and tls_key_file for secure cluster communication.")
+		log.Fatalf("[cluster] FATAL: AuthSecret is configured but TLS is not enabled -- cluster auth secret would be sent in cleartext. Configure tls_cert_file and tls_key_file to secure cluster communication.")
 	}
 
 	if c.config.TLSCertFile != "" && c.config.TLSKeyFile != "" {

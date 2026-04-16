@@ -23,7 +23,7 @@ waf:
     max_frame_size: 1048576         # 1MB
     rate_limit_per_second: 100
     rate_limit_burst: 50
-    allowed_origins:                # Empty = allow all
+    allowed_origins:                # Empty = same-origin policy (reject cross-origin by default)
       - "https://example.com"
       - "https://*.example.com"     # Wildcard subdomain
     blocked_extensions:

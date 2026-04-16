@@ -1,164 +1,117 @@
-# Business Logic Flaws Scan - GuardianWAF
+# Business Logic Security Scan Results
 
-## Scanner: sc-business-logic
-## Target: Pure Go WAF codebase (GuardianWAF)
-## Date: 2026-04-15
+**Scanner:** sc-business-logic
+**Target:** GuardianWAF - Business Logic Flaws
+**Date:** 2026-04-16
 
 ---
 
 ## Executive Summary
 
-One business logic flaw was identified (medium severity): the WAF exclusion bypass via path traversal sequences in the pipeline layer. All seven security categories were analyzed, and the other six did not yield findings.
+Analyzed multi-tenant isolation, rate limiting, ATO protection, and API security layers for business logic vulnerabilities. Found **5 findings** (1 High, 2 Medium, 2 Low).
 
 ---
 
 ## Findings
 
-### [MEDIUM] WAF Exclusion Bypass via Path Traversal Sequences
+### Finding: BIZ-001
 
-- **Category:** Business Logic Flaw
-- **Location:** internal/engine/pipeline.go:96
-- **Description:** The `shouldSkip` function uses `strings.HasPrefix(path, exc.PathPrefix)` to check if a request path matches an exclusion rule. However, the exclusion matching does not canonicalize the request path first. An attacker can bypass exclusion rules by inserting path traversal sequences (e.g., `/api/webhook/../../etc/passwd` or `/api/webhook/./`) that modify the effective path while still reaching the same resource.
-
-  The pipeline does normalize the path via `ctx.NormalizedPath` (set by the Sanitizer layer at Order 300), but the exclusion check at line 96 falls back to `ctx.Path` (the raw, unnormalized path) when `NormalizedPath` is empty. This means:
-
-  1. Requests reaching the pipeline before the Sanitizer layer (Order < 300) use raw path for exclusion matching
-  2. A request to `/api/webhook/../../admin` with an exclusion for `/api/webhook` will NOT match the exclusion when the sanitizer has normalized the path to `/admin`, but the bypass works the opposite direction: raw path with `../` can escape the prefix check even though the actual resource being accessed is normalized
-
-  The vulnerability manifests because exclusion rules are evaluated against the raw `ctx.Path` before path canonicalization, allowing attacks like `/api/webhook/..%2F..%2F/etc/passwd` (URL-encoded or raw) to bypass exclusions.
-
-  Note: The sanitization layer (Order 300) runs before the detection layer (Order 400), so by the time detection exclusions are checked, `ctx.NormalizedPath` should be populated. However, the fallback to raw path exists for early-stage layers and the logic is not consistently applied.
-
-- **Remediation:** Canonicalize the path before exclusion matching in `shouldSkip`. Use the same `path.Clean` logic that the sanitizer uses, or require that exclusion paths be normalized before being stored in the pipeline. The fix should ensure that `/api/webhook/../../admin` and `/admin` both match an exclusion for `/admin`.
+- **Title:** Rate Limit Bucket Exhaustion Bypass
+- **Severity:** High
+- **Confidence:** 75
+- **File:** `internal/layers/ratelimit/ratelimit.go:211-238`
+- **Vulnerability Type:** CWE-840 (Business Logic Errors)
+- **Description:** When the token bucket map reaches `maxBuckets` (500,000), `getOrCreateBucket()` returns `nil` and the rate limit check is skipped entirely (line 149: `if bucket == nil { continue }`). An attacker could intentionally trigger bucket creation for many IP+tenant combinations to exhaust the limit and bypass rate limiting.
+- **Impact:** An attacker with ability to make requests from many IPs (botnet, distributed attack) could bypass all rate limiting by filling the bucket map to capacity. Once full, no new buckets are created and all rate limit rules silently pass for unknown bucket keys.
+- **Remediation:** Instead of skipping the rule when bucket creation fails, return `engine.ActionBlock` or fall back to a deny response. Consider implementing a simple per-IP counter that doesn't require bucket allocation.
+- **References:** https://cwe.mitre.org/data/definitions/840.html
 
 ---
 
-## Analysis Details by Category
+### Finding: BIZ-002
 
-### 1. Integer Overflow in Security Values
-
-**Status:** No issues found
-
-Key observations:
-- `RequestCount`, `ByteCount`, and `BlockedCount` in the `Tenant` struct (internal/tenant/manager.go:43-46) are `int64`, which provides a very large upper bound (9.2e18)
-- `ScoreAccumulator` uses `int` for scores but detectors cap individual scores at 100, and the accumulator tracks total score across all layers — with 16 layers, max score is 1600, well within int range
-- Rate limit counters in `ratelimit.go:38` use `*atomic.Int64` for violation tracking
-- Bucket count in rate limiter is capped at 500,000 (line 45: `maxBuckets = 500000`) to prevent memory exhaustion, not overflow
-- The code uses Go 1.21+ idioms like `min()` and `slices.Contains` throughout
-
-**Positive patterns observed:**
-- All counters that could be attacker-influenced use atomic operations or mutex protection
-- No arithmetic operations on security-critical values that could overflow
-- Hard limits are enforced (bucket cap, header count limits, body size limits)
+- **Title:** Tenant Rate Limiter Counter Reset on Auto-Ban Expiry
+- **Severity:** Medium
+- **Confidence:** 70
+- **File:** `internal/layers/ratelimit/ratelimit.go:274-293`
+- **Vulnerability Type:** CWE-840 (Business Logic Errors)
+- **Description:** When auto-ban triggers after `rule.AutoBanAfter` violations, the violation counter is reset to 0 (line 291). The ban has a fixed duration (`BlockDuration`). After the ban expires, the attacker has a "clean slate" and can immediately begin accumulating violations again without any historical context. An attacker could cycle through this: make banned-1 requests, get banned briefly, wait out the ban, repeat.
+- **Impact:** Persistent attacker can maintain a low-and-slow brute force or abuse campaign indefinitely by keeping requests just below the auto-ban threshold and cycling bans.
+- **Remediation:** Consider using a sliding window for violation counting that doesn't reset completely on ban. Alternatively, use a longer-term counter (e.g., 24-hour rolling window) for ban decisions that decays but doesn't hard-reset.
+- **References:** https://cwe.mitre.org/data/definitions/840.html
 
 ---
 
-### 2. Race Conditions in Security Checks
+### Finding: BIZ-003
 
-**Status:** No issues found
-
-Key observations:
-- Tenant resolution in `middleware.go:37-88` is atomic: the tenant is resolved once at the start of request processing and stored in the request context
-- `TenantWAFConfig` is read directly by each layer via `ctx.TenantWAFConfig`, which is set once per request and never modified during pipeline execution
-- `RequestContext` is pooled via `sync.Pool` (context.go:132-136), but fields are properly reset in `ReleaseContext()` (line 247-293)
-- The `Pipeline` uses `sync.RWMutex` for layer list and exclusion updates (pipeline.go:35-37)
-- `TenantRateLimiter` uses proper locking for all operations (ratetracker.go:67-150)
-- `TokenBucket` uses `sync.Mutex` for all operations (bucket.go:10-66)
-- `IP ACL Layer` uses `sync.RWMutex` for auto-ban map protection (ipacl.go:39)
-
----
-
-### 3. Bypass via Method Switching
-
-**Status:** No issues found
-
-Key observations:
-- The sanitizer layer (`validate.go:115-135`) validates HTTP method against `AllowedMethods` config using case-insensitive comparison
-- The detection layer runs the same detectors regardless of HTTP method — there is no method-based skip logic
-- Pipeline execution order does not change based on method — all layers run in order
-- No difference in enforcement between GET/POST/HEAD requests
-- The `Method` field in `RequestContext` is populated directly from `r.Method` and not modified during processing
+- **Title:** Impossible Travel Detection Bypass via Small Distances
+- **Severity:** Medium
+- **Confidence:** 65
+- **File:** `internal/layers/ato/ato.go:262-306`
+- **Vulnerability Type:** CWE-840 (Business Logic Errors)
+- **Description:** The impossible travel check requires BOTH `speed > 1000 km/h` AND `distance > cfg.MaxDistanceKm` (line 298). If `MaxDistanceKm` is set to a high value (e.g., default or misconfigured), an attacker making rapid logins from geographically close but "impossible" locations (e.g., different cities 200km apart in 10 minutes = 1200 km/h) could bypass detection if MaxDistanceKm > 200. The speed check alone (1000 km/h) could be achieved with short flights between nearby cities.
+- **Impact:** A sophisticated attacker could exploit impossible travel detection gaps by making rapid login attempts from multiple nearby locations, potentially bypassing fraud detection.
+- **Remediation:** Consider making the two conditions independent (either speed OR distance violation triggers alert). Or require BOTH conditions with lower thresholds.
+- **References:** https://cwe.mitre.org/data/definitions/840.html
 
 ---
 
-### 4. Multi-Tenancy Bypass
+### Finding: BIZ-004
 
-**Status:** No issues found
-
-Key observations:
-- Tenant resolution uses multiple factors: API key header (`X-GuardianWAF-Tenant-Key`), domain-based routing, and default tenant fallback (manager.go:335-359)
-- API keys are hashed with per-tenant random salt using SHA256 (manager.go:724-733), with legacy unsalted hash support for backwards compatibility
-- Tenant config (`TenantWAFConfig`) is isolated per-request via `RequestContext` — layers read tenant overrides directly from `ctx.TenantWAFConfig` without any cross-tenant reference
-- Tenant rules are stored in isolated `rules.Layer` instances keyed by tenant ID (rules.go:14-64)
-- Tenant rate tracking uses isolated `RateTracker` instances per tenant (ratetracker.go:67-150)
-- The `Middleware.Handler` sets tenant context before calling the next handler (middleware.go:58-76)
-- No evidence of tenant ID confusion or cross-tenant data access in the codebase
-- `safeTenantID` validation (store.go:23-38) ensures tenant IDs contain only safe characters
+- **Title:** ATO Brute Force Per-Email Counter Incomplete for Credential Stuffing
+- **Severity:** Low
+- **Confidence:** 60
+- **File:** `internal/layers/ato/ato.go:212-232`
+- **Vulnerability Type:** CWE-840 (Business Logic Errors)
+- **Description:** The brute force check per-email tracks `GetEmailAttempts()` which counts all attempts for a given email within a window. However, this doesn't account for distributed attacks where the same email is attacked from many IPs (already caught by credential stuffing detection at line 234-245). The concern is that legitimate failed attempts from different IPs (user typo, password expiry) could combine with an attacker's attempts to trigger a false positive block.
+- **Impact:** Legitimate users may be blocked after repeated password mistakes across different IPs, especially in corporate environments with multiple exit IPs.
+- **Remediation:** Consider requiring attempts from multiple IPs before blocking an email for brute force (similar to credential stuffing logic). The current implementation correctly separates brute force (per-email count) from credential stuffing (unique IP count), but the interaction could be refined.
+- **References:** https://cwe.mitre.org/data/definitions/840.html
 
 ---
 
-### 5. Quota Bypass
+### Finding: BIZ-005
 
-**Status:** No issues found
-
-Key observations:
-- Rate limiting in `ratelimit.go` uses token bucket algorithm with proper mutex protection
-- Bucket keys include normalized IP (`bucketKey` function, lines 189-205) to prevent bypass via IPv4-mapped IPv6 addresses
-- Path normalization uses `path.Clean` for `ip+path` scope rules to prevent path-based bypass
-- Hard cap on total buckets (500,000) prevents memory exhaustion attacks
-- Violation counter for auto-ban uses atomic operations (`atomic.Int64`) with proper threshold checking (ratelimit.go:274-290)
-- Tenant quotas use sliding window algorithm (`RateTracker` in ratetracker.go:9-65) with proper mutex locking
-- No evidence of race conditions in quota checking — all quota checks use `mu.Lock()` or `mu.RLock()` appropriately
-
----
-
-### 6. Authentication Bypass via Race
-
-**Status:** No issues found
-
-Key observations:
-- JWT validation (`jwt.go:116-211`) performs all checks (algorithm, signature, claims expiry, issuer, audience) atomically within a single `Validate` function call — no time-of-check-time-of-use (TOCTOU) issues
-- API key validation follows a similar pattern: extract key, validate, return result — no multiple steps that could race
-- `JWTValidator.isAlgorithmAllowed` (lines 213-241) correctly prevents algorithm confusion attacks by blocking HMAC when an asymmetric key source is configured
-- JWKS fetching uses proper timeout and context cancellation (lines 370-450)
-- SSRF protection exists for JWKS URL validation (`validateJWKSURL` function, lines 1066-1106) — validates against localhost, private, and link-local addresses
-- No authentication bypass via concurrent requests detected
+- **Title:** Tenant Resolution Order Allows Header-Based Tenant Impersonation
+- **Severity:** Low
+- **Confidence:** 55
+- **File:** `internal/tenant/middleware.go:335-359`
+- **Vulnerability Type:** CWE-840 (Business Logic Errors)
+- **Description:** `ResolveTenant()` checks `X-GuardianWAF-Tenant-Key` header first (line 337), before domain-based resolution. While this is intentional for API access, it means a compromised or leaked API key could be used to impersonate any tenant by setting this header. The domain-based routing (line 344-350) is bypassed entirely when the header is present.
+- **Impact:** If an API key is compromised, the attacker can access any tenant's resources regardless of the request's Host header. This is mitigated if API keys are properly secured and rotated.
+- **Remediation:** Consider adding validation that the API key matches the requested tenant, or requiring multi-factor confirmation for cross-tenant API access. Log all API key-based tenant resolutions for audit.
+- **References:** https://cwe.mitre.org/data/definitions/840.html
 
 ---
 
-### 7. Exclusion Bypass (DETAILED ABOVE)
+## Secure Patterns Observed
 
-**Finding ID:** BL-001
-**Severity:** MEDIUM
+The codebase demonstrates several secure business logic patterns:
 
-See the dedicated finding above for the complete description and remediation.
+1. **Tenant isolation via bucket keys** (`ratelimit.go:192-207`): Rate limit buckets include tenant ID, preventing cross-tenant bypass.
+
+2. **JWT tenant binding validation** (`apisecurity.go:115-132`): JWT tokens with mismatched `tenant_id` claim are rejected, preventing cross-tenant token reuse.
+
+3. **API key constant-time comparison** (`apikey.go:114-118`): Uses `subtle.ConstantTimeCompare` for hash comparison to prevent timing attacks.
+
+4. **HMAC algorithm blocking** (`jwt.go:220-230`): Prevents algorithm confusion attacks by blocking HMAC when asymmetric keys are configured.
+
+5. **JWKS SSRF protection** (`jwt.go:1071-1112`): Validates JWKS URLs don't target private networks.
+
+6. **Billing overage guards** (`billing.go:187-199`): Request and bandwidth overage only charged when positive.
+
+7. **Rate tracker map size limits** (`ratetracker.go:78-83`): Prevents memory exhaustion via entry limits.
 
 ---
 
-## Conclusion
+## Recommendations
 
-The GuardianWAF codebase demonstrates strong security design patterns. Business logic flaws are minimal — the codebase uses proper locking, atomic operations, and isolated contexts throughout. One medium-severity finding was identified: the exclusion bypass via path traversal sequences, which could allow an attacker to circumvent WAF exclusion rules through crafted paths containing `..` sequences.
+1. **BIZ-001 (High)**: Add a fallback rate limit response when bucket creation fails. Consider implementing a "global rate limit" that applies to all requests when buckets are exhausted.
 
-All other categories (integer overflow, race conditions, method switching, multi-tenancy, quota bypass, authentication race) passed analysis with no findings.
+2. **BIZ-002 (Medium)**: Implement violation count persistence that survives ban expiry. Consider a decay function rather than hard reset.
 
----
+3. **BIZ-003 (Medium)**: Review `MaxDistanceKm` configuration defaults. Consider lowering the speed threshold or making distance/speed checks independent.
 
-## Files Analyzed
+4. **BIZ-004 (Low)**: Consider adding source IP diversity requirements to brute force detection.
 
-- internal/engine/pipeline.go
-- internal/engine/context.go
-- internal/engine/layer.go
-- internal/tenant/manager.go
-- internal/tenant/middleware.go
-- internal/tenant/ratetracker.go
-- internal/tenant/rules.go
-- internal/tenant/store.go
-- internal/layers/ratelimit/ratelimit.go
-- internal/layers/ratelimit/bucket.go
-- internal/layers/ipacl/ipacl.go
-- internal/layers/sanitizer/sanitizer.go
-- internal/layers/sanitizer/normalize.go
-- internal/layers/sanitizer/validate.go
-- internal/layers/detection/detection.go
-- internal/layers/apisecurity/apisecurity.go
-- internal/layers/apisecurity/jwt.go
+5. **BIZ-005 (Low)**: Ensure API keys are regularly rotated and implement logging/monitoring for tenant resolution via API key.

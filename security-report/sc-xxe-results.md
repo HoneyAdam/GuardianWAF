@@ -1,80 +1,116 @@
-# XXE Security Scan Results
+# SC-XXE: XML External Entity Scanner Results
 
-**Target:** GuardianWAF (Pure Go WAF Codebase)
-**Date:** 2026-04-15
-**Scanner:** sc-xxe skill
+**Scanner:** sc-xxe
+**Target:** `D:/CODEBOX/PROJECTS/GuardianWAF`
+**Date:** 2026-04-16
 
 ---
 
 ## Summary
 
-**No XXE vulnerabilities found.** Go's xml package does not process external entities by default.
+| Category | Result |
+|----------|--------|
+| XXE Vulnerabilities Found | 0 |
+| XXE Detector Coverage | Pattern-based (signature matching) |
+| Actual XML Parsing Code | None found |
+| SAML Parsing | None found |
+| SOAP Parsing | None found |
+| SVG/XLSX/DOCX Processing | None found |
 
 ---
 
-## Detailed Findings
+## Phase 1: Discovery
 
-### XML Parsing Analysis
+### Files Scanned
 
-| Pattern | Files Found | Risk |
-|---------|-------------|------|
-| `xml.Unmarshal` | 0 | None |
-| `xml.NewDecoder` | 0 | None |
-| `xml.Parse` | 0 | None |
-| `XMLElement` | 0 | None |
-| `xml.Reader` | 0 | None |
-| `encoding.xml` import | 0 | None |
+- `internal/layers/detection/xxe/` — XXE detector implementation
+- All Go source files (`**/*.go`)
+- Configuration files and documentation
 
-### Key Security Findings
+### Search Results
 
-#### 1. YAML Parser - Safe by Design
-- **Location:** `internal/config/yaml.go`
-- **Finding:** Custom zero-dependency YAML parser explicitly excludes XXE vectors
-- **Details:** The parser comment at line 4 states:
-  ```
-  It does NOT support anchors (&), aliases (*), tags (!!), or multi-document (---/...).
-  ```
-- **Verdict:** SAFE - No external entity support
+No usage of Go's `encoding/xml` package was found anywhere in the codebase. The following patterns were all absent:
 
-#### 2. OWASP CRS Parser - Text-Based Rules
-- **Location:** `internal/layers/crs/parser.go`
-- **Finding:** Parses SecRule directives using string splitting, not XML
-- **Details:** No XML parsing involved; processes Apache-style rule format
-- **Verdict:** SAFE - Not vulnerable to XXE
+```
+encoding/xml, xml.NewDecoder, xml.Unmarshal, xml.Decode,
+Decoder{}, NewParser (XML-related), DocumentBuilder,
+SAXParser, XMLReader, XMLElement
+```
 
-#### 3. GraphQL Parser - Custom String Parser
-- **Location:** `internal/layers/graphql/parser.go`
-- **Finding:** Custom string-based GraphQL query parser
-- **Details:** Uses `strings.Index`, `strings.Split` operations; no XML
-- **Verdict:** SAFE - Not vulnerable to XXE
+### Threat Intel Feeds
 
-#### 4. XXE Detector - Active Detection Layer
-- **Location:** `internal/layers/detection/xxe/xxe.go`
-- **Finding:** This is a DETECTOR for XXE attacks, not an XML parser
-- **Details:** Uses string pattern matching (`strings.Contains`) to detect XXE attack signatures:
-  - DOCTYPE declarations
-  - ENTITY declarations
-  - SYSTEM keyword with protocols (file://, http://, php://, etc.)
-  - XInclude elements
-  - SSI include directives
-- **Verdict:** SAFE - Detection layer, not a parser
+Threat intel feeds (`internal/layers/threatintel/feed.go`) only support JSON, JSONL, and CSV formats. No XML feed parsing is implemented.
+
+### GraphQL Layer
+
+The GraphQL layer (`internal/layers/graphql/parser.go`) uses a custom parser. No XML parsing code was found.
 
 ---
 
-## Conclusion
+## Phase 2: Analysis
 
-The GuardianWAF codebase is **not vulnerable to XML External Entity (XXE) attacks** because:
+### XXE Detector (`internal/layers/detection/xxe/xxe.go`)
 
-1. **No use of Go's `encoding/xml` package** - All XML processing would require explicit use of this package
-2. **Custom YAML parser lacks entity support** - Explicitly excludes anchors, aliases, and tags
-3. **String-based parsing** - CRS and GraphQL parsers use string manipulation, not XML parsing
+The XXE detector is a **pattern-based (signature-based) detector**, not a real XML parser. It works by scanning request body, query parameters, and headers for malicious string patterns.
 
-The codebase does include XXE detection as a security layer (`internal/layers/detection/xxe/xxe.go`) which actively scans for XXE attack patterns in incoming requests.
+**Detection methods:**
+- String matching for DOCTYPE declarations (`<!DOCTYPE`, `<!doctype`)
+- String matching for ENTITY declarations (`<!ENTITY`)
+- Pattern matching for SYSTEM keyword with dangerous protocols (`file://`, `http://`, `https://`, `expect://`, `php://`)
+- Parameter entity detection (`<!ENTITY %`)
+- XInclude detection (`<xi:include`)
+- SSI include detection (`<!--#include`)
+- CDATA section inspection for suspicious content
+
+**Supported content types:**
+- `application/xml`, `text/xml`
+- `application/soap+xml`
+- `application/rss+xml`
+- `application/xhtml+xml`
+- Plus heuristic detection for bodies starting with `<?xml` or `<!DOCTYPE`
+
+### Why No True XXE Vulnerabilities Exist
+
+Go's `encoding/xml` package is not used anywhere in the codebase. The WAF itself does not parse XML documents — it only inspects HTTP traffic for attack patterns. This means:
+
+1. The WAF cannot be exploited via XXE attacks targeting its own processing
+2. There is no XML parser configuration to harden against XXE
+3. The XXE detector serves to protect **back-end services** that process XML
+
+### Known Limitation
+
+The pattern-based detector cannot catch all XXE variants. It will not detect:
+- Entity expansion attacks (billion laughs) where the entity name doesn't contain obvious keywords
+- XXE via XML comment manipulation
+- XXE using alternative encoding (UTF-7, UTF-16, etc.)
+- Blind XXE where the payload uses unusual formatting to evade string matching
+
+---
+
+## Findings
+
+### No Vulnerabilities Found
+
+No XXE vulnerabilities were identified in the GuardianWAF codebase.
+
+**Reason:** The codebase does not contain any XML parsing code that could process external entities. The XXE detector is a WAF layer that detects XXE attack patterns in HTTP traffic — it is not itself an XML parser.
 
 ---
 
 ## Recommendations
 
-- Continue to avoid `encoding/xml` package usage
-- If XML parsing is needed in the future, use `xml.NewDecoder` with `SetEntity` or `SetDelegate` to disable external entities
-- Maintain the current approach of string-based parsing where possible
+1. **Continue pattern-based detection** — The current signature-based approach is appropriate for a WAF layer that inspects traffic, not parses XML.
+
+2. **Consider regex-based entity expansion detection** — Add detection for nested entity expansion patterns like `&lol;&lol;...` to catch billion laughs variants.
+
+3. **Add encoded XML detection** — Consider adding detection for UTF-7 (`+ADw-` for `<`) and UTF-16 encoded XML to catch encoding-based bypasses.
+
+4. **No remediation needed** for the codebase itself — there is no XML parsing code to harden.
+
+---
+
+## References
+
+- CWE-611: Improper Restriction of XML External Entity Reference (https://cwe.mitre.org/data/definitions/611.html)
+- OWASP Top 10 2021: A05:2021 Security Misconfiguration
+- Go `encoding/xml` Security Notes (https://pkg.go.dev/encoding/xml): Go's `xml.Decoder` does not resolve external entities by default, but any code using it should still be audited for XXE if DTD processing is enabled.

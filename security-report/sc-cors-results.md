@@ -1,59 +1,122 @@
-# CORS Security Scan Results
+# SC-CORS Results
 
-**Scanner:** sc-cors
-**Target:** Pure Go WAF codebase
-**Date:** 2026-04-15
-
----
-
-## Summary
-
-| Severity | Count |
-|----------|-------|
-| CRITICAL | 1 |
-| HIGH | 0 |
-| MEDIUM | 0 |
-| LOW | 0 |
-| INFO | 0 |
+**Scanner:** sc-cors (CORS Misconfiguration)
+**Date:** 2026-04-16
+**Files Scanned:** `internal/layers/cors/cors.go`, `internal/engine/engine.go`, `guardianwaf.yaml`
 
 ---
 
-### [CRITICAL] CORS Headers Never Applied to HTTP Responses
+## Findings Summary
 
-- **Category:** CORS Misconfiguration / Implementation Bug
-- **Location:** `internal/layers/cors/cors.go:245-256`, `internal/engine/engine.go:407-413`
-- **Description:** The CORS layer computes and stores CORS headers in context metadata (`cors_headers`, `cors_preflight_headers`, `cors_expose_headers`) but never actually writes them to HTTP responses. The CORS layer sets `cors_response_hook = true` (a boolean), but the engine's `applyResponseHook` function at `engine.go:407` looks for `response_hook` as a function type, not a boolean. Additionally, the response layer (`internal/layers/response/response.go`) does not handle CORS headers at all — it only manages security headers and data masking.
-
-  As a result, even when CORS validation passes (origin is allowed, preflight is valid), the required `Access-Control-Allow-Origin`, `Access-Control-Allow-Credentials`, and other CORS headers are **never written to the HTTP response**. Browsers will not receive the headers, and cross-origin requests will fail.
-
-- **Evidence:**
-  - `cors.go:256`: `ctx.Metadata["cors_response_hook"] = true` — boolean flag, never checked by engine
-  - `cors.go:284`: Same issue for preflight headers
-  - `engine.go:408`: `if hook, ok := metadata["response_hook"]; ok { ... }` — looks for `response_hook`, not `cors_response_hook`
-  - The response layer (`response.go:87`) only registers `response_hook` for security headers
-
-- **Remediation:** Register a `response_hook` function in the CORS layer (similar to how the response layer does it at `response.go:87`) that writes the stored `cors_headers` or `cors_preflight_headers` to the HTTP response writer. Alternatively, integrate CORS header application into the response layer itself.
+| ID | Severity | Confidence | Issue |
+|----|----------|-----------|-------|
+| CORS-001 | Medium | 90 | Wildcard origin (`*`) in default config |
+| CORS-002 | Low | 85 | Missing `Vary: Origin` header |
 
 ---
 
-## Positive Security Findings
+## Finding: CORS-001
 
-The following CORS security controls are correctly implemented:
+**Title:** CORS Misconfiguration - Wildcard Origin in Default Config
 
-- **No wildcard origin alone:** `AllowOrigins` does not support a bare `*` origin. The `compileWildcard` function (cors.go:62) always anchors the regex with `^` and requires a scheme and host pattern. A plain `*` in `AllowOrigins` would not match any origin.
+**Severity:** Medium
+**Confidence:** 90/100
+**File:** `guardianwaf.yaml:91`
+**Vulnerability Type:** CWE-942 (Permissive Cross-domain Policy)
 
-- **Credentials with wildcard origin:** When `AllowCredentials: true`, the code reflects the **validated specific origin** (e.g., `https://evil.example.com`) rather than a wildcard (cors.go:246). Browsers reject `Access-Control-Allow-Credentials: true` with `Access-Control-Allow-Origin: *`, so reflecting the specific origin is correct.
+**Description:**
+The default configuration uses `*` (wildcard) as an allowed origin:
+```yaml
+cors:
+  enabled: true
+  allowed_origins:
+    - "*"
+```
 
-- **Origin allowlist required:** Origins are validated against `AllowOrigins` allowlist (cors.go:131-151). If no match and `StrictMode` is enabled, the request is blocked with a score of 30.
+**Impact:**
+- Browsers ignore `Access-Control-Allow-Credentials: true` when `Access-Control-Allow-Origin: *` is set
+- Any website can make cross-origin requests to protected APIs
+- Sensitive data exposed to untrusted cross-origin requests
 
-- **Method allowlist on preflight:** Preflight requests validate `Access-Control-Request-Method` against `AllowMethods` whitelist (cors.go:187-205). Invalid methods block in strict mode.
+**Current Mitigations:**
+- `allow_credentials: false` is set in default config (credentials are not enabled with wildcard)
+- CORS layer uses origin reflection only for allowlisted origins (lines 247, 265 in cors.go)
+- Null origin is rejected when credentials are enabled (line 127-129 in cors.go)
 
-- **Header allowlist on preflight:** Preflight requests validate `Access-Control-Request-Headers` against `AllowHeaders` whitelist (cors.go:207-230).
+**Remediation:**
+Replace wildcard with explicit origin allowlist:
+```yaml
+cors:
+  allowed_origins:
+    - "https://app.example.com"
+    - "https://admin.example.com"
+```
 
-- **Null origin rejection:** `Origin: null` is rejected when `AllowCredentials: true` (cors.go:127-129), preventing sandbox iframe abuse.
-
-- **Wildcard scheme restricted:** `*://*.example.com` is converted to `https://` only — HTTP is never allowed for wildcard schemes (cors.go:77-79).
+**Note:** This finding applies to the default config file. Production deployments should override `allowed_origins` with a strict allowlist.
 
 ---
 
-**Conclusion:** 1 critical finding. The CORS validation logic is well-designed, but the implementation bug that prevents headers from being written to responses renders the CORS protection non-functional.
+## Finding: CORS-002
+
+**Title:** CORS Misconfiguration - Missing Vary: Origin Header
+
+**Severity:** Low
+**Confidence:** 85/100
+**File:** `internal/engine/engine.go:423-441`
+**Vulnerability Type:** CWE-942 (Permissive Cross-domain Policy)
+
+**Description:**
+The CORS response hook (`applyCORSHook`) does not set the `Vary: Origin` header. When multiple origins are allowed and responses vary based on origin, caches may serve wrong-origin responses.
+
+**Current Code:**
+```go
+func applyCORSHook(w http.ResponseWriter, metadata map[string]any) {
+    if headers, ok := metadata["cors_preflight_headers"].(map[string]string); ok {
+        for k, v := range headers {
+            w.Header().Set(k, v)
+        }
+        return
+    }
+    // Regular CORS headers...
+}
+```
+
+**Impact:**
+- Caching proxies may serve CORS responses to wrong origins
+- Low severity since credential-based CORS is disabled in default config
+- Primarily affects cached responses with varying CORS policies
+
+**Remediation:**
+Add `Vary: Origin` header in `applyCORSHook`:
+```go
+w.Header().Set("Vary", "Origin")
+```
+
+---
+
+## Security Assessment
+
+| Aspect | Status | Notes |
+|--------|--------|-------|
+| Wildcard + Credentials | PASS | Credentials disabled when wildcard used |
+| Null Origin | PASS | Rejected when credentials enabled (line 127-129) |
+| Reflected Origin | PASS | Only reflected for allowlisted origins |
+| Wildcard Patterns | PASS | Proper regex anchoring (scheme forced to https) |
+| Vary Header | WARN | Missing, but low risk with current config |
+| Preflight Caching | PASS | MaxAge set to 86400s in default config |
+
+---
+
+## Conclusion
+
+The CORS implementation is **reasonably secure** with the default configuration:
+- Credentials are disabled (so wildcard is less dangerous)
+- Null origin is properly rejected with credentials
+- Origin reflection only occurs for allowlisted origins
+- Wildcard patterns properly enforce HTTPS scheme
+
+**Primary concern:** The default config uses `*` wildcard, which should be replaced with an explicit allowlist in production. This is flagged as Medium severity.
+
+**References:**
+- https://cwe.mitre.org/data/definitions/942.html
+- https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS
