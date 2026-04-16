@@ -58,8 +58,8 @@ export default function TenantsPage() {
 
   const handleRegenerateKey = async (id: string) => {
     try {
-      const response = await api.adminRegenerateKey(id)
-      toast({ title: 'Success', description: 'New API key: ' + response.api_key })
+      await api.adminRegenerateKey(id)
+      toast({ title: 'Success', description: 'API key regenerated — copy it from the dialog' })
       loadTenants()
     } catch {
       toast({

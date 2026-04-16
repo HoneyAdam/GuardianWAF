@@ -5,7 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useToast } from '@/components/ui/toast'
-import { api } from '@/lib/api'
+import { api, type ResourceQuota } from '@/lib/api'
 import {
   ArrowLeft,
   ArrowRight,
@@ -18,7 +18,6 @@ import {
   Shield,
   Zap,
   Server,
-  Download
 } from 'lucide-react'
 
 type Step = 1 | 2 | 3 | 4 | 5
@@ -30,17 +29,8 @@ interface Plan {
   description: string
   icon: React.ElementType
   features: string[]
-  quota: QuotaConfig
+  quota: ResourceQuota
   recommended?: boolean
-}
-
-interface QuotaConfig {
-  max_domains: number
-  max_rules: number
-  max_rate_limit_rules: number
-  max_requests_per_minute: number
-  max_bandwidth_mbps: number
-  max_ip_acls?: number
 }
 
 const PLANS: Plan[] = [
@@ -55,8 +45,7 @@ const PLANS: Plan[] = [
       max_domains: 1,
       max_rules: 5,
       max_rate_limit_rules: 2,
-      max_requests_per_minute: 1000,
-      max_bandwidth_mbps: 10,
+      max_requests_per_minute: 1000,      max_requests_per_hour: 60000,      max_bandwidth_mbps: 10,
       max_ip_acls: 10
     }
   },
@@ -72,8 +61,7 @@ const PLANS: Plan[] = [
       max_domains: 3,
       max_rules: 20,
       max_rate_limit_rules: 5,
-      max_requests_per_minute: 10000,
-      max_bandwidth_mbps: 100,
+      max_requests_per_minute: 10000,      max_requests_per_hour: 600000,      max_bandwidth_mbps: 100,
       max_ip_acls: 50
     }
   },
@@ -88,8 +76,7 @@ const PLANS: Plan[] = [
       max_domains: 10,
       max_rules: 100,
       max_rate_limit_rules: 20,
-      max_requests_per_minute: 50000,
-      max_bandwidth_mbps: 1000,
+      max_requests_per_minute: 50000,      max_requests_per_hour: 3000000,      max_bandwidth_mbps: 1000,
       max_ip_acls: 200
     }
   },
@@ -104,8 +91,7 @@ const PLANS: Plan[] = [
       max_domains: 100,
       max_rules: 1000,
       max_rate_limit_rules: 100,
-      max_requests_per_minute: 100000,
-      max_bandwidth_mbps: 10000,
+      max_requests_per_minute: 100000,      max_requests_per_hour: 6000000,      max_bandwidth_mbps: 10000,
       max_ip_acls: 1000
     }
   }
@@ -129,7 +115,7 @@ export default function TenantNewPage() {
     customConfig: false
   })
 
-  const [customQuota, setCustomQuota] = useState<QuotaConfig>(PLANS[1].quota)
+  const [customQuota, setCustomQuota] = useState<ResourceQuota>(PLANS[1].quota)
 
   const selectedPlan = PLANS.find(p => p.id === form.plan) || PLANS[1]
 
@@ -184,7 +170,7 @@ export default function TenantNewPage() {
   }
 
   const addDomain = () => {
-    const maxDomains = form.customConfig ? customQuota.max_domains : selectedPlan.quota.max_domains
+    const maxDomains = (form.customConfig ? customQuota.max_domains : selectedPlan.quota.max_domains) || 1
     if (form.domains.length < maxDomains) {
       setForm({ ...form, domains: [...form.domains, ''] })
     } else {
@@ -215,6 +201,7 @@ export default function TenantNewPage() {
 
       const response = await api.adminCreateTenant({
         name: form.name,
+        email: form.email,
         description: form.description,
         plan: form.plan,
         domains: form.domains.filter(d => d.trim()),
@@ -244,36 +231,6 @@ export default function TenantNewPage() {
   const copyApiKey = () => {
     navigator.clipboard.writeText(apiKey)
     toast({ title: 'Copied!', description: 'API key copied to clipboard' })
-  }
-
-  const downloadCredentials = () => {
-    const content = `GuardianWAF Tenant Credentials
-==============================
-
-Tenant ID: ${tenantId}
-Tenant Name: ${form.name}
-Plan: ${selectedPlan.name}
-Created: ${new Date().toISOString()}
-
-API Key: ${apiKey}
-
-IMPORTANT: Store this API key securely. It will not be shown again.
-
-Configuration:
-- Domains: ${form.domains.filter(d => d.trim()).join(', ')}
-- Max Requests/Min: ${(form.customConfig ? customQuota : selectedPlan.quota).max_requests_per_minute.toLocaleString()}
-- Max Bandwidth: ${(form.customConfig ? customQuota : selectedPlan.quota).max_bandwidth_mbps} Mbps
-
-API Documentation: https://docs.guardianwaf.com/api
-Support: support@guardianwaf.com
-`
-    const blob = new Blob([content], { type: 'text/plain' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `guardianwaf-credentials-${tenantId}.txt`
-    a.click()
-    URL.revokeObjectURL(url)
   }
 
   const renderStepIndicator = () => (
@@ -359,7 +316,7 @@ Support: support@guardianwaf.com
           <div className="space-y-6">
             <div className="text-center mb-6">
               <h2 className="text-2xl font-bold">Domain Configuration</h2>
-              <p className="text-gray-500">Add domains you want to protect ({form.domains.filter(d => d.trim()).length}/{selectedPlan.quota.max_domains})</p>
+              <p className="text-gray-500">Add domains you want to protect ({form.domains.filter(d => d.trim()).length}/{selectedPlan.quota.max_domains || 1})</p>
             </div>
 
             <div className="space-y-4">
@@ -391,7 +348,7 @@ Support: support@guardianwaf.com
                 type="button"
                 variant="outline"
                 onClick={addDomain}
-                disabled={form.domains.length >= selectedPlan.quota.max_domains}
+                disabled={form.domains.length >= (selectedPlan.quota.max_domains || 1)}
                 className="w-full"
               >
                 <Globe className="w-4 h-4 mr-2" />

@@ -57,6 +57,7 @@ import (
 	"github.com/guardianwaf/guardianwaf/internal/layers/threatintel"
 	"github.com/guardianwaf/guardianwaf/internal/layers/websocket"
 	"github.com/guardianwaf/guardianwaf/internal/layers/grpc"
+	"github.com/guardianwaf/guardianwaf/internal/layers/zerotrust"
 	"github.com/guardianwaf/guardianwaf/internal/layers/canary"
 	"github.com/guardianwaf/guardianwaf/internal/layers/cache"
 	"github.com/guardianwaf/guardianwaf/internal/layers/replay"
@@ -1521,7 +1522,7 @@ func cmdServe(args []string) {
 	eng.Logs.Info("Shutting down...")
 	fmt.Println("\nShutting down...")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	// 1. Stop accepting new requests
@@ -2228,6 +2229,18 @@ func addLayers(eng *engine.Engine, cfg *config.Config) {
 		if grpcLayer != nil {
 			eng.AddLayer(engine.OrderedLayer{Layer: grpcLayer, Order: engine.OrderGRPC})
 			eng.Logs.Info("gRPC security layer enabled")
+		}
+
+		// Zero Trust
+		if cfg.WAF.ZeroTrust.Enabled {
+			ztSvc, ztErr := zerotrust.NewService(&cfg.WAF.ZeroTrust)
+			if ztErr != nil {
+				eng.Logs.Error("Zero Trust init failed", "error", ztErr)
+			} else {
+				ztLayer := zerotrust.NewLayer(ztSvc)
+				eng.AddLayer(engine.OrderedLayer{Layer: ztLayer, Order: engine.OrderZeroTrust})
+				eng.Logs.Info("Zero Trust layer enabled")
+			}
 		}
 	}
 

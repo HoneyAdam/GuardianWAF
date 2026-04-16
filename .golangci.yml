@@ -1,41 +1,41 @@
-version: "2"
-
 run:
   timeout: 5m
   go: "1.25"
 
 linters:
-  default: none
+  disable-all: true
   enable:
     - govet
     - staticcheck
     - unused
     - ineffassign
+    - gocritic
+    - misspell
+    - revive
 
-  settings:
-    govet:
-      enable-all: false
-      enable:
-        - shadow
-
-  exclusions:
-    rules:
-      - path: _test\.go
-        linters:
-          - govet
-          - staticcheck
-      - path: internal/layers/apisecurity/jwt\.go
-        linters:
-          - staticcheck
-        text: "elliptic.Unmarshal has been deprecated"
-      - path: internal/acme/client\.go
-        linters:
-          - unparam
-        text: "result 1 .error. is always nil"
-      - linters:
-          - staticcheck
-        text: "QF1"
+linters-settings:
+  govet:
+    enable-all: false
+    enable:
+      - shadow
 
 issues:
   max-issues-per-linter: 50
   max-same-issues: 5
+  exclude-rules:
+    - path: _test\.go
+      linters:
+        - govet
+        - staticcheck
+        - revive
+    - path: internal/layers/apisecurity/jwt\.go
+      linters:
+        - staticcheck
+      text: "elliptic.Unmarshal has been deprecated"
+    - path: internal/acme/client\.go
+      linters:
+        - unparam
+      text: "result 1 .error. is always nil"
+    - linters:
+        - staticcheck
+      text: "QF1"

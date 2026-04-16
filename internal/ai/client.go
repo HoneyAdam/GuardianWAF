@@ -28,12 +28,13 @@ type Client struct {
 
 // ClientConfig holds configuration for the AI client.
 type ClientConfig struct {
-	BaseURL       string
-	APIKey        string
-	Model         string
-	MaxTokens     int
-	Timeout       time.Duration
-	TLSServerName string // optional: override TLS server name for certificate verification
+	BaseURL              string
+	APIKey               string
+	Model                string
+	MaxTokens            int
+	Timeout              time.Duration
+	TLSServerName        string // optional: override TLS server name for certificate verification
+	AllowPrivateEndpoint bool   // allow localhost/private endpoints (for testing only)
 }
 
 // NewClient creates a new AI API client.
@@ -47,7 +48,7 @@ func NewClient(cfg ClientConfig) *Client {
 		maxTokens = 2048
 	}
 	// Validate endpoint is not SSRF-vulnerable (private/internal IPs)
-	if cfg.BaseURL != "" {
+	if cfg.BaseURL != "" && !cfg.AllowPrivateEndpoint && !testAllowPrivate {
 		if u, err := url.Parse(cfg.BaseURL); err == nil {
 			if u.Scheme == "http" {
 				log.Printf("[ai] WARNING: AI endpoint uses HTTP — API key will be sent in cleartext. Use HTTPS.")

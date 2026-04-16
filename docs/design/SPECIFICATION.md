@@ -170,12 +170,12 @@ Command:  guardianwaf sidecar --upstream localhost:8088
 +---------------------------------------------------------------------+
 ```
 
-### 2.2 Core Engine — 16-Layer Pipeline
+### 2.2 Core Engine — 28-Layer Pipeline
 
 Every HTTP request passes through a pipeline. The diagram below shows the 6 primary registered stages (simplified conceptual view — additional stages run between these steps in the full design):
 
-Currently **16 layers are registered** in the engine pipeline: IP ACL(100) through Response(600).
-The full **planned** pipeline includes 5 additional early-stage layers: Cluster(75), WebSocket(76), gRPC(78), Canary(95), Replay(145). These packages exist but are not yet wired into the main engine pipeline.
+Currently **28 layers are registered** in the engine pipeline: SIEM(1) through Response(600).
+The full pipeline order is listed below.
 
 ```
                             REQUEST
@@ -231,16 +231,47 @@ The full **planned** pipeline includes 5 additional early-stage layers: Cluster(
                               v
                            RESPONSE
 
-Full pipeline order: Cluster(75) → WebSocket(76) → gRPC(78) → Canary(95) →
-IP ACL(100) → Threat Intel(125) → Replay(145) → CORS(150) → Custom Rules(150) →
-Rate Limit(200) → ATO(250) → API Security(275) → API Validation(280) →
-Sanitizer(300) → CRS(350) → Detection(400) → Virtual Patch(450) →
-DLP(475) → Bot Detection(500) → Client-Side(590) → Response(600)
+Full pipeline order: SIEM(1) → Cluster(75) → WebSocket(76) → gRPC(78) → Canary(95) →
+IP ACL(100) → Threat Intel(125) → Cache(140) → Replay(145) → CORS(150) → Custom Rules(150) →
+Rate Limit(200) → ATO Protection(250) → API Security(275) → API Validation(280) → GraphQL(285) →
+Sanitizer(300) → API Discovery(310) → CRS(350) → Detection(400) → JS Challenge(430) →
+Virtual Patch(450) → ML Anomaly(473) → DLP(475) → AI Remediation(480) →
+Bot Detection(500) → Client-Side(590) → Response(600)
 
-**Note:** Currently 16 layers are registered in the engine pipeline (IP ACL through Response).
-The 5 early-stage layers (Cluster/75, WebSocket/76, gRPC/78, Canary/95, Replay/145) are
-implemented as packages but not yet registered in the main engine pipeline. They are
-included in the full pipeline order above as planned future registrations.
+**Full Layer Table (28 layers registered in serve mode):**
+
+| Order | Layer | Description |
+|-------|-------|-------------|
+| 1 | SIEM | Passive event forwarding to SIEM systems (Splunk, ELK, ArcSight) |
+| 75 | Cluster | HTTP gossip + leader election; distributes IP bans across nodes |
+| 76 | WebSocket | WebSocket handshake validation, connection limits |
+| 78 | gRPC | gRPC request validation, method allowlists |
+| 95 | Canary | Canary release routing (% traffic to canary upstream) |
+| 100 | IP ACL | Radix tree CIDR matching, runtime add/remove, auto-ban |
+| 125 | Threat Intel | IP/domain reputation feeds with LRU cache |
+| 140 | Cache | Response caching (memory/Redis backend) |
+| 145 | Replay | Request/response recording for testing |
+| 150 | CORS | Origin validation, preflight caching |
+| 150 | Custom Rules | Geo-aware rule engine with dashboard CRUD |
+| 200 | Rate Limit | Token bucket per IP/path, auto-ban |
+| 250 | ATO Protection | Brute force, credential stuffing, password spray, impossible travel |
+| 275 | API Security | JWT validation (RS256/ES256/HS256), API key auth |
+| 280 | API Validation | Request/response schema validation (YAML-defined schemas) |
+| 285 | GraphQL | Query depth/complexity/introspection limits |
+| 300 | Sanitizer | Normalize + validate requests |
+| 310 | API Discovery | Passive API endpoint discovery, OpenAPI generation |
+| 350 | CRS | OWASP ModSecurity Core Rule Set parser and executor |
+| 400 | Detection | 6 detectors: sqli, xss, lfi, cmdi, xxe, ssrf (each in own subdirectory) |
+| 430 | JS Challenge | Bot proof-of-work challenge (SHA-256 PoW) |
+| 450 | Virtual Patch | Virtual patching layer |
+| 473 | ML Anomaly | ONNX-based Isolation Forest anomaly detection |
+| 475 | DLP | Data Loss Prevention (credit cards, SSNs, API keys, PII) |
+| 480 | AI Remediation | Generated rules from AI threat analysis verdicts |
+| 500 | Bot Detection | JA3/JA4 TLS fingerprinting, UA, behavioral analysis |
+| 590 | Client-Side | Client-side protection injection |
+| 600 | Response | Security headers, data masking, branded block pages |
+
+**Note:** Library mode (`guardianwaf.go`) wires only 6 core layers: IP ACL, Rate Limit, Sanitizer, Detection, Bot Detection, Response. Additional layers can be added via the internal engine's `AddLayer` method.
 ```
 ```
 
@@ -276,11 +307,6 @@ package types
 type Layer interface {
     Name() string
     Process(ctx *RequestContext) LayerResult
-    Enabled() bool
-    SetEnabled(enabled bool)
-    Mode() LayerMode
-    SetMode(mode LayerMode)
-    Reload(config interface{}) error
 }
 
 type LayerMode string
@@ -293,12 +319,13 @@ const (
 type LayerResult struct {
     Action   Action
     Findings []Finding
-    Error    error
+    Score    float64
+    Duration time.Duration
 }
 
 type Action int
 const (
-    ActionAllow Action = iota
+    ActionPass Action = iota
     ActionBlock
     ActionLog
     ActionChallenge
@@ -1028,12 +1055,18 @@ Full HTTP/1.1 and HTTP/2 reverse proxy with:
 3. **Rules** — Manage IP whitelist/blacklist, rate limit rules, detection exclusions (CRUD)
 4. **Configuration** — Edit YAML config in browser, apply without restart
 5. **Analytics** — Charts: attack trends (24h/7d/30d), detector breakdown, geographic distribution
+6. **AI Analysis** — AI threat analysis: provider config, analysis history, usage stats
+7. **Tenants** — Multi-tenant management: create, configure, monitor tenants
+8. **Tenant Admin** — Per-tenant admin dashboard and configuration
+9. **Routing Topology** — Visual routing topology graph (React Flow), upstream health, load balancer status
+10. **Docker Services** — Docker auto-discovered services, container status, label-based routing
 
 #### Tech Stack:
-- Pure HTML + CSS + vanilla JavaScript (no framework, embedded in binary)
+- React + TypeScript + Tailwind CSS + Vite (embedded in binary via go:embed)
 - Server-Sent Events (SSE) for real-time updates
-- Minimal, modern design (dark/light theme via CSS variables)
-- Mobile-responsive
+- Modern, responsive design (dark/light theme)
+- React Flow for routing topology visualization
+- Hot-reload dev server on :5173 (proxies API to :9443)
 
 ### 10.4 REST API
 
@@ -1076,7 +1109,9 @@ Built-in MCP (Model Context Protocol) server for AI agent integration.
 Transport: stdio (for Claude Code integration)
 Protocol: JSON-RPC 2.0 as per MCP specification
 
-#### Tools:
+#### Tools (44 total):
+Tools are implemented across two files: `tools.go` (21 tools) and `tools_new_features.go` (23 tools).
+
 | Tool | Description | Parameters |
 |------|-------------|------------|
 | guardianwaf_get_stats | WAF statistics | timeframe (optional) |
@@ -1094,6 +1129,8 @@ Protocol: JSON-RPC 2.0 as per MCP specification
 | guardianwaf_test_request | Test request (dry-run) | url, method, headers, body |
 | guardianwaf_get_top_ips | Top blocked/monitored IPs | timeframe, limit |
 | guardianwaf_get_detectors | List detectors and status | (none) |
+
+**Additional 29 tools** (in `tools_new_features.go`) cover: CRS rule management, virtual patch CRUD, API schema validation, DLP rule management, alerting webhook/email configuration, cluster node management, tenant CRUD, cache management, API discovery, replay recording, analytics queries, and more.
 
 ## 11. Embeddable Library Mode
 
@@ -1460,11 +1497,39 @@ guardianwaf/
 │   │   └── response/ (response.go, headers.go, masking.go, errorpage.go, response_test.go)
 │   ├── proxy/ (proxy.go, loadbalancer.go, healthcheck.go, circuitbreaker.go, websocket.go, proxy_test.go)
 │   ├── tls/ (manager.go, acme.go, sni.go, tls_test.go)
-│   ├── dashboard/ (dashboard.go, api.go, sse.go, auth.go, static/, dashboard_test.go)
-│   ├── mcp/ (server.go, tools.go, handlers.go, mcp_test.go)
+│   ├── http3/ (HTTP/3/QUIC support, build with -tags http3, stub otherwise)
+│   ├── dashboard/ (dashboard.go, api.go, sse.go, auth.go, ui/ (React app), dist/ (embedded), dashboard_test.go)
+│   ├── mcp/ (server.go, tools.go, tools_new_features.go, handlers.go, mcp_test.go)
 │   ├── config/ (config.go, yaml.go, yaml_test.go, validate.go, defaults.go)
 │   ├── events/ (store.go, memory.go, file.go, store_test.go)
-│   └── analytics/ (analytics.go, topk.go, ringbuffer.go, analytics_test.go)
+│   ├── analytics/ (analytics.go, topk.go, ringbuffer.go, analytics_test.go)
+│   ├── tenant/ (tenant management, isolation, billing, per-tenant rules)
+│   ├── siem/ (SIEM event forwarding — Splunk, ELK, ArcSight)
+│   ├── cluster/ (HTTP gossip + leader election)
+│   ├── clustersync/ (Cross-node state synchronization via gRPC-lite over TCP)
+│   ├── cache/ (Response caching — memory/Redis backend)
+│   ├── replay/ (Request/response recording for testing)
+│   ├── canary/ (Canary release routing)
+│   ├── cors/ (CORS origin validation, preflight caching)
+│   ├── crs/ (OWASP ModSecurity Core Rule Set parser and executor)
+│   ├── graphql/ (Query depth/complexity/introspection limits)
+│   ├── threatintel/ (IP/domain reputation feeds with LRU cache)
+│   ├── ato/ (Account takeover protection — brute force, credential stuffing)
+│   ├── apisecurity/ (JWT validation, API key auth)
+│   ├── apivalidation/ (Request/response schema validation)
+│   ├── virtualpatch/ (Virtual patching layer)
+│   ├── dlp/ (Data Loss Prevention — credit cards, SSNs, API keys, PII)
+│   ├── clientside/ (Client-side protection injection)
+│   ├── ml/ (ML anomaly detection — ONNX Isolation Forest model)
+│   ├── remediation/ (AI-generated remediation rules)
+│   ├── docker/ (Docker auto-discovery via Unix socket/CLI, label-based routing)
+│   ├── ai/ (AI threat analysis — models.dev catalog, OpenAI client, batch analyzer)
+│   ├── alerting/ (Webhook and email alerting — Slack, Discord, PagerDuty, SMTP)
+│   ├── discovery/ (Passive API discovery and path clustering)
+│   ├── integrations/ (Third-party integrations)
+│   ├── acme/ (ACME/Let's Encrypt auto-certificate, HTTP-01)
+│   ├── geoip/ (GeoIP database with auto-refresh)
+│   └── layers/zerotrust/ (Zero Trust middleware — in-development, not yet wired)
 ├── guardianwaf.go
 ├── guardianwaf_test.go
 ├── options.go

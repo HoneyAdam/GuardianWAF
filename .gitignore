@@ -111,3 +111,6 @@ internal/dashboard/ui/node_modules/
 internal/dashboard/ui/dist/
 internal/dashboard/ui/tsconfig.tsbuildinfo
 data/
+
+# AI remediation generated rules (thousands of JSON files)
+internal/ai/remediation/data/remediation/*.json

@@ -736,6 +736,7 @@ func TestClient_Analyze_Non200(t *testing.T) {
 
 	client := NewClient(ClientConfig{
 		BaseURL: srv.URL,
+		AllowPrivateEndpoint: true,
 		APIKey:  "test",
 		Model:   "test",
 	})
@@ -760,6 +761,7 @@ func TestClient_Analyze_EmptyChoices(t *testing.T) {
 
 	client := NewClient(ClientConfig{
 		BaseURL:   srv.URL,
+		AllowPrivateEndpoint: true,
 		APIKey:    "test",
 		Model:     "test",
 		MaxTokens: 1024,
@@ -786,6 +788,7 @@ func TestClient_Analyze_ResponseError(t *testing.T) {
 
 	client := NewClient(ClientConfig{
 		BaseURL: srv.URL,
+		AllowPrivateEndpoint: true,
 		APIKey:  "test",
 		Model:   "test",
 	})
@@ -806,6 +809,7 @@ func TestClient_Analyze_InvalidJSON(t *testing.T) {
 
 	client := NewClient(ClientConfig{
 		BaseURL: srv.URL,
+		AllowPrivateEndpoint: true,
 		APIKey:  "test",
 		Model:   "test",
 	})
@@ -820,9 +824,10 @@ func TestClient_Analyze_InvalidJSON(t *testing.T) {
 
 func TestClient_Analyze_Unreachable(t *testing.T) {
 	client := NewClient(ClientConfig{
-		BaseURL: "http://127.0.0.1:1/v1",
-		APIKey:  "test",
-		Model:   "test",
+		BaseURL:              "http://127.0.0.1:1/v1",
+		APIKey:               "test",
+		Model:                "test",
+		AllowPrivateEndpoint: true,
 	})
 
 	_, _, err := client.Analyze(context.Background(), "sys", "user")
@@ -841,6 +846,7 @@ func TestClient_Analyze_ContextCancelled(t *testing.T) {
 
 	client := NewClient(ClientConfig{
 		BaseURL: srv.URL,
+		AllowPrivateEndpoint: true,
 		APIKey:  "test",
 		Model:   "test",
 	})
@@ -891,7 +897,7 @@ func TestAnalyzer_Loop_ChannelClosed(t *testing.T) {
 		ModelID:    "test-model",
 		APIKey:     "test-key",
 		BaseURL:    srv.URL,
-	})
+})
 
 	a := NewAnalyzer(AnalyzerConfig{
 		Enabled:       true,
@@ -982,7 +988,7 @@ func TestAnalyzer_FlushBatch_AnalysisError(t *testing.T) {
 		ModelID:    "test-model",
 		APIKey:     "test-key",
 		BaseURL:    srv.URL,
-	})
+})
 
 	a := NewAnalyzer(AnalyzerConfig{
 		Enabled:       true,
@@ -1038,7 +1044,7 @@ func TestAnalyzer_FlushBatch_ParseError(t *testing.T) {
 		ModelID:    "test-model",
 		APIKey:     "test-key",
 		BaseURL:    srv.URL,
-	})
+})
 
 	a := NewAnalyzer(AnalyzerConfig{
 		Enabled:       true,
@@ -1091,7 +1097,7 @@ func TestAnalyzer_BatchUsageLimitExceeded(t *testing.T) {
 		ModelID:    "test-model",
 		APIKey:     "test-key",
 		BaseURL:    srv.URL,
-	})
+})
 
 	store.TrackUsage(100000)
 
@@ -1200,7 +1206,7 @@ func TestAnalyzer_CollectAndFlush_SmallBatch(t *testing.T) {
 		ModelID:    "test-model",
 		APIKey:     "test-key",
 		BaseURL:    srv.URL,
-	})
+})
 
 	a := NewAnalyzer(AnalyzerConfig{
 		Enabled:       true,
@@ -1317,7 +1323,7 @@ func TestAnalyzer_FlushViaTicker(t *testing.T) {
 		ModelID:    "test-model",
 		APIKey:     "test-key",
 		BaseURL:    srv.URL,
-	})
+})
 
 	a := NewAnalyzer(AnalyzerConfig{
 		Enabled:       true,

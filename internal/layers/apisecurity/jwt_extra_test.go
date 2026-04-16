@@ -1355,6 +1355,7 @@ func TestFetchJWKS_RSAKey(t *testing.T) {
 	})
 	// Set JWKS URL directly (bypass SSRF check for localhost test server)
 	v.config.JWKSURL = srv.URL
+	v.ssrfChecked = true
 	// Manually trigger fetch
 	v.fetchJWKS()
 
@@ -1396,6 +1397,7 @@ func TestFetchJWKS_ECKey(t *testing.T) {
 
 	v, _ := NewJWTValidator(JWTConfig{Enabled: true})
 	v.config.JWKSURL = srv.URL
+	v.ssrfChecked = true
 	v.fetchJWKS()
 
 	k, ok := v.jwksCache.Load("ec-key-1")
@@ -1848,6 +1850,7 @@ func TestFetchJWKS_EC_P384_P521(t *testing.T) {
 
 			v, _ := NewJWTValidator(JWTConfig{Enabled: true})
 				v.config.JWKSURL = srv.URL
+				v.ssrfChecked = true
 				v.fetchJWKS()
 
 			k, ok := v.jwksCache.Load(tc.name)

@@ -65,6 +65,13 @@ func (b *Balancer) Targets() []*Target {
 	return out
 }
 
+// Len returns the number of targets.
+func (b *Balancer) Len() int {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return len(b.targets)
+}
+
 // Strategy returns the strategy name.
 func (b *Balancer) Strategy() string {
 	return b.strategy

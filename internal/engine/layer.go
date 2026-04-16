@@ -62,6 +62,7 @@ const (
 	OrderCluster     = 75
 	OrderWebSocket   = 76
 	OrderGRPC        = 78
+	OrderZeroTrust   = 85  // Zero Trust identity verification (mTLS/device attestation)
 	OrderIPACL       = 100
 	OrderThreatIntel = 125
 	OrderCORS        = 150

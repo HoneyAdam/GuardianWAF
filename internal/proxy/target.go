@@ -15,6 +15,18 @@ import (
 	"time"
 )
 
+
+
+// proxyError wraps a ResponseWriter to detect proxy errors.
+// When ErrorHandler fires, it records the error. The router checks this to retry.
+type proxyError struct {
+	http.ResponseWriter
+	err error
+}
+
+func (pe *proxyError) WriteHeader(code int) { pe.ResponseWriter.WriteHeader(code) }
+func (pe *proxyError) Write(p []byte) (int, error)              { return pe.ResponseWriter.Write(p) }
+
 // Target represents a single backend server with its reverse proxy and stats.
 type Target struct {
 	URL         *url.URL
@@ -193,7 +205,10 @@ func NewTarget(rawURL string, weight int) (*Target, error) {
 			r.Body.Close()
 		}
 		t.circuit.RecordFailure()
-		http.Error(w, "502 Bad Gateway", http.StatusBadGateway)
+		// Store error on the writer so ServeHTTP can return it.
+		if pw, ok := w.(*proxyError); ok {
+			pw.err = err
+		}
 	}
 
 	// Wire response modifier to record success
@@ -210,16 +225,19 @@ func NewTarget(rawURL string, weight int) (*Target, error) {
 }
 
 // ServeHTTP proxies the request to this target, tracking active connections.
-// If the circuit breaker is open, returns 503 immediately.
-func (t *Target) ServeHTTP(w http.ResponseWriter, r *http.Request, stripPrefix string) {
+// Returns an error if the upstream was unreachable (so the router can retry).
+// If the circuit breaker is open, writes 503 and returns nil (not retryable).
+func (t *Target) ServeHTTP(w http.ResponseWriter, r *http.Request, stripPrefix string) error {
 	if !t.circuit.Allow() {
 		http.Error(w, "503 Service Unavailable - Circuit breaker open", http.StatusServiceUnavailable)
-		return
+		return nil
 	}
 
 	t.activeConns.Add(1)
 	defer t.activeConns.Add(-1)
 
+	// Track whether the ErrorHandler was invoked (upstream unreachable).
+	proxyErr := &proxyError{ResponseWriter: w}
 	if stripPrefix != "" {
 		r2 := r.Clone(r.Context())
 		r2.URL.Path = strings.TrimPrefix(r2.URL.Path, stripPrefix)
@@ -227,11 +245,15 @@ func (t *Target) ServeHTTP(w http.ResponseWriter, r *http.Request, stripPrefix s
 			r2.URL.Path = "/" + r2.URL.Path
 		}
 		r2.URL.RawPath = ""
-		t.proxy.ServeHTTP(w, r2)
-		return
+		t.proxy.ServeHTTP(proxyErr, r2)
+	} else {
+		t.proxy.ServeHTTP(proxyErr, r)
 	}
 
-	t.proxy.ServeHTTP(w, r)
+	if proxyErr.err != nil {
+		return proxyErr.err
+	}
+	return nil
 }
 
 // IsHealthy returns true if the target is healthy AND circuit is not open.

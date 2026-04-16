@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 )
@@ -354,10 +355,69 @@ func DefaultWAFConfig() WAFConfig {
 }
 
 // appendTenantsFromDir loads tenant configs from tenants.d/*.yaml and appends.
-func appendTenantsFromDir(path string, cfg *Config) error {
-	// Tenant config is complex; for now just track that file exists
-	// Full tenant loading would need TenantConfig struct
+func appendTenantsFromDir(dir string, cfg *Config) error {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read tenants directory: %w", err)
+	}
+
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !strings.HasSuffix(name, ".yaml") && !strings.HasSuffix(name, ".yml") {
+			continue
+		}
+
+		data, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil {
+			return fmt.Errorf("read tenant file %s: %w", name, err)
+		}
+
+		node, err := Parse(data)
+		if err != nil {
+			return fmt.Errorf("parse tenant file %s: %w", name, err)
+		}
+
+		td := parseTenantDefinition(node)
+		if td.ID != "" {
+			cfg.Tenant.Tenants = append(cfg.Tenant.Tenants, td)
+		}
+	}
+
 	return nil
+}
+
+// parseTenantDefinition parses a TenantDefinition from a YAML node.
+func parseTenantDefinition(n *Node) TenantDefinition {
+	td := TenantDefinition{Active: true}
+	if id := n.Get("id"); id != nil {
+		td.ID = id.String()
+	}
+	if name := n.Get("name"); name != nil {
+		td.Name = name.String()
+	}
+	if desc := n.Get("description"); desc != nil {
+		td.Description = desc.String()
+	}
+	if apiKey := n.Get("api_key"); apiKey != nil {
+		td.APIKey = apiKey.String()
+	}
+	if active := n.Get("active"); active != nil {
+		if b, _ := active.Bool(); !b {
+			td.Active = false
+		}
+	}
+	if domains := n.Get("domains"); domains != nil {
+		for _, d := range domains.Items {
+			td.Domains = append(td.Domains, d.String())
+		}
+	}
+	return td
 }
 
 // parseCustomRule parses a single custom rule from a YAML node.

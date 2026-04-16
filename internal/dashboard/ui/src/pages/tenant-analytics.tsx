@@ -69,7 +69,7 @@ export default function TenantAnalyticsPage() {
   const [loading, setLoading] = useState(true)
   const [tenant, setTenant] = useState<Tenant | null>(null)
   const [usage, setUsage] = useState<TenantUsageType | null>(null)
-  const [history, setHistory] = useState<UsageHistory[]>([])
+  const [history] = useState<UsageHistory[]>([])
   const [refreshing, setRefreshing] = useState(false)
   const [timeRange, setTimeRange] = useState<'24h' | '7d' | '30d'>('24h')
   const { toast } = useToast()
@@ -83,9 +83,10 @@ export default function TenantAnalyticsPage() {
       setTenant(tenantData)
       setUsage(usageData)
 
-      // Generate mock history data for demonstration
-      const mockHistory: UsageHistory[] = generateMockHistory(timeRange)
-      setHistory(mockHistory)
+      // TODO: Replace with real history API when backend endpoint is available
+      // const historyData = await api.getTenantHistory(id!, timeRange)
+      // setHistory(historyData)
+      void timeRange // suppress unused warning until real API is connected
     } catch {
       toast({
         title: 'Error',
@@ -95,26 +96,6 @@ export default function TenantAnalyticsPage() {
     } finally {
       setLoading(false)
     }
-  }
-
-  const generateMockHistory = (range: '24h' | '7d' | '30d'): UsageHistory[] => {
-    const now = new Date()
-    const data: UsageHistory[] = []
-
-    const points = range === '24h' ? 24 : range === '7d' ? 7 : 30
-    const interval = range === '24h' ? 60 * 60 * 1000 : 24 * 60 * 60 * 1000
-
-    for (let i = points - 1; i >= 0; i--) {
-      const date = new Date(now.getTime() - i * interval)
-      data.push({
-        date: date.toISOString(),
-        requests: Math.floor(Math.random() * 10000) + 5000,
-        blocked: Math.floor(Math.random() * 500),
-        bandwidth_gb: Math.random() * 10 + 1
-      })
-    }
-
-    return data
   }
 
   const refreshData = async () => {

@@ -1,4 +1,4 @@
-.PHONY: build test lint bench fuzz clean run docker-build smoke docker-test ui ui-dev help fmt tidy e2e e2e-headed e2e-list
+.PHONY: build test lint bench fuzz clean run docker-build smoke docker-test ui ui-dev dev help fmt tidy e2e e2e-headed e2e-list
 
 BINARY=guardianwaf
 VERSION?=$(shell git describe --tags --always --dirty 2>/dev/null || echo "dev")
@@ -19,6 +19,10 @@ ui:
 # Dev mode for dashboard (hot reload on :5173, proxies API to :9443)
 ui-dev:
 	cd internal/dashboard/ui && npm run dev
+
+# Dev build — Go only, skips dashboard rebuild (use ui-dev for frontend changes)
+dev:
+	go build $(LDFLAGS) -o $(BINARY) ./cmd/guardianwaf
 
 test:
 	go test -race -count=1 ./...
@@ -99,6 +103,7 @@ help:
 	@echo "  build        Build dashboard UI + Go binary"
 	@echo "  ui           Build React dashboard"
 	@echo "  ui-dev       Dashboard dev mode (hot reload :5173)"
+	@echo "  dev          Go-only build (skips dashboard rebuild)"
 	@echo "  test         Run all tests with race detector"
 	@echo "  lint         Run golangci-lint"
 	@echo "  bench        Run benchmarks with memory stats"

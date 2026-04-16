@@ -88,7 +88,7 @@ export default function AIPage() {
 
   const handleSave = async () => {
     if (!selectedProvider || !selectedModel || !apiKey) {
-      setError('Provider, model ve API key gerekli')
+      setError('Provider, model, and API key are required')
       return
     }
     setSaving(true); setError(null)

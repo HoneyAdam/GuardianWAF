@@ -8,6 +8,8 @@ import (
 	"sync"
 )
 
+const maxRetries = 2
+
 // Route maps a path prefix to a load balancer with optional prefix stripping.
 type Route struct {
 	PathPrefix  string
@@ -100,7 +102,26 @@ func (rt *Router) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if route.StripPrefix {
 			stripPrefix = route.PathPrefix
 		}
-		target.ServeHTTP(w, r, stripPrefix)
+
+		// Send to first target; retry on proxy error (502) if more targets exist.
+		proxyErr := target.ServeHTTP(w, r, stripPrefix)
+		if proxyErr == nil || route.Balancer.Len() <= 1 {
+			return
+		}
+
+		// Retry with different targets (skip the one that failed)
+		for attempt := 0; attempt < maxRetries; attempt++ {
+			next := route.Balancer.Next(r)
+			if next == nil || next == target {
+				break
+			}
+			if next.ServeHTTP(w, r, stripPrefix) == nil {
+				return
+			}
+			target = next
+		}
+		// All attempts failed — send 502 to client
+		http.Error(w, "502 Bad Gateway", http.StatusBadGateway)
 		return
 	}
 

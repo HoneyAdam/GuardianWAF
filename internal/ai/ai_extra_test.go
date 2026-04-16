@@ -70,7 +70,7 @@ func TestAnalyzer_ManualAnalyze(t *testing.T) {
 		ModelID:    "test-model",
 		APIKey:     "test-key",
 		BaseURL:    srv.URL,
-	})
+})
 
 	a := NewAnalyzer(AnalyzerConfig{
 		Enabled:         true,
@@ -214,7 +214,7 @@ func TestAnalyzer_TestConnection(t *testing.T) {
 		ModelID:    "test-model",
 		APIKey:     "test-key",
 		BaseURL:    srv.URL,
-	})
+})
 
 	a := NewAnalyzer(AnalyzerConfig{Enabled: true}, store, "")
 
@@ -259,6 +259,7 @@ func TestClient_TestConnection(t *testing.T) {
 
 	client := NewClient(ClientConfig{
 		BaseURL: srv.URL,
+		AllowPrivateEndpoint: true,
 		APIKey:  "test-key",
 		Model:   "test-model",
 	})
@@ -316,7 +317,7 @@ func TestAnalyzer_ManualAnalyze_ParseError(t *testing.T) {
 		ModelID:    "test-model",
 		APIKey:     "test-key",
 		BaseURL:    srv.URL,
-	})
+})
 
 	a := NewAnalyzer(AnalyzerConfig{
 		Enabled:         true,

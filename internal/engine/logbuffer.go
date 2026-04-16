@@ -2,6 +2,7 @@ package engine
 
 import (
 	"fmt"
+	"runtime/debug"
 	"sync"
 	"time"
 )
@@ -124,6 +125,11 @@ func (lb *LogBuffer) Warn(msg string) {
 // Error(msg string) logs an error message.
 func (lb *LogBuffer) Error(msg string) {
 	lb.Add("error", msg)
+}
+
+// ErrorStack logs an error message with a goroutine stack trace appended.
+func (lb *LogBuffer) ErrorStack(msg string) {
+	lb.Add("error", msg+"\n"+string(debug.Stack()))
 }
 
 // Infof logs a formatted info message.

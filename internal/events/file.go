@@ -23,15 +23,16 @@ const (
 
 // FileStore writes events as JSONL (one JSON object per line) to a file.
 type FileStore struct {
-	mu       sync.RWMutex
-	file     *os.File
-	writer   *bufio.Writer
-	ch       chan engine.Event // buffered channel for async writes
-	done     chan struct{}
-	filePath string
-	maxSize  int64 // max file size before rotation
-	dropped  atomic.Int64 // count of dropped events
-	closed   bool // guard against double-close of ch
+	mu        sync.RWMutex
+	rotateMu  sync.Mutex // serializes rotation I/O outside the main mu
+	file      *os.File
+	writer    *bufio.Writer
+	ch        chan engine.Event // buffered channel for async writes
+	done      chan struct{}
+	filePath  string
+	maxSize   int64 // max file size before rotation
+	dropped   atomic.Int64 // count of dropped events
+	closed    bool // guard against double-close of ch
 }
 
 // NewFileStore creates a new FileStore that writes JSONL to the specified file.
@@ -171,18 +172,21 @@ func (fs *FileStore) writeEvent(ev engine.Event) {
 	line := marshalEventJSON(ev)
 
 	fs.mu.Lock()
-	defer fs.mu.Unlock()
 
 	if _, err := fs.writer.WriteString(line); err != nil {
 		fs.dropped.Add(1)
+		fs.mu.Unlock()
 		return
 	}
 	if err := fs.writer.WriteByte('\n'); err != nil {
 		fs.dropped.Add(1)
+		fs.mu.Unlock()
 		return
 	}
 
-	// Check if rotation is needed
+	fs.mu.Unlock()
+
+	// Check if rotation is needed (handles its own locking)
 	fs.checkRotation()
 }
 
@@ -197,72 +201,86 @@ func (fs *FileStore) flush() {
 }
 
 // checkRotation checks if the file exceeds maxSize and rotates if necessary.
-// Must be called with fs.mu held.
+// Acquires fs.mu for state checks, then releases it during I/O operations
+// (serialized under rotateMu) to avoid blocking concurrent readers.
 func (fs *FileStore) checkRotation() {
+	fs.mu.Lock()
 	// Flush buffered data so the on-disk size is accurate
 	fs.writer.Flush()
 
 	info, err := fs.file.Stat()
 	if err != nil {
+		fs.mu.Unlock()
 		return
 	}
 	if info.Size() < fs.maxSize {
+		fs.mu.Unlock()
 		return
 	}
 
-	// Close current file before rename (required on Windows where open files cannot be renamed)
+	// Capture what we need, release the main lock, and serialize rotation I/O.
 	oldFile := fs.file
+	fp := fs.filePath
+	fs.mu.Unlock()
+
+	fs.rotateMu.Lock()
+	defer fs.rotateMu.Unlock()
+
+	// Close current file before rename (required on Windows where open files cannot be renamed)
 	oldFile.Close()
 
 	// Rename current file with timestamp
 	ts := time.Now().Format("20060102-150405")
 	ext := ""
-	base := fs.filePath
-	if idx := strings.LastIndex(fs.filePath, "."); idx >= 0 {
-		ext = fs.filePath[idx:]
-		base = fs.filePath[:idx]
+	base := fp
+	if idx := strings.LastIndex(fp, "."); idx >= 0 {
+		ext = fp[idx:]
+		base = fp[:idx]
 	}
 	rotatedName := base + "-" + ts + ext
-	if renameErr := os.Rename(fs.filePath, rotatedName); renameErr != nil {
+
+	var newFile *os.File
+	if renameErr := os.Rename(fp, rotatedName); renameErr != nil {
 		// If rename fails, reopen the original file
-		f, reopenErr := os.OpenFile(fs.filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+		f, reopenErr := os.OpenFile(fp, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 		if reopenErr != nil {
-			// Cannot reopen — close channel to stop accepting events
+			fs.mu.Lock()
 			if !fs.closed {
 				fs.closed = true
 				close(fs.ch)
 			}
+			fs.mu.Unlock()
 			return
 		}
-		fs.file = f
-		fs.writer = bufio.NewWriterSize(f, 32*1024)
-		return
+		newFile = f
+	} else {
+		// Create new file
+		f, openErr := os.OpenFile(fp, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+		if openErr != nil {
+			f, _ = os.OpenFile(rotatedName, os.O_WRONLY|os.O_APPEND, 0o600)
+		}
+		if f != nil {
+			newFile = f
+		} else {
+			f2, f2err := os.OpenFile(fp, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+			if f2err == nil {
+				newFile = f2
+			}
+		}
 	}
 
-	// Create new file
-	f, err := os.OpenFile(fs.filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
-	if err != nil {
-		// If we can't create a new file, try to reopen with the rotated name
-		f, _ = os.OpenFile(rotatedName, os.O_WRONLY|os.O_APPEND, 0o600)
+	fs.mu.Lock()
+	if newFile != nil {
+		fs.file = newFile
+		fs.writer = bufio.NewWriterSize(newFile, 32*1024)
 	}
-	if f != nil {
-		fs.file = f
-		fs.writer = bufio.NewWriterSize(f, 32*1024)
-	} else {
-		// Both attempts failed -- reopen original path as last resort
-		f2, f2err := os.OpenFile(fs.filePath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
-		if f2err == nil {
-			fs.file = f2
-			fs.writer = bufio.NewWriterSize(f2, 32*1024)
-		}
-		// If even that fails, fs.file/fs.writer are stale but writes just fail silently
-	}
+	fs.mu.Unlock()
 
 	fs.cleanupRotated(base, ext)
 }
 
 // cleanupRotated removes old rotated files, keeping only the most recent ones.
-// Must be called with fs.mu held.
+// Must be called with fs.rotateMu held.
 func (fs *FileStore) cleanupRotated(base, ext string) {
 	dir := "."
 	// Use filepath.Separator for cross-platform compatibility

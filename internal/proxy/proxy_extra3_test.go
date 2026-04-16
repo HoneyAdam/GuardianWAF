@@ -104,9 +104,9 @@ func TestTargetErrorHandler(t *testing.T) {
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/", nil)
-	target.ServeHTTP(w, req, "")
-	if w.Code != http.StatusBadGateway {
-		t.Errorf("expected 502, got %d", w.Code)
+	err := target.ServeHTTP(w, req, "")
+	if err == nil {
+		t.Error("expected error when backend is down")
 	}
 	if target.circuit.Failures() == 0 {
 		t.Error("expected circuit failure to be recorded")

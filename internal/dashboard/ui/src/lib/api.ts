@@ -113,9 +113,9 @@ export const api = {
 
   // Admin tenant management (backend at /api/admin/tenants)
   adminGetTenants: () => request<{tenants: AdminTenant[]}>('/api/admin/tenants'),
-  adminGetTenant: (id: string) => request<any>('/api/admin/tenants/' + id),
-  adminCreateTenant: (data: any) => request<{tenant: any, api_key: string}>('/api/admin/tenants', { method: 'POST', body: JSON.stringify(data) }),
-  adminUpdateTenant: (id: string, data: any) => request<any>('/api/admin/tenants/' + id, { method: 'PUT', body: JSON.stringify(data) }),
+  adminGetTenant: (id: string) => request<AdminTenantDetail>('/api/admin/tenants/' + id),
+  adminCreateTenant: (data: AdminCreateTenantRequest) => request<{tenant: AdminTenantDetail, api_key: string}>('/api/admin/tenants', { method: 'POST', body: JSON.stringify(data) }),
+  adminUpdateTenant: (id: string, data: AdminUpdateTenantRequest) => request<AdminTenantDetail>('/api/admin/tenants/' + id, { method: 'PUT', body: JSON.stringify(data) }),
   adminDeleteTenant: (id: string) => request<void>('/api/admin/tenants/' + id, { method: 'DELETE' }),
   adminRegenerateKey: (id: string) => request<{api_key: string}>('/api/admin/tenants/' + id + '/regenerate-key', { method: 'POST', body: JSON.stringify({}) }),
 
@@ -401,6 +401,35 @@ export interface AdminTenant {
     requests_this_month: number
     blocked_requests: number
   }
+}
+
+export interface AdminTenantDetail extends AdminTenant {
+  api_key: string
+  description?: string
+  updated_at?: string
+  auto_rotation?: boolean
+  rotation_interval?: string
+  quota?: ResourceQuota
+}
+
+export interface AdminCreateTenantRequest {
+  name: string
+  email: string
+  description?: string
+  plan: string
+  domains: string[]
+  quota?: ResourceQuota
+}
+
+export interface AdminUpdateTenantRequest {
+  name?: string
+  email?: string
+  plan?: string
+  status?: string
+  domains?: string[]
+  quota?: ResourceQuota
+  auto_rotation?: boolean
+  rotation_interval?: string
 }
 
 export interface ResourceQuota {

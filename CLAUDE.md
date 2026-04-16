@@ -73,14 +73,14 @@ All WAF processing flows through a **layer pipeline** (`internal/engine/pipeline
 ### Request Context
 
 `engine.RequestContext` (`internal/engine/context.go`) carries all per-request state. It's pooled via `sync.Pool` for zero-allocation hot paths:
-- Acquired via `AcquireContext()` — parses HTTP request, reads/decompresses body (gzip/deflate), extracts client IP (X-Forwarded-For → X-Real-IP → RemoteAddr)
+- Acquired via `AcquireContext()` — parses HTTP request, reads/decompresses body (gzip/deflate), extracts client IP (trusted proxy aware: X-Forwarded-For → X-Real-IP → RemoteAddr; only trusts proxy headers from configured `trusted_proxies` CIDRs)
 - Released via `ReleaseContext()` — resets all fields, returns to pool
 - Populates JA4 TLS fingerprint fields from custom TLS handler data
 - Carries `TenantID` and `TenantWAFConfig` for multi-tenant isolation
 
 ### Layer Order Constants
 
-Defined in `internal/engine/layer.go`. **24 layers** are registered in the main pipeline.
+Defined in `internal/engine/layer.go`. **29 layers** are registered in the main pipeline (serve mode). Library mode (`guardianwaf.go`) wires only 6 core layers: IP ACL, Rate Limit, Sanitizer, Detection, Bot Detection, Response.
 
 **Registered (in pipeline):**
 
@@ -90,6 +90,7 @@ Defined in `internal/engine/layer.go`. **24 layers** are registered in the main 
 | 75 | Cluster | HTTP gossip + leader election; distributes IP bans across nodes |
 | 76 | WebSocket | WebSocket handshake validation, connection limits |
 | 78 | gRPC | gRPC request validation, method allowlists |
+| 85 | Zero Trust | mTLS client verification, device attestation, session trust levels |
 | 95 | Canary | Canary release routing (% traffic to canary upstream) |
 | 100 | IP ACL | Radix tree CIDR matching, runtime add/remove, auto-ban |
 | 125 | Threat Intel | IP/domain reputation feeds with LRU cache |
@@ -115,8 +116,6 @@ Defined in `internal/engine/layer.go`. **24 layers** are registered in the main 
 | 590 | Client-Side | Client-side protection injection |
 | 600 | Response | Security headers, data masking, branded block pages |
 
-**Not yet implemented:**
-
 ### Scoring System
 
 - Each detector produces scores 0-100
@@ -124,6 +123,10 @@ Defined in `internal/engine/layer.go`. **24 layers** are registered in the main 
 - `block_threshold`: 50 (default), `log_threshold`: 25
 - Score 40-79 with bot detection → JS challenge
 - Per-detector multipliers adjust sensitivity
+
+### Layer vs Library Mode
+
+The `serve` command (`cmd/guardianwaf/main.go`) wires all 29 layers into the pipeline. The Go library API (`guardianwaf.go`) wires only 6 core layers by default. To add more layers in library mode, access the internal engine and call `AddLayer` directly.
 
 ### Multi-Tenancy
 
@@ -176,8 +179,7 @@ Key config files:
 - `internal/discovery/` — Passive API discovery and path clustering
 - `internal/integrations/` — Third-party integrations (v040)
 - `internal/ml/` — ML anomaly detection (ONNX model, Isolation Forest — separate from AI batch analysis)
-- `internal/layers/graphql/` — GraphQL protection (parser + security layer, in-development pipeline integration)
-- `internal/layers/zerotrust/` — Zero Trust middleware/service (in-development)
+- `internal/layers/zerotrust/` — Zero Trust middleware/service (in-development, not yet wired)
 - `guardianwaf.go` + `options.go` — Public library API
 
 ## Architecture Decision Records

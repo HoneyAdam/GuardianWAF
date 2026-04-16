@@ -127,6 +127,7 @@ func TestClient_Analyze_MockServer(t *testing.T) {
 
 	client := NewClient(ClientConfig{
 		BaseURL:   srv.URL,
+		AllowPrivateEndpoint: true,
 		APIKey:    "test-key",
 		Model:     "test-model",
 		MaxTokens: 1024,

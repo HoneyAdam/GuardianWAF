@@ -25,7 +25,7 @@ func DefaultSecurityHeaders() SecurityHeaders {
 		XFrameOptions:         "SAMEORIGIN",
 		ReferrerPolicy:        "strict-origin-when-cross-origin",
 		PermissionsPolicy:     "camera=(), microphone=(), geolocation=()",
-		ContentSecurityPolicy: "default-src 'self'",
+		ContentSecurityPolicy: "default-src 'self'; frame-ancestors 'self'",
 		XXSSProtection:        "0",
 		CacheControl:          "",
 	}

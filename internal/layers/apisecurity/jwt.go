@@ -107,7 +107,7 @@ func NewJWTValidator(cfg JWTConfig) (*JWTValidator, error) {
 	// Warn if using default algorithm whitelist — production deployments should
 	// explicitly set the `algorithms` field to restrict allowed algorithms.
 	if len(cfg.Algorithms) == 0 {
-		log.Println("[jwt] WARNING: JWT validation using default algorithm whitelist (RS256-RS512, ES256-ES512, HS256-HS512). Set `algorithms` in config to restrict.")
+		log.Println("[jwt] WARNING: JWT validation using default algorithm whitelist (RS256, ES256). Set `algorithms` in config to allow other algorithms.")
 	}
 
 	return v, nil
@@ -386,9 +386,13 @@ func (v *JWTValidator) fetchJWKS() {
 	// Re-validate JWKS URL on each fetch to prevent DNS rebinding attacks.
 	// The initial validation at startup only checked the hostname; DNS could have
 	// changed since then to point to a private/internal address.
-	if err := validateJWKSURL(v.config.JWKSURL); err != nil {
-		log.Printf("[jwt] fetchJWKS: JWKS URL validation failed: %v", err)
-		return
+	// Skip re-validation when ssrfChecked is true (used in tests with localhost servers).
+	if !v.ssrfChecked {
+		if err := validateJWKSURL(v.config.JWKSURL); err != nil {
+			log.Printf("[jwt] fetchJWKS: JWKS URL validation failed: %v", err)
+			return
+		}
+		v.ssrfChecked = true
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

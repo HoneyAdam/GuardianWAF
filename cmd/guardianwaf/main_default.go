@@ -1449,7 +1449,7 @@ func cmdServe(args []string) {
 	eng.Logs.Info("Shutting down...")
 	fmt.Println("\nShutting down...")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	// 1. Stop accepting new requests
@@ -1693,7 +1693,7 @@ func cmdSidecar(args []string) {
 	<-shutdown
 	fmt.Println("\nShutting down sidecar...")
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(ctx)
 	eng.Close()
