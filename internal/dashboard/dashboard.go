@@ -535,6 +535,12 @@ func (d *Dashboard) handleGetEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Cap offset to prevent out-of-range enumeration
+	if offset > total {
+		offset = total
+		evts = nil
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{
 		"events": evts,
 		"total":  total,

@@ -422,6 +422,9 @@ func applyResponseHook(w http.ResponseWriter, metadata map[string]any) {
 
 // applyCORSHook applies CORS headers stored in context metadata by the CORS layer.
 func applyCORSHook(w http.ResponseWriter, metadata map[string]any) {
+	// Vary header required so caches don't serve wrong origin response
+	w.Header().Set("Vary", "Origin")
+
 	// Preflight headers take precedence if set (handled by CORS layer directly)
 	if headers, ok := metadata["cors_preflight_headers"].(map[string]string); ok {
 		for k, v := range headers {
