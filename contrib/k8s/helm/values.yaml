@@ -1,0 +1,166 @@
+# GuardianWAF Helm Chart Values
+
+replicaCount: 2
+
+image:
+  repository: ghcr.io/guardianwaf/guardianwaf
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+# WAF configuration
+config:
+  mode: enforce            # enforce, detect, disable
+  listen: ":8088"          # Main HTTP listener
+  dashboardListen: ":9443" # Dashboard/API listener
+  logLevel: info           # debug, info, warn, error
+  logFormat: json          # json, text
+
+  detection:
+    blockThreshold: 50
+    logThreshold: 25
+    paranoiaLevel: 2       # 1-4
+
+  geoip:
+    enabled: false
+    dbPath: ""
+    autoDownload: false
+
+# Environment variables (override config values)
+env: {}
+  # GWAF_MODE: enforce
+  # GWAF_THRESHOLD_BLOCK: 50
+
+# Existing ConfigMap with full guardianwaf.yml (overrides config section)
+existingConfigMap: ""
+
+# Upstream backends
+upstreams: []
+  # - name: backend1
+  #   targets:
+  #     - url: http://backend:8080
+  #       weight: 1
+  #   strategy: round_robin  # round_robin, weighted, least_conn, ip_hash
+  #   healthCheck:
+  #     enabled: true
+  #     path: /healthz
+  #     interval: 10s
+
+# Dashboard service
+dashboard:
+  enabled: true
+  service:
+    type: ClusterIP
+    port: 9443
+    annotations: {}
+
+# Main WAF service
+service:
+  type: ClusterIP
+  port: 80
+  annotations: {}
+  # service.beta.kubernetes.io/aws-load-balancer-type: nlb
+
+# TLS for the main listener
+tls:
+  enabled: false
+  secretName: guardianwaf-certs
+  # certManager:
+  #   enabled: true
+  #   issuerRef:
+  #     name: letsencrypt-prod
+  #     kind: ClusterIssuer
+
+# Ingress
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+    # kubernetes.io/ingress.class: nginx
+  hosts: []
+  #   - host: waf.example.com
+  #     paths:
+  #       - path: /
+  #         pathType: Prefix
+  tls: []
+  #   - secretName: waf-example-tls
+  #     hosts:
+  #       - waf.example.com
+
+# API key for dashboard access
+apiKey:
+  # Set to a pre-generated key, or leave empty to use existing secret
+  value: ""
+  existingSecret: ""
+  existingSecretKey: "api-key"
+
+# Resources
+resources:
+  requests:
+    memory: "64Mi"
+    cpu: "100m"
+  limits:
+    memory: "256Mi"
+    cpu: "500m"
+
+# Autoscaling
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 80
+  # targetMemoryUtilizationPercentage: 80
+
+# Pod disruption budget
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+  # maxUnavailable: 1
+
+# Node selector
+nodeSelector: {}
+
+# Tolerations
+tolerations: []
+
+# Affinity
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                  - guardianwaf
+          topologyKey: kubernetes.io/hostname
+
+# Security context
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 1000
+  capabilities:
+    drop:
+      - ALL
+
+# Service account
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+# Extra volumes and volume mounts
+extraVolumes: []
+extraVolumeMounts: []
+
+# Prometheus monitoring
+prometheus:
+  enabled: false
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    path: /metrics
+    labels: {}

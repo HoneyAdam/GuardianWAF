@@ -1,0 +1,17 @@
+apiVersion: v2
+name: guardianwaf
+description: Zero-dependency Web Application Firewall with 29-layer detection pipeline
+version: 0.1.0
+appVersion: "0.3.0"
+home: https://github.com/guardianwaf/guardianwaf
+keywords:
+  - waf
+  - security
+  - firewall
+  - reverse-proxy
+  - web-application-firewall
+maintainers:
+  - name: Ersin Koc
+    email: ersin@guardianwaf.com
+sources:
+  - https://github.com/guardianwaf/guardianwaf
