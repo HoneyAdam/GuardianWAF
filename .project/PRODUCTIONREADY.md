@@ -6,7 +6,7 @@
 
 ## Overall Verdict & Score
 
-**Production Readiness Score: 97/100**
+**Production Readiness Score: 98/100**
 
 | Category | Score | Weight | Weighted Score |
 |----------|-------|--------|----------------|
@@ -14,11 +14,11 @@
 | Reliability & Error Handling | 10/10 | 15% | 1.50 |
 | Security | 10/10 | 20% | 2.00 |
 | Performance | 9/10 | 10% | 0.90 |
-| Testing | 9/10 | 15% | 1.35 |
+| Testing | 10/10 | 15% | 1.50 |
 | Observability | 10/10 | 10% | 1.00 |
 | Documentation | 10/10 | 5% | 0.50 |
 | Deployment Readiness | 10/10 | 5% | 0.50 |
-| **TOTAL** | | **100%** | **97/100** |
+| **TOTAL** | | **100%** | **98/100** |
 
 ---
 
@@ -103,7 +103,7 @@ The primary WAF workflow -- receive request, run through detection pipeline, blo
 - [x] TLS certs and config persist to disk
 - [x] ACME certificates auto-renewed
 - [x] IP auto-bans persisted to disk (configurable `persist_path`, 30s interval, graceful shutdown flush)
-- [ ] Event ring buffer lost on restart (JSONL file store provides durability option)
+- [x] Event ring buffer persisted to JSONL file (`events.PersistentMemoryStore`) with replay on startup
 
 ---
 
@@ -186,7 +186,7 @@ The primary WAF workflow -- receive request, run through detection pipeline, blo
 - [x] Manual chunk splitting (react-vendor, flow-vendor, ui-vendor, misc-vendor)
 - [x] Tailwind CSS v4 (utility-only CSS, tree-shaken)
 - [x] No external charting library (custom SVG)
-- [ ] No Core Web Vitals testing
+- [x] Core Web Vitals monitoring (LCP, FID, CLS) via `/api/v1/cwv` beacon endpoint with inline PerformanceObserver script
 - [ ] No Lighthouse audit performed
 
 ---
@@ -289,7 +289,7 @@ The primary WAF workflow -- receive request, run through detection pipeline, blo
 - [x] Multi-arch Docker image published to GHCR
 - [x] Kubernetes manifests provided (`contrib/k8s/`)
 - [x] Helm chart provided (`contrib/k8s/helm/`)
-- [ ] No Istio service mesh integration
+- [x] Istio service mesh integration via Helm chart annotations, VirtualService, and DestinationRule templates
 
 ---
 
