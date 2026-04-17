@@ -6,19 +6,19 @@
 
 ## Overall Verdict & Score
 
-**Production Readiness Score: 96/100**
+**Production Readiness Score: 97/100**
 
 | Category | Score | Weight | Weighted Score |
 |----------|-------|--------|----------------|
 | Core Functionality | 9/10 | 20% | 1.80 |
-| Reliability & Error Handling | 9/10 | 15% | 1.35 |
+| Reliability & Error Handling | 10/10 | 15% | 1.50 |
 | Security | 10/10 | 20% | 2.00 |
 | Performance | 9/10 | 10% | 0.90 |
 | Testing | 9/10 | 15% | 1.35 |
 | Observability | 10/10 | 10% | 1.00 |
 | Documentation | 10/10 | 5% | 0.50 |
 | Deployment Readiness | 10/10 | 5% | 0.50 |
-| **TOTAL** | | **100%** | **96/100** |
+| **TOTAL** | | **100%** | **97/100** |
 
 ---
 
@@ -102,7 +102,7 @@ The primary WAF workflow -- receive request, run through detection pipeline, blo
 - [x] Process can recover from crashes (stateless by design)
 - [x] TLS certs and config persist to disk
 - [x] ACME certificates auto-renewed
-- [ ] Rate limit counters, behavior tracking, and auto-bans lost on restart (acceptable for WAF)
+- [x] IP auto-bans persisted to disk (configurable `persist_path`, 30s interval, graceful shutdown flush)
 - [ ] Event ring buffer lost on restart (JSONL file store provides durability option)
 
 ---
@@ -306,8 +306,8 @@ The primary WAF workflow -- receive request, run through detection pipeline, blo
 - [x] Kubernetes deployment examples
 - [x] Grafana dashboard provided
 - [x] CHANGELOG.md complete with v0.3.0/v0.2.0/v0.1.0 entries
-- [ ] No troubleshooting runbook
-- [ ] No incident response guide
+- [x] Troubleshooting runbook (`docs/runbook.md`) — 8 scenarios, emergency procedures
+- [x] Incident response guide (`docs/incident-response.md`) — P1-P4 classification, forensic collection
 
 ---
 
