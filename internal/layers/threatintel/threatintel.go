@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/guardianwaf/guardianwaf/internal/engine"
+	"github.com/guardianwaf/guardianwaf/internal/layers/ipacl"
 )
 
 // Config holds the configuration for the Threat Intelligence layer.
@@ -38,18 +39,12 @@ type DomainRepConfig struct {
 	CheckRedirects bool `yaml:"check_redirects"`
 }
 
-// cidrEntry holds a pre-parsed CIDR network with its threat info.
-type cidrEntry struct {
-	network *net.IPNet
-	info    *ThreatInfo
-}
-
 // Layer implements engine.Layer for threat intelligence.
 type Layer struct {
 	config      Config
 	ipCache     *Cache
 	domainCache *Cache
-	cidrCache   []cidrEntry // pre-parsed CIDR ranges for lookup
+	cidrTree    *ipacl.RadixTree // O(128) CIDR lookup instead of linear scan
 	feeds       []*FeedManager
 	mu          sync.RWMutex
 	started     bool
@@ -71,7 +66,7 @@ func NewLayer(cfg *Config) (*Layer, error) {
 		config:      *cfg,
 		ipCache:     NewCache(cacheSize, cacheTTL),
 		domainCache: NewCache(cacheSize/10, cacheTTL),
-		cidrCache:   make([]cidrEntry, 0),
+		cidrTree:    ipacl.NewRadixTree(),
 	}
 
 	// Initialize feed managers
@@ -217,25 +212,22 @@ func (l *Layer) Process(ctx *engine.RequestContext) engine.LayerResult {
 	return engine.LayerResult{Action: engine.ActionPass, Duration: time.Since(start)}
 }
 
-// checkIP looks up an IP in the cache and CIDR ranges.
+// checkIP looks up an IP in the cache and CIDR radix tree.
 func (l *Layer) checkIP(ip net.IP) (*ThreatInfo, bool) {
 	ipStr := ip.String()
 
-	// Check exact IP match
+	// Check exact IP match (LRU cache)
 	if info, ok := l.ipCache.Get(ipStr); ok {
 		return info, true
 	}
 
-	// Check CIDR ranges (pre-parsed networks, no per-request parsing)
-	l.mu.RLock()
-	for _, entry := range l.cidrCache {
-		if entry.network.Contains(ip) {
-			l.mu.RUnlock()
-			l.ipCache.Set(ipStr, entry.info)
-			return entry.info, true
+	// Check CIDR ranges via radix tree — O(128) regardless of entry count
+	if val, ok := l.cidrTree.Lookup(ip); ok {
+		if info, ok := val.(*ThreatInfo); ok {
+			l.ipCache.Set(ipStr, info)
+			return info, true
 		}
 	}
-	l.mu.RUnlock()
 
 	return nil, false
 }
@@ -270,8 +262,8 @@ func (l *Layer) updateEntries(entries []ThreatEntry) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 
-	// Rebuild cidrCache from scratch to evict stale entries
-	l.cidrCache = make([]cidrEntry, 0, len(entries))
+	// Rebuild CIDR tree from scratch to evict stale entries
+	l.cidrTree = ipacl.NewRadixTree()
 
 	for _, e := range entries {
 		if e.Info == nil {
@@ -282,10 +274,7 @@ func (l *Layer) updateEntries(entries []ThreatEntry) {
 			l.ipCache.Set(e.IP, e.Info)
 		}
 		if e.CIDR != "" {
-			_, network, err := net.ParseCIDR(e.CIDR)
-			if err == nil {
-				l.cidrCache = append(l.cidrCache, cidrEntry{network: network, info: e.Info})
-			}
+			l.cidrTree.Insert(e.CIDR, e.Info)
 		}
 		if e.Domain != "" {
 			l.domainCache.Set(strings.ToLower(e.Domain), e.Info)
@@ -319,7 +308,7 @@ func (l *Layer) Stats() map[string]int {
 	return map[string]int{
 		"ip_cache_size":     l.ipCache.Len(),
 		"domain_cache_size": l.domainCache.Len(),
-		"cidr_entries":      len(l.cidrCache),
+		"cidr_entries":      l.cidrTree.Len(),
 	}
 }
 
