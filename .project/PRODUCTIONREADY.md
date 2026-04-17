@@ -6,7 +6,7 @@
 
 ## Overall Verdict & Score
 
-**Production Readiness Score: 94/100**
+**Production Readiness Score: 96/100**
 
 | Category | Score | Weight | Weighted Score |
 |----------|-------|--------|----------------|
@@ -18,7 +18,7 @@
 | Observability | 10/10 | 10% | 1.00 |
 | Documentation | 10/10 | 5% | 0.50 |
 | Deployment Readiness | 10/10 | 5% | 0.50 |
-| **TOTAL** | | **100%** | **94/100** |
+| **TOTAL** | | **100%** | **96/100** |
 
 ---
 
@@ -116,7 +116,7 @@ The primary WAF workflow -- receive request, run through detection pipeline, blo
 - [x] MCP server authentication via API key in initialize message
 - [x] Per-tenant request scoping enforced
 - [x] Admin vs tenant API key separation
-- [ ] API keys stored as SHA256 hash -- acceptable but bcrypt/argon2 would be stronger for low-entropy keys
+- [x] API keys hashed with iterated HMAC-SHA256 (100k rounds, PBKDF2-like) with v1/v2 backward compatibility
 
 ### 3.2 Input Validation & Injection
 
@@ -255,7 +255,7 @@ The primary WAF workflow -- receive request, run through detection pipeline, blo
 - [x] Per-layer spans in pipeline with WAF action/score attributes
 - [x] Configurable sampling rate and exporters (stdout, noop, pluggable)
 - [x] `pprof` endpoints available for profiling
-- [ ] No correlation IDs across cluster nodes
+- [x] Correlation IDs propagated via `X-Correlation-ID` header through proxy and across cluster nodes
 
 ---
 
@@ -279,7 +279,7 @@ The primary WAF workflow -- receive request, run through detection pipeline, blo
 - [x] Hot-reload via SIGHUP
 - [x] Per-domain WAF overrides via virtual hosts
 - [x] Environment-specific config profiles via `GWAF_ENV=staging` → `guardianwaf.staging.yaml` or `GWAF_CONFIG_PATH`
-- [ ] No feature flags system
+- [x] Feature flags system with YAML config, env vars (`GWAF_FEATURE_*`), and per-tenant overrides (`internal/feature/`)
 
 ### 7.3 Infrastructure
 
