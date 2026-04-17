@@ -8,6 +8,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"math"
 	"net/http"
 	"strings"
 	"sync"
@@ -447,22 +448,63 @@ type Stats struct {
 	BytesOut  uint64 `json:"bytes_out"`
 }
 
-// Validator provides protobuf message validation.
+// Protobuf wire type constants.
+const (
+	wireVarint     = 0
+	wireFixed64    = 1
+	wireBytes      = 2
+	wireStartGroup = 3 // deprecated
+	wireEndGroup   = 4 // deprecated
+	wireFixed32    = 5
+)
+
+// Protobuf field type strings (for schema-based validation).
+const (
+	FieldTypeDouble   = "double"
+	FieldTypeFloat    = "float"
+	FieldTypeInt64    = "int64"
+	FieldTypeUint64   = "uint64"
+	FieldTypeInt32    = "int32"
+	FieldTypeFixed64  = "fixed64"
+	FieldTypeFixed32  = "fixed32"
+	FieldTypeBool     = "bool"
+	FieldTypeString   = "string"
+	FieldTypeBytes    = "bytes"
+	FieldTypeUint32   = "uint32"
+	FieldTypeSfixed32 = "sfixed32"
+	FieldTypeSfixed64 = "sfixed64"
+	FieldTypeSint32   = "sint32"
+	FieldTypeSint64   = "sint64"
+	FieldTypeMessage  = "message"
+	FieldTypeEnum     = "enum"
+)
+
+// Structural limits for protobuf validation.
+const (
+	maxFieldCount      = 10000
+	maxNestedDepth     = 16
+	maxRepeatedItems   = 10000
+	maxStringLen       = 4 * 1024 * 1024 // 4MB per string field
+	maxBytesLen        = 4 * 1024 * 1024 // 4MB per bytes field
+	maxVarintBytes     = 10              // protobuf varints are at most 10 bytes
+)
+
+// Validator provides protobuf message validation with wire format decoding.
 type Validator struct {
-	mu          sync.RWMutex
-	protoFiles  []string
+	mu           sync.RWMutex
+	protoPaths   []string
 	messageTypes map[string]*MessageType
 }
 
-// MessageType represents a protobuf message type.
+// MessageType represents a protobuf message type schema.
 type MessageType struct {
-	Name       string
-	Fields     []Field
-	Required   []string
+	Name        string
+	Fields      []Field
+	Required    []string
 	Constraints map[string]Constraint
 }
 
-// Field represents a protobuf field.
+// Field represents a protobuf field in a message schema.
 type Field struct {
 	Name     string
 	Number   int
@@ -480,46 +522,427 @@ type Constraint struct {
 	MaxVal   *float64
 }
 
+// decodedField holds a decoded protobuf field from wire format.
+type decodedField struct {
+	FieldNumber int
+	WireType    int
+	Value       []byte // raw value bytes
+	Varint      uint64 // decoded varint (wire types 0)
+}
+
+// ValidationResult contains detailed results from protobuf validation.
+type ValidationResult struct {
+	FieldCount     int
+	Fields         []decodedField
+	UnknownFields  []int
+	MissingFields  []string
+	Violations     []string
+	Warnings       []string
+}
+
 // NewValidator creates a new protobuf validator.
 func NewValidator(protoPaths []string) (*Validator, error) {
 	v := &Validator{
-		protoFiles:   protoPaths,
+		protoPaths:   protoPaths,
 		messageTypes: make(map[string]*MessageType),
 	}
-
-	// In a full implementation, this would parse .proto files
-	// For now, we use a simplified approach
-
 	return v, nil
 }
 
-// ValidateMessage validates a protobuf message.
+// ValidateMessage validates a protobuf message against wire format rules
+// and optionally against a registered schema for the given method.
 func (v *Validator) ValidateMessage(methodName string, data []byte) error {
-	// Simplified validation - in production this would decode the protobuf
-	// and validate against the schema
-
 	if len(data) == 0 {
 		return fmt.Errorf("empty message")
 	}
-
-	// Check max size (4MB default)
 	if len(data) > 4*1024*1024 {
 		return fmt.Errorf("message too large: %d bytes", len(data))
 	}
 
+	result := v.ValidateMessageDetailed(methodName, data, 0)
+	if len(result.Violations) > 0 {
+		return fmt.Errorf("%s", result.Violations[0])
+	}
 	return nil
 }
 
-// RegisterMessageType registers a message type for validation.
+// ValidateMessageDetailed performs full protobuf wire format validation
+// and returns structured results including warnings.
+func (v *Validator) ValidateMessageDetailed(methodName string, data []byte, depth int) ValidationResult {
+	result := ValidationResult{}
+
+	if depth >= maxNestedDepth {
+		result.Violations = append(result.Violations, "message nesting exceeds maximum depth")
+		return result
+	}
+
+	// Decode wire format
+	fields, err := decodeWireFormat(data)
+	if err != nil {
+		result.Violations = append(result.Violations, fmt.Sprintf("wire format error: %v", err))
+		return result
+	}
+
+	result.Fields = fields
+	result.FieldCount = len(fields)
+
+	// Structural limits
+	if len(fields) > maxFieldCount {
+		result.Violations = append(result.Violations, fmt.Sprintf("too many fields: %d (max %d)", len(fields), maxFieldCount))
+		return result
+	}
+
+	// Look up registered schema
+	v.mu.RLock()
+	schema := v.messageTypes[methodName]
+	v.mu.RUnlock()
+
+	if schema != nil {
+		v.validateAgainstSchema(schema, fields, depth, &result)
+	} else {
+		// No schema registered — validate wire format integrity only
+		v.validateWireIntegrity(fields, depth, &result)
+	}
+
+	return result
+}
+
+// validateAgainstSchema validates decoded fields against a registered message schema.
+func (v *Validator) validateAgainstSchema(schema *MessageType, fields []decodedField, depth int, result *ValidationResult) {
+	// Build field number -> schema lookup
+	schemaByNumber := make(map[int]*Field)
+	schemaByName := make(map[string]*Field)
+	for i := range schema.Fields {
+		f := &schema.Fields[i]
+		schemaByNumber[f.Number] = f
+		schemaByName[f.Name] = f
+	}
+
+	// Track which required fields were seen
+	seenFields := make(map[int]int) // field number -> count
+
+	for _, df := range fields {
+		seenFields[df.FieldNumber]++
+
+		sf, known := schemaByNumber[df.FieldNumber]
+		if !known {
+			result.UnknownFields = append(result.UnknownFields, df.FieldNumber)
+			continue
+		}
+
+		// Wire type compatibility check
+		if err := checkWireTypeCompat(sf.Type, df.WireType); err != nil {
+			result.Violations = append(result.Violations,
+				fmt.Sprintf("field %s (#%d): %v", sf.Name, sf.Number, err))
+			continue
+		}
+
+		// Apply constraints
+		if c, ok := schema.Constraints[sf.Name]; ok {
+			v.applyConstraint(sf, &c, &df, result)
+		}
+
+		// Recurse into embedded messages
+		if sf.Type == FieldTypeMessage && df.WireType == wireBytes && len(df.Value) > 0 {
+			sub := v.ValidateMessageDetailed(sf.Name, df.Value, depth+1)
+			result.Violations = append(result.Violations, sub.Violations...)
+			result.Warnings = append(result.Warnings, sub.Warnings...)
+		}
+	}
+
+	// Check repeated field limits
+	for fieldNum, count := range seenFields {
+		if sf, ok := schemaByNumber[fieldNum]; ok && sf.Repeated && count > maxRepeatedItems {
+			result.Violations = append(result.Violations,
+				fmt.Sprintf("field %s: too many repeated items (%d, max %d)", sf.Name, count, maxRepeatedItems))
+		}
+	}
+
+	// Check required fields
+	for _, reqName := range schema.Required {
+		sf, ok := schemaByName[reqName]
+		if !ok {
+			continue
+		}
+		if _, seen := seenFields[sf.Number]; !seen {
+			result.MissingFields = append(result.MissingFields, reqName)
+			result.Violations = append(result.Violations,
+				fmt.Sprintf("required field missing: %s (#%d)", reqName, sf.Number))
+		}
+	}
+}
+
+// validateWireIntegrity validates decoded fields without a schema.
+// Checks wire type consistency, size limits, and structural anomalies.
+func (v *Validator) validateWireIntegrity(fields []decodedField, depth int, result *ValidationResult) {
+	// Track field numbers for duplicate detection
+	seenNumbers := make(map[int]int)
+
+	for _, df := range fields {
+		seenNumbers[df.FieldNumber]++
+
+		switch df.WireType {
+		case wireVarint:
+			// Varint already decoded — no further validation
+		case wireFixed64:
+			if len(df.Value) != 8 {
+				result.Violations = append(result.Violations,
+					fmt.Sprintf("field #%d: fixed64 has %d bytes (expected 8)", df.FieldNumber, len(df.Value)))
+			}
+		case wireFixed32:
+			if len(df.Value) != 4 {
+				result.Violations = append(result.Violations,
+					fmt.Sprintf("field #%d: fixed32 has %d bytes (expected 4)", df.FieldNumber, len(df.Value)))
+			}
+		case wireBytes:
+			if len(df.Value) > maxBytesLen {
+				result.Violations = append(result.Violations,
+					fmt.Sprintf("field #%d: length-delimited field exceeds %d bytes", df.FieldNumber, maxBytesLen))
+			}
+			// Attempt recursive decode — if it looks like a valid message, validate it
+			if len(df.Value) > 0 && depth < maxNestedDepth {
+				subFields, err := decodeWireFormat(df.Value)
+				if err == nil && len(subFields) > 0 {
+					// Looks like an embedded message — validate recursively
+					sub := v.ValidateMessageDetailed(fmt.Sprintf("nested_%d", df.FieldNumber), df.Value, depth+1)
+					result.Violations = append(result.Violations, sub.Violations...)
+					result.Warnings = append(result.Warnings, sub.Warnings...)
+				}
+			}
+		case wireStartGroup, wireEndGroup:
+			result.Warnings = append(result.Warnings,
+				fmt.Sprintf("field #%d: deprecated group wire type %d", df.FieldNumber, df.WireType))
+		default:
+			result.Violations = append(result.Violations,
+				fmt.Sprintf("field #%d: unknown wire type %d", df.FieldNumber, df.WireType))
+		}
+	}
+
+	// Warn on excessive repeated fields
+	for num, count := range seenNumbers {
+		if count > maxRepeatedItems {
+			result.Violations = append(result.Violations,
+				fmt.Sprintf("field #%d: %d repeated entries exceeds limit %d", num, count, maxRepeatedItems))
+		}
+	}
+}
+
+// applyConstraint validates a field value against its constraint.
+func (v *Validator) applyConstraint(sf *Field, c *Constraint, df *decodedField, result *ValidationResult) {
+	switch sf.Type {
+	case FieldTypeString, FieldTypeBytes:
+		length := len(df.Value)
+		if c.MinLen != nil && length < *c.MinLen {
+			result.Violations = append(result.Violations,
+				fmt.Sprintf("field %s: length %d below minimum %d", sf.Name, length, *c.MinLen))
+		}
+		if c.MaxLen != nil && length > *c.MaxLen {
+			result.Violations = append(result.Violations,
+				fmt.Sprintf("field %s: length %d exceeds maximum %d", sf.Name, length, *c.MaxLen))
+		}
+	case FieldTypeInt32, FieldTypeInt64, FieldTypeSint32, FieldTypeSint64:
+		if c.MinVal != nil || c.MaxVal != nil {
+			val := int64(df.Varint)
+			if c.MinVal != nil && float64(val) < *c.MinVal {
+				result.Violations = append(result.Violations,
+					fmt.Sprintf("field %s: value %d below minimum %v", sf.Name, val, *c.MinVal))
+			}
+			if c.MaxVal != nil && float64(val) > *c.MaxVal {
+				result.Violations = append(result.Violations,
+					fmt.Sprintf("field %s: value %d exceeds maximum %v", sf.Name, val, *c.MaxVal))
+			}
+		}
+	case FieldTypeUint32, FieldTypeUint64:
+		if c.MinVal != nil || c.MaxVal != nil {
+			val := df.Varint
+			if c.MinVal != nil && float64(val) < *c.MinVal {
+				result.Violations = append(result.Violations,
+					fmt.Sprintf("field %s: value %d below minimum %v", sf.Name, val, *c.MinVal))
+			}
+			if c.MaxVal != nil && float64(val) > *c.MaxVal {
+				result.Violations = append(result.Violations,
+					fmt.Sprintf("field %s: value %d exceeds maximum %v", sf.Name, val, *c.MaxVal))
+			}
+		}
+	case FieldTypeDouble, FieldTypeFloat:
+		if (c.MinVal != nil || c.MaxVal != nil) && len(df.Value) >= 4 {
+			var fval float64
+			if sf.Type == FieldTypeDouble && len(df.Value) == 8 {
+				fval = float64(math.Float64frombits(binary.LittleEndian.Uint64(df.Value)))
+			} else if len(df.Value) == 4 {
+				fval = float64(math.Float32frombits(binary.LittleEndian.Uint32(df.Value[:4])))
+			}
+			if c.MinVal != nil && fval < *c.MinVal {
+				result.Violations = append(result.Violations,
+					fmt.Sprintf("field %s: value %f below minimum %v", sf.Name, fval, *c.MinVal))
+			}
+			if c.MaxVal != nil && fval > *c.MaxVal {
+				result.Violations = append(result.Violations,
+					fmt.Sprintf("field %s: value %f exceeds maximum %v", sf.Name, fval, *c.MaxVal))
+			}
+		}
+	}
+}
+
+// checkWireTypeCompat checks if a wire type is compatible with a schema field type.
+func checkWireTypeCompat(fieldType string, wireType int) error {
+	switch fieldType {
+	case FieldTypeInt32, FieldTypeInt64, FieldTypeUint32, FieldTypeUint64,
+		FieldTypeSint32, FieldTypeSint64, FieldTypeBool, FieldTypeEnum:
+		if wireType != wireVarint {
+			return fmt.Errorf("expected varint wire type for %s, got %d", fieldType, wireType)
+		}
+	case FieldTypeFixed64, FieldTypeSfixed64, FieldTypeDouble:
+		if wireType != wireFixed64 {
+			return fmt.Errorf("expected fixed64 wire type for %s, got %d", fieldType, wireType)
+		}
+	case FieldTypeFixed32, FieldTypeSfixed32, FieldTypeFloat:
+		if wireType != wireFixed32 {
+			return fmt.Errorf("expected fixed32 wire type for %s, got %d", fieldType, wireType)
+		}
+	case FieldTypeString, FieldTypeBytes, FieldTypeMessage:
+		if wireType != wireBytes {
+			return fmt.Errorf("expected length-delimited wire type for %s, got %d", fieldType, wireType)
+		}
+	}
+	return nil
+}
+
+// decodeWireFormat decodes all fields from protobuf wire format bytes.
+func decodeWireFormat(data []byte) ([]decodedField, error) {
+	var fields []decodedField
+	offset := 0
+
+	for offset < len(data) {
+		// Read field tag (varint)
+		tag, n, err := decodeVarint(data[offset:])
+		if err != nil {
+			return fields, fmt.Errorf("offset %d: %w", offset, err)
+		}
+		if n == 0 {
+			return fields, fmt.Errorf("offset %d: zero-length varint", offset)
+		}
+		offset += n
+
+		fieldNumber := int(tag >> 3)
+		wireType := int(tag & 0x07)
+
+		if fieldNumber == 0 {
+			return fields, fmt.Errorf("field number 0 is invalid")
+		}
+
+		df := decodedField{
+			FieldNumber: fieldNumber,
+			WireType:    wireType,
+		}
+
+		switch wireType {
+		case wireVarint:
+			val, n, err := decodeVarint(data[offset:])
+			if err != nil {
+				return fields, fmt.Errorf("field #%d varint: %w", fieldNumber, err)
+			}
+			df.Varint = val
+			offset += n
+
+		case wireFixed64:
+			if offset+8 > len(data) {
+				return fields, fmt.Errorf("field #%d: incomplete fixed64", fieldNumber)
+			}
+			df.Value = data[offset : offset+8]
+			offset += 8
+
+		case wireBytes:
+			length, n, err := decodeVarint(data[offset:])
+			if err != nil {
+				return fields, fmt.Errorf("field #%d length: %w", fieldNumber, err)
+			}
+			offset += n
+			if offset+int(length) > len(data) {
+				return fields, fmt.Errorf("field #%d: declared %d bytes but only %d remain", fieldNumber, length, len(data)-offset)
+			}
+			df.Value = data[offset : offset+int(length)]
+			offset += int(length)
+
+		case wireFixed32:
+			if offset+4 > len(data) {
+				return fields, fmt.Errorf("field #%d: incomplete fixed32", fieldNumber)
+			}
+			df.Value = data[offset : offset+4]
+			offset += 4
+
+		case wireStartGroup:
+			// Groups are deprecated — skip to matching end group
+			depth := 1
+			for offset < len(data) && depth > 0 {
+				skipTag, skipN, err := decodeVarint(data[offset:])
+				if err != nil {
+					return fields, fmt.Errorf("field #%d group: %w", fieldNumber, err)
+				}
+				offset += skipN
+				skipWT := int(skipTag & 0x07)
+				switch skipWT {
+				case wireStartGroup:
+					depth++
+				case wireEndGroup:
+					depth--
+				case wireVarint:
+					_, vn, _ := decodeVarint(data[offset:])
+					offset += vn
+				case wireFixed64:
+					offset += 8
+				case wireFixed32:
+					offset += 4
+				case wireBytes:
+					bl, bn, _ := decodeVarint(data[offset:])
+					offset += bn + int(bl)
+				}
+			}
+
+		case wireEndGroup:
+			// Should not appear at top level
+
+		default:
+			return fields, fmt.Errorf("field #%d: unknown wire type %d", fieldNumber, wireType)
+		}
+
+		fields = append(fields, df)
+	}
+
+	return fields, nil
+}
+
+// decodeVarint decodes a protobuf varint from data, returning the value and bytes consumed.
+func decodeVarint(data []byte) (uint64, int, error) {
+	var value uint64
+	for i := range min(len(data), maxVarintBytes) {
+		b := data[i]
+		value |= uint64(b&0x7F) << (i * 7)
+		if b&0x80 == 0 {
+			return value, i + 1, nil
+		}
+	}
+	if len(data) >= maxVarintBytes {
+		return 0, 0, fmt.Errorf("varint too long")
+	}
+	return 0, 0, fmt.Errorf("incomplete varint")
+}
+
+// RegisterMessageType registers a message type schema for validation.
 func (v *Validator) RegisterMessageType(name string, msgType *MessageType) {
 	v.mu.Lock()
 	defer v.mu.Unlock()
 	v.messageTypes[name] = msgType
 }
 
-// GetMessageType returns a registered message type.
+// GetMessageType returns a registered message type schema.
 func (v *Validator) GetMessageType(name string) *MessageType {
 	v.mu.RLock()
 	defer v.mu.RUnlock()
 	return v.messageTypes[name]
+}
+
+// RegisterSchema is an alias for RegisterMessageType for convenience.
+func (v *Validator) RegisterSchema(name string, msgType *MessageType) {
+	v.RegisterMessageType(name, msgType)
 }
