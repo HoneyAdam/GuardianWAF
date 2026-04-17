@@ -216,3 +216,32 @@ jobs:
     - name: Scan Dockerfile for misconfigs
       run: |
         docker run --rm -v $(pwd):/workspace aquasec/trivy:latest config /workspace --exit-code 0
+
+  lighthouse:
+    needs: [build-dashboard, build-go]
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-node@v4
+      with:
+        node-version: '22'
+        cache: 'npm'
+        cache-dependency-path: internal/dashboard/ui/package-lock.json
+    - name: Build dashboard
+      run: cd internal/dashboard/ui && npm ci && npm run build
+    - name: Build Go binary
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: 'go.mod'
+    - run: go build -o guardianwaf ./cmd/guardianwaf/
+    - name: Start WAF server
+      run: |
+        ./guardianwaf serve &
+        sleep 5
+        curl -sf http://localhost:9443/api/v1/health || (echo "Server not ready" && exit 1)
+    - name: Run Lighthouse CI
+      run: |
+        npm install -g @lhci/cli@0.14.x
+        lhci autorun --config=lighthouserc.json || true
+      env:
+        LHCI_GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
