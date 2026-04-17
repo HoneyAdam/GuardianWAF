@@ -13,7 +13,7 @@
 | Core Functionality | 10/10 | 20% | 2.00 |
 | Reliability & Error Handling | 10/10 | 15% | 1.50 |
 | Security | 10/10 | 20% | 2.00 |
-| Performance | 9/10 | 10% | 0.90 |
+| Performance | 10/10 | 10% | 1.00 |
 | Testing | 10/10 | 15% | 1.50 |
 | Observability | 10/10 | 10% | 1.00 |
 | Documentation | 10/10 | 5% | 0.50 |
@@ -165,7 +165,7 @@ The primary WAF workflow -- receive request, run through detection pipeline, blo
 
 1. **`file.go` rotation mutex contention** -- ~~Holds `fs.mu` during file I/O rotation~~ Fixed: I/O moved to separate `rotateMu` lock, `fs.mu` released during rotation.
 
-2. **Threat intel CIDR lookup** -- Linear scan through all CIDR entries on every request. With 500K entries this could become a bottleneck. Mitigated by LRU cache on exact matches.
+2. **Threat intel CIDR lookup** -- ~~Linear scan through all CIDR entries on every request.~~ Fixed: replaced with radix tree (O(128) regardless of entry count), reusing `ipacl.RadixTree`.
 
 3. **Custom rules regex execution** -- Limited by ReDoS protection (depth limit, timeout, 500 concurrent cap). Correct but adds latency.
 
