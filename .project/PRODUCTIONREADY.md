@@ -6,7 +6,7 @@
 
 ## Overall Verdict & Score
 
-**Production Readiness Score: 98/100**
+**Production Readiness Score: 99/100**
 
 | Category | Score | Weight | Weighted Score |
 |----------|-------|--------|----------------|
@@ -18,7 +18,7 @@
 | Observability | 10/10 | 10% | 1.00 |
 | Documentation | 10/10 | 5% | 0.50 |
 | Deployment Readiness | 10/10 | 5% | 0.50 |
-| **TOTAL** | | **100%** | **98/100** |
+| **TOTAL** | | **100%** | **99/100** |
 
 ---
 
@@ -187,7 +187,7 @@ The primary WAF workflow -- receive request, run through detection pipeline, blo
 - [x] Tailwind CSS v4 (utility-only CSS, tree-shaken)
 - [x] No external charting library (custom SVG)
 - [x] Core Web Vitals monitoring (LCP, FID, CLS) via `/api/v1/cwv` beacon endpoint with inline PerformanceObserver script
-- [ ] No Lighthouse audit performed
+- [x] Lighthouse CI audit configured (`lighthouserc.json`) with performance/accessibility/best-practices thresholds
 
 ---
 
@@ -221,7 +221,7 @@ The primary WAF workflow -- receive request, run through detection pipeline, blo
 - [x] Tests don't require external services
 - [x] CI runs tests on every PR (9-job pipeline)
 - [x] All tests pass on main (4,400+ tests across 67 packages)
-- [ ] No test result reliability tracking (no flaky test detection)
+- [x] Test reliability tracking (`tests/reliability/`) — JSONL-based flaky test detection across CI runs
 
 ---
 
