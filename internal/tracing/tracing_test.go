@@ -1,0 +1,174 @@
+package tracing
+
+import (
+	"strings"
+	"testing"
+)
+
+func TestStartSpan(t *testing.T) {
+	span := StartSpan("test.operation", SpanKindServer)
+	if span.Name != "test.operation" {
+		t.Errorf("Name = %q, want %q", span.Name, "test.operation")
+	}
+	if span.Kind != SpanKindServer {
+		t.Errorf("Kind = %v, want %v", span.Kind, SpanKindServer)
+	}
+	if span.TraceID == "" {
+		t.Error("TraceID is empty")
+	}
+	if span.SpanID == "" {
+		t.Error("SpanID is empty")
+	}
+	if span.StartTime.IsZero() {
+		t.Error("StartTime is zero")
+	}
+}
+
+func TestStartSpanWithParent(t *testing.T) {
+	parent := StartSpan("parent", SpanKindServer)
+	child := StartSpanWithParent("child", SpanKindInternal, parent.TraceID)
+
+	if child.TraceID != parent.TraceID {
+		t.Errorf("child TraceID = %q, want parent %q", child.TraceID, parent.TraceID)
+	}
+	if child.SpanID == parent.SpanID {
+		t.Error("child SpanID should differ from parent")
+	}
+}
+
+func TestSpanAttributes(t *testing.T) {
+	span := StartSpan("test", SpanKindInternal)
+	span.SetAttribute("key1", "value1")
+	span.SetAttribute("key2", "value2")
+
+	if span.Attributes["key1"] != "value1" {
+		t.Errorf("Attributes[key1] = %q, want %q", span.Attributes["key1"], "value1")
+	}
+	if span.Attributes["key2"] != "value2" {
+		t.Errorf("Attributes[key2] = %q, want %q", span.Attributes["key2"], "value2")
+	}
+}
+
+func TestSpanEvents(t *testing.T) {
+	span := StartSpan("test", SpanKindInternal)
+	span.AddEvent("exception", map[string]string{"type": "Error"})
+
+	if len(span.Events) != 1 {
+		t.Fatalf("Events = %d, want 1", len(span.Events))
+	}
+	if span.Events[0].Name != "exception" {
+		t.Errorf("Event.Name = %q, want %q", span.Events[0].Name, "exception")
+	}
+	if span.Events[0].Timestamp.IsZero() {
+		t.Error("Event.Timestamp is zero")
+	}
+}
+
+func TestSpanEnd(t *testing.T) {
+	span := StartSpan("test", SpanKindInternal)
+	span.End()
+
+	if span.EndTime.IsZero() {
+		t.Error("EndTime is zero after End()")
+	}
+	if span.Duration() < 0 {
+		t.Error("Duration should be non-negative")
+	}
+}
+
+func TestSpanIsRecording(t *testing.T) {
+	span := StartSpan("test", SpanKindInternal)
+	if !span.IsRecording() {
+		t.Error("active span should be recording")
+	}
+	span.End()
+	if span.IsRecording() {
+		t.Error("ended span should not be recording")
+	}
+}
+
+func TestNoopExporter(t *testing.T) {
+	e := NewNoopExporter()
+	span := StartSpan("test", SpanKindInternal)
+	e.Export(span) // should not panic
+	e.Shutdown()
+}
+
+func TestShouldSample_Disabled(t *testing.T) {
+	Init(Config{Enabled: false})
+	if ShouldSample() {
+		t.Error("ShouldSample should return false when disabled")
+	}
+	Shutdown()
+}
+
+func TestShouldSample_Always(t *testing.T) {
+	Init(Config{Enabled: true, SamplingRate: 1.0})
+	if !ShouldSample() {
+		t.Error("ShouldSample should return true with rate 1.0")
+	}
+	Shutdown()
+}
+
+func TestShouldSample_Never(t *testing.T) {
+	Init(Config{Enabled: true, SamplingRate: 0.0})
+	if ShouldSample() {
+		t.Error("ShouldSample should return false with rate 0.0")
+	}
+	Shutdown()
+}
+
+func TestEnabled(t *testing.T) {
+	Init(Config{Enabled: true})
+	if !Enabled() {
+		t.Error("Enabled should return true after Init with Enabled=true")
+	}
+	Shutdown()
+	if Enabled() {
+		t.Error("Enabled should return false after Shutdown")
+	}
+}
+
+func TestStdoutExporter(t *testing.T) {
+	e := NewStdoutExporter()
+	span := StartSpan("test.span", SpanKindInternal)
+	span.SetAttribute("attr1", "val1")
+	span.Status = SpanStatusOK
+	e.Export(span)
+	e.Shutdown()
+
+	// Export after shutdown should be safe
+	span2 := StartSpan("test.span2", SpanKindInternal)
+	e.Export(span2) // should not panic
+}
+
+func TestStats(t *testing.T) {
+	Init(Config{Enabled: true})
+	enabled, created, exported := Stats()
+	if !enabled {
+		t.Error("should be enabled")
+	}
+	_ = created
+	_ = exported
+	Shutdown()
+}
+
+func TestSetExporter(t *testing.T) {
+	SetExporter(NewNoopExporter())
+	// Should not panic — just verify it works
+	span := StartSpan("test", SpanKindInternal)
+	span.End()
+}
+
+func TestAttributeConstants(t *testing.T) {
+	attrs := []string{
+		AttrHTTPMethod, AttrHTTPURL, AttrHTTPHost, AttrHTTPCode, AttrHTTPUserAgent,
+		AttrClientIP, AttrWAFLayer, AttrWAFAction, AttrWAFScore, AttrWAFTenantID,
+		AttrWAFBlocked, AttrWAFLatencyMs, AttrWAFRuleID, AttrWAFDetector, AttrWAFFinding,
+	}
+	for _, a := range attrs {
+		if !strings.Contains(a, ".") {
+			t.Errorf("attribute %q should contain a dot (OTel convention)", a)
+		}
+	}
+}

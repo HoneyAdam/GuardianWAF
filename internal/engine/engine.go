@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 
 	"github.com/guardianwaf/guardianwaf/internal/config"
+	"github.com/guardianwaf/guardianwaf/internal/tracing"
 )
 
 // EventStorer is the interface for event persistence.
@@ -216,6 +217,19 @@ func (e *Engine) Check(r *http.Request) *Event {
 	ctx := AcquireContext(r, int(e.paranoiaLevel.Load()), e.maxBodySize.Load())
 	defer ReleaseContext(ctx)
 
+	// Start root trace span if tracing is enabled and sampled
+	if tracing.Enabled() && tracing.ShouldSample() {
+		span := tracing.StartSpan("waf.request", tracing.SpanKindServer)
+		span.SetAttribute(tracing.AttrHTTPMethod, r.Method)
+		span.SetAttribute(tracing.AttrHTTPURL, r.URL.String())
+		span.SetAttribute(tracing.AttrHTTPHost, r.Host)
+		if ua := r.UserAgent(); ua != "" {
+			span.SetAttribute(tracing.AttrHTTPUserAgent, ua)
+		}
+		ctx.TraceSpan = span
+		defer span.End()
+	}
+
 	// Execute pipeline
 	result := e.currentPipeline().Execute(ctx)
 
@@ -284,6 +298,18 @@ func (e *Engine) Middleware(next http.Handler) http.Handler {
 		// so we can access metadata before the context is released)
 		ctx := AcquireContext(r, int(e.paranoiaLevel.Load()), e.maxBodySize.Load())
 
+		// Start root trace span if tracing is enabled and sampled
+		if tracing.Enabled() && tracing.ShouldSample() {
+			span := tracing.StartSpan("waf.request", tracing.SpanKindServer)
+			span.SetAttribute(tracing.AttrHTTPMethod, r.Method)
+			span.SetAttribute(tracing.AttrHTTPURL, r.URL.String())
+			span.SetAttribute(tracing.AttrHTTPHost, r.Host)
+			if ua := r.UserAgent(); ua != "" {
+				span.SetAttribute(tracing.AttrHTTPUserAgent, ua)
+			}
+			ctx.TraceSpan = span
+		}
+
 		// Set tenant info from context if available (set by caller via SetTenantContext)
 		// This avoids importing tenant package to break circular dependency
 		if tenantCtx := GetTenantContext(r.Context()); tenantCtx != nil {
@@ -335,6 +361,13 @@ func (e *Engine) Middleware(next http.Handler) http.Handler {
 
 		// Capture tenant ID before releasing context (pool resets all fields)
 		tenantID := ctx.TenantID
+
+		// End trace span before releasing context
+		if ctx.TraceSpan != nil {
+			ctx.TraceSpan.SetAttribute(tracing.AttrWAFAction, finalAction.String())
+			ctx.TraceSpan.SetAttribute(tracing.AttrWAFScore, strconv.Itoa(result.TotalScore))
+			ctx.TraceSpan.End()
+		}
 
 		// Release context back to pool
 		ReleaseContext(ctx)

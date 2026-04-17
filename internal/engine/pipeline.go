@@ -4,9 +4,12 @@ import (
 	"path"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/guardianwaf/guardianwaf/internal/tracing"
 )
 
 // timingMapPool reuses map[string]time.Duration across requests.
@@ -99,9 +102,24 @@ func (p *Pipeline) Execute(ctx *RequestContext) (result PipelineResult) {
 		}
 
 		layerStart := time.Now()
+
+		// Create a tracing span for this layer if tracing is active
+		var span *tracing.Span
+		if ctx.TraceSpan != nil {
+			span = tracing.StartSpanWithParent(layer.Name(), tracing.SpanKindInternal, ctx.TraceSpan.TraceID)
+			span.ParentID = ctx.TraceSpan.SpanID
+		}
+
 		lr := layer.Process(ctx)
 		elapsed := time.Since(layerStart)
 		timing[layer.Name()] = elapsed
+
+		if span != nil {
+			span.SetAttribute(tracing.AttrWAFLayer, layer.Name())
+			span.SetAttribute(tracing.AttrWAFAction, lr.Action.String())
+			span.SetAttribute(tracing.AttrWAFScore, strconv.Itoa(lr.Score))
+			span.End()
+		}
 
 		// Accumulate findings
 		if len(lr.Findings) > 0 {

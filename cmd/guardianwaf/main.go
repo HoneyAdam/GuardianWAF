@@ -69,6 +69,7 @@ import (
 	"github.com/guardianwaf/guardianwaf/internal/mcp"
 	"github.com/guardianwaf/guardianwaf/internal/proxy"
 	"github.com/guardianwaf/guardianwaf/internal/tenant"
+	"github.com/guardianwaf/guardianwaf/internal/tracing"
 	gwaftls "github.com/guardianwaf/guardianwaf/internal/tls"
 )
 
@@ -767,6 +768,21 @@ func cmdServe(args []string) {
 	// 4. Create event infrastructure
 	eventStore := events.NewMemoryStore(cfg.Events.MaxEvents)
 	eventBus := events.NewEventBus()
+
+	// 5. Initialize tracing
+	if cfg.Tracing.Enabled {
+		tracing.Init(tracing.Config{
+			Enabled:      true,
+			ServiceName:  cfg.Tracing.ServiceName,
+			SamplingRate: cfg.Tracing.SamplingRate,
+			ExporterType: cfg.Tracing.ExporterType,
+		})
+		if cfg.Tracing.ServiceName == "" {
+			slog.Info("tracing enabled", "sampling_rate", cfg.Tracing.SamplingRate)
+		} else {
+			slog.Info("tracing enabled", "service", cfg.Tracing.ServiceName, "sampling_rate", cfg.Tracing.SamplingRate)
+		}
+	}
 
 	// 5. Create engine
 	eng, err := engine.NewEngine(cfg, eventStore, eventBus)
@@ -1601,7 +1617,10 @@ func cmdServe(args []string) {
 			dash.Close()
 		}
 
-		// 8. Close engine (flushes pending events, closes event bus and store)
+		// 8. Flush tracing spans
+		tracing.Shutdown()
+
+		// 9. Close engine (flushes pending events, closes event bus and store)
 	eng.Close()
 	fmt.Println("GuardianWAF stopped.")
 }
@@ -1674,6 +1693,16 @@ func cmdSidecar(args []string) {
 	// Create event infrastructure
 	eventStore := events.NewMemoryStore(cfg.Events.MaxEvents)
 	eventBus := events.NewEventBus()
+
+	// Initialize tracing
+	if cfg.Tracing.Enabled {
+		tracing.Init(tracing.Config{
+			Enabled:      true,
+			ServiceName:  cfg.Tracing.ServiceName,
+			SamplingRate: cfg.Tracing.SamplingRate,
+			ExporterType: cfg.Tracing.ExporterType,
+		})
+	}
 
 	// Create engine
 	eng, err := engine.NewEngine(cfg, eventStore, eventBus)
@@ -1817,6 +1846,7 @@ func cmdSidecar(args []string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	_ = srv.Shutdown(ctx)
+	tracing.Shutdown()
 	eng.Close()
 	fmt.Println("GuardianWAF sidecar stopped.")
 }

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/guardianwaf/guardianwaf/internal/config"
+	"github.com/guardianwaf/guardianwaf/internal/tracing"
 )
 
 // randReader allows tests to inject failures for generateRequestID.
@@ -123,6 +124,9 @@ type RequestContext struct {
 	// Tenant info (set by engine middleware for multi-tenant)
 	TenantID       string         // Tenant identifier (empty = global/default)
 	TenantWAFConfig *config.WAFConfig // Per-tenant WAF config override (nil = use global)
+
+	// Tracing (set by engine if tracing is enabled and request is sampled)
+	TraceSpan *tracing.Span
 
 	// Internal
 	bodyRead bool
@@ -286,6 +290,8 @@ func ReleaseContext(ctx *RequestContext) {
 	ctx.JA4Protocol = ""
 	ctx.JA4SNI = false
 	ctx.JA4Ver = 0
+
+	ctx.TraceSpan = nil
 
 	ctx.bodyRead = false
 

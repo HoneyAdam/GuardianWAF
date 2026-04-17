@@ -27,6 +27,7 @@ type Config struct {
 	Events         EventsConfig    `yaml:"events"`
 	Tenant         TenantConfig    `yaml:"tenant"`
 	TrustedProxies []string        `yaml:"trusted_proxies"` // CIDRs/IPs whose X-Forwarded-For/X-Real-IP headers are trusted
+	Tracing        TracingConfig   `yaml:"tracing"`
 }
 
 // AlertingConfig controls webhook and email-based alert delivery.
@@ -1646,6 +1647,15 @@ type SchemaSourceConfig struct {
 	Type      string `yaml:"type"`
 	AutoLearn bool   `yaml:"auto_learn"`
 }
+
+// TracingConfig controls built-in distributed tracing.
+type TracingConfig struct {
+	Enabled      bool    `yaml:"enabled"`
+	ServiceName  string  `yaml:"service_name"`
+	SamplingRate float64 `yaml:"sampling_rate"` // 0.0-1.0
+	ExporterType string  `yaml:"exporter_type"` // "stdout", "noop"
+}
+
 
 // FindVirtualHost finds a virtual host configuration by domain.
 // It checks exact match first, then wildcard patterns (e.g., *.example.com).
