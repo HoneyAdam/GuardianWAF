@@ -29,6 +29,7 @@ type Config struct {
 	TrustedProxies []string        `yaml:"trusted_proxies"` // CIDRs/IPs whose X-Forwarded-For/X-Real-IP headers are trusted
 	Tracing        TracingConfig   `yaml:"tracing"`
 	Features       map[string]bool `yaml:"features"`
+	Compliance     ComplianceConfig `yaml:"compliance"`
 }
 
 // AlertingConfig controls webhook and email-based alert delivery.
@@ -1660,6 +1661,40 @@ type TracingConfig struct {
 	ServiceName  string  `yaml:"service_name"`
 	SamplingRate float64 `yaml:"sampling_rate"` // 0.0-1.0
 	ExporterType string  `yaml:"exporter_type"` // "stdout", "noop"
+}
+
+// ComplianceConfig controls compliance reporting (PCI DSS, GDPR, SOC 2, ISO 27001).
+type ComplianceConfig struct {
+	Enabled         bool                   `yaml:"enabled"`
+	Frameworks      []string               `yaml:"frameworks"`       // Active frameworks: "pci_dss", "gdpr", "soc2", "iso27001"
+	ReportDir       string                 `yaml:"report_dir"`       // Output directory for generated reports
+	AuditTrail      AuditTrailConfig       `yaml:"audit_trail"`
+	Retention       RetentionConfig        `yaml:"retention"`
+	ScheduledReports []ScheduledReportConfig `yaml:"scheduled_reports"`
+}
+
+// AuditTrailConfig controls hash-chained audit trail.
+type AuditTrailConfig struct {
+	Enabled      bool   `yaml:"enabled"`
+	HashAlgorithm string `yaml:"hash_algorithm"` // "sha256" (default)
+}
+
+// RetentionConfig controls data retention per compliance framework.
+type RetentionConfig struct {
+	DefaultDays int               `yaml:"default_days"`
+	PerFramework map[string]int   `yaml:"per_framework"`
+	AutoDelete   bool             `yaml:"auto_delete"`
+	ArchivePath  string           `yaml:"archive_path"`
+}
+
+// ScheduledReportConfig defines a scheduled compliance report.
+type ScheduledReportConfig struct {
+	ID         string   `yaml:"id"`
+	Framework  string   `yaml:"framework"`
+	Schedule   string   `yaml:"schedule"`   // Cron expression
+	Format     []string `yaml:"format"`     // "json", "csv"
+	TenantID   string   `yaml:"tenant_id"`  // Empty = all tenants
+	OutputDir  string   `yaml:"output_dir"`
 }
 
 
