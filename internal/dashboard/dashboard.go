@@ -1661,6 +1661,11 @@ func (d *Dashboard) SetAlertingStatsFn(fn func() any) {
 
 // SetTenantManager injects the multi-tenant manager.
 // Also registers all existing tenant API keys for per-tenant authentication (AUTH-003).
+// SetComplianceEngine sets the compliance reporting engine for the dashboard.
+func (d *Dashboard) SetComplianceEngine(e *compliance.Engine) {
+	d.complianceEngine = e
+}
+
 func (d *Dashboard) SetTenantManager(manager tenantManagerInterface) {
 	d.tenantManager = manager
 	adminHandler := NewTenantAdminHandler(d, manager)

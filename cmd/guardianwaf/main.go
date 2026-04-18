@@ -31,6 +31,7 @@ import (
 	"github.com/guardianwaf/guardianwaf/internal/ai"
 	"github.com/guardianwaf/guardianwaf/internal/alerting"
 	"github.com/guardianwaf/guardianwaf/internal/config"
+	"github.com/guardianwaf/guardianwaf/internal/compliance"
 	"github.com/guardianwaf/guardianwaf/internal/dashboard"
 	dkr "github.com/guardianwaf/guardianwaf/internal/docker"
 	"github.com/guardianwaf/guardianwaf/internal/engine"
@@ -3044,6 +3045,13 @@ func startDashboard(cfg *config.Config, eng *engine.Engine) (*http.Server, *dash
 	}
 
 	dash := dashboard.New(eng, eventStore, cfg.Dashboard.APIKey)
+
+	// Wire compliance reporting engine
+	if cfg.Compliance.Enabled {
+		compEngine := compliance.NewEngine(cfg.Compliance)
+		dash.SetComplianceEngine(compEngine)
+	}
+
 	if cfg.Dashboard.AdminKey != "" {
 		dash.SetAdminKey(cfg.Dashboard.AdminKey)
 	} else {
