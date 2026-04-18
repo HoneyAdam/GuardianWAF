@@ -636,6 +636,24 @@ func LoadEnv(cfg *Config) {
 				cfg.Logging.MaxAgeDays = i
 			}
 		},
+
+		// Compliance reporting
+		"GWAF_COMPLIANCE_ENABLED": func(v string) {
+			if b, err := strconv.ParseBool(v); err == nil {
+				cfg.Compliance.Enabled = b
+			}
+		},
+		"GWAF_COMPLIANCE_FRAMEWORKS": func(v string) {
+			cfg.Compliance.Frameworks = strings.Split(v, ",")
+		},
+		"GWAF_COMPLIANCE_REPORT_DIR": func(v string) {
+			cfg.Compliance.ReportDir = v
+		},
+		"GWAF_COMPLIANCE_AUDIT_TRAIL_ENABLED": func(v string) {
+			if b, err := strconv.ParseBool(v); err == nil {
+				cfg.Compliance.AuditTrail.Enabled = b
+			}
+		},
 	}
 	for key, setter := range envMap {
 		if val := os.Getenv(key); val != "" {

@@ -1,7 +1,7 @@
 # ADR 0022: Compliance & Reporting Framework
 
 **Date:** 2026-04-15
-**Status:** Proposed
+**Status:** Implemented
 **Deciders:** GuardianWAF Team
 
 ---
