@@ -211,6 +211,7 @@ Key config files:
 - `internal/alerting/` — Webhook and email alerting (Slack, Discord, PagerDuty, SMTP)
 - `internal/cluster/` — Cluster mode (HTTP gossip + leader election; NOT Raft — see ADR 0023)
 - `internal/clustersync/` — Cross-node state synchronization (gRPC-lite over TCP)
+- `internal/compliance/` — Compliance reporting (PCI DSS, GDPR, SOC 2, ISO 27001 control registry, evaluator, reports, audit chain)
 - `internal/discovery/` — Passive API discovery and path clustering
 - `internal/integrations/` — Third-party integrations (v040)
 - `internal/ml/` — ML anomaly detection (ONNX model, Isolation Forest — separate from AI batch analysis)

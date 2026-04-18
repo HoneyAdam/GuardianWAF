@@ -55,7 +55,7 @@
 | gRPC Proxy | Working -- wire format decoder + schema validation with 20 tests |
 | Client-Side Protection | Working -- inline JS agent (DOM/form/network monitoring), report endpoint, CSP, Magecart detection |
 | Zero Trust | Working -- wired as pipeline layer (Order 85), mTLS + session trust |
-| Compliance Reporting | Deferred -- not in v1.0 scope (PCI-DSS/GDPR reporting dashboard) |
+| Compliance Reporting | Working — control registry (PCI DSS, GDPR, SOC 2, ISO 27001), evaluator, JSON/CSV reports, hash-chained audit trail, REST API |
 
 ### 1.2 Critical Path Analysis
 
